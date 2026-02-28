@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mockup 2 — Newsprint</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Space+Mono:ital,wght@0,400;0,700;1,700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.15/index.global.min.css">
+  <style>
+    /* === THEME: NEWSPRINT ===
+       Off-white background, heavy black borders, red accent.
+       Most faithful to 730DC — printed listings / editorial newsletter feel. */
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:      #f2ede4;
+      --surface: #ffffff;
+      --border:  #111111;
+      --border2: #ccbfb0;
+      --text:    #111111;
+      --muted:   #5a5248;
+      --accent:  #e8312a;
+      --sidebar: 260px;
+    }
+
+    body {
+      font-family: 'Space Mono', monospace;
+      background: var(--bg);
+      color: var(--text);
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: var(--sidebar) 1fr;
+      grid-template-rows: auto 1fr;
+      min-height: 100vh;
+    }
+
+    /* === Header === */
+    header {
+      grid-column: 1 / -1;
+      background: var(--text);
+      color: #fff;
+      padding: 0;
+      display: flex;
+      align-items: stretch;
+      border-bottom: 4px solid var(--accent);
+    }
+    .header-main {
+      padding: 0.85rem 1.5rem;
+      border-right: 1px solid #333;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+    }
+    header h1 {
+      font-size: 1.5rem;
+      font-weight: 700;
+      font-style: italic;
+      text-transform: uppercase;
+      letter-spacing: -0.02em;
+      line-height: 1;
+    }
+    header .tagline {
+      font-size: 0.62rem;
+      text-transform: uppercase;
+      letter-spacing: 0.15em;
+      color: rgba(255,255,255,0.55);
+      margin-top: 0.2rem;
+    }
+    .header-date {
+      padding: 0.85rem 1.5rem;
+      font-size: 0.65rem;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: rgba(255,255,255,0.45);
+      display: flex;
+      align-items: center;
+    }
+    .header-badge {
+      margin-left: auto;
+      font-size: 0.6rem;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      background: var(--accent);
+      color: #fff;
+      padding: 0.65rem 1rem;
+      display: flex;
+      align-items: center;
+    }
+
+    /* === Sidebar === */
+    .sidebar {
+      background: var(--surface);
+      border-right: 2px solid var(--border);
+      padding: 1.1rem 1rem;
+      overflow-y: auto;
+      max-height: calc(100vh - 66px);
+      position: sticky;
+      top: 66px;
+    }
+
+    .filter-label {
+      font-size: 0.6rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.14em;
+      color: var(--muted);
+      margin-bottom: 0.5rem;
+      padding-bottom: 0.3rem;
+      border-bottom: 1px solid var(--border2);
+    }
+
+    .filter-section { margin-bottom: 1.4rem; }
+
+    .search-input {
+      width: 100%;
+      font-family: 'Space Mono', monospace;
+      font-size: 0.75rem;
+      border: 1.5px solid var(--border);
+      padding: 0.4rem 0.6rem;
+      background: var(--bg);
+      color: var(--text);
+      outline: none;
+    }
+    .search-input::placeholder { color: var(--muted); }
+    .search-input:focus { border-color: var(--accent); }
+
+    .chip-group { display: flex; flex-wrap: wrap; gap: 0.3rem; }
+    .chip {
+      font-family: 'Space Mono', monospace;
+      font-size: 0.6rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      padding: 0.18rem 0.5rem;
+      border: 1.5px solid var(--border2);
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+      transition: all 0.12s;
+    }
+    .chip:hover { border-color: var(--accent); color: var(--accent); }
+    .chip.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+    .venue-list { display: flex; flex-direction: column; gap: 0.4rem; }
+    .venue-row {
+      display: flex;
+      align-items: center;
+      gap: 0.45rem;
+      font-size: 0.72rem;
+      color: var(--muted);
+      cursor: pointer;
+    }
+    .venue-dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+
+    /* === Calendar === */
+    .calendar-area {
+      padding: 1.1rem 1.25rem;
+      background: var(--bg);
+    }
+
+    .fc {
+      --fc-border-color: #c5bdb0;
+      --fc-button-bg-color: var(--text);
+      --fc-button-border-color: var(--text);
+      --fc-button-hover-bg-color: var(--accent);
+      --fc-button-hover-border-color: var(--accent);
+      --fc-button-active-bg-color: var(--accent);
+      --fc-button-active-border-color: var(--accent);
+      --fc-today-bg-color: rgba(232,49,42,0.07);
+      --fc-page-bg-color: var(--surface);
+      --fc-list-event-hover-bg-color: var(--bg);
+      font-family: 'Space Mono', monospace;
+      background: var(--surface);
+      border: 2px solid var(--border);
+    }
+
+    .fc .fc-toolbar-title {
+      font-size: 1.05rem;
+      font-weight: 700;
+      font-style: italic;
+      text-transform: uppercase;
+      letter-spacing: -0.02em;
+      color: var(--text);
+    }
+
+    .fc .fc-button {
+      font-family: 'Space Mono', monospace;
+      font-size: 0.62rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      border-radius: 0;
+      color: #fff;
+      padding: 0.3rem 0.7rem;
+    }
+
+    .fc .fc-col-header-cell {
+      border-bottom: 2px solid var(--border) !important;
+    }
+    .fc .fc-col-header-cell-cushion {
+      font-size: 0.65rem;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: var(--muted);
+      text-decoration: none;
+      font-weight: 700;
+    }
+
+    .fc .fc-daygrid-day-number {
+      font-size: 0.75rem;
+      color: var(--text);
+      text-decoration: none;
+    }
+
+    .fc .fc-day-today .fc-daygrid-day-number {
+      color: var(--accent);
+      font-weight: 700;
+    }
+
+    .fc .fc-daygrid-event {
+      border-radius: 0 !important;
+    }
+
+    .fc .fc-list-day-cushion {
+      background: var(--bg) !important;
+      border-top: 1px solid var(--border2) !important;
+    }
+    .fc .fc-list-day-text,
+    .fc .fc-list-day-side-text {
+      font-size: 0.72rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      text-decoration: none;
+      color: var(--text);
+    }
+
+    /* Event tiles */
+    .ev {
+      display: flex;
+      flex-direction: column;
+      padding: 2px 5px;
+      overflow: hidden;
+    }
+    .ev-title {
+      font-size: 0.68rem;
+      font-weight: 700;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      color: #fff;
+    }
+    .ev-venue {
+      font-size: 0.57rem;
+      color: rgba(255,255,255,0.7);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+  </style>
+</head>
+<body>
+<div class="layout">
+  <header>
+    <div class="header-main">
+      <h1>Triangle Shows</h1>
+      <span class="tagline">Live music in the Triangle</span>
+    </div>
+    <span class="header-date">Thursday, February 26, 2026</span>
+    <span class="header-badge">Mockup 2 — Newsprint</span>
+  </header>
+
+  <aside class="sidebar">
+    <div class="filter-section">
+      <input class="search-input" type="text" placeholder="Search...">
+    </div>
+
+    <div class="filter-section">
+      <div class="filter-label">City</div>
+      <div class="chip-group">
+        <button class="chip active">Raleigh</button>
+        <button class="chip">Durham</button>
+        <button class="chip active">Chapel Hill</button>
+        <button class="chip">Carrboro</button>
+        <button class="chip">Saxapahaw</button>
+      </div>
+    </div>
+
+    <div class="filter-section">
+      <div class="filter-label">Venue Size</div>
+      <div class="chip-group">
+        <button class="chip">Intimate</button>
+        <button class="chip active">Club</button>
+        <button class="chip">Theater</button>
+        <button class="chip">Amphitheater</button>
+      </div>
+    </div>
+
+    <div class="filter-section">
+      <div class="filter-label">Genre</div>
+      <div class="chip-group">
+        <button class="chip">Rock</button>
+        <button class="chip active">Indie</button>
+        <button class="chip">Country</button>
+        <button class="chip">Hip-Hop</button>
+        <button class="chip">Jazz</button>
+        <button class="chip">Electronic</button>
+      </div>
+    </div>
+
+    <div class="filter-section">
+      <div class="filter-label">Venues</div>
+      <div class="venue-list">
+        <div class="venue-row"><span class="venue-dot" style="background:#e85d04"></span>Red Hat Amphitheater</div>
+        <div class="venue-row"><span class="venue-dot" style="background:#7209b7"></span>DPAC</div>
+        <div class="venue-row"><span class="venue-dot" style="background:#2d6a4f"></span>Cat's Cradle</div>
+        <div class="venue-row"><span class="venue-dot" style="background:#e63946"></span>The Ritz</div>
+        <div class="venue-row"><span class="venue-dot" style="background:#457b9d"></span>Motorco Music Hall</div>
+        <div class="venue-row"><span class="venue-dot" style="background:#d946ef"></span>Haw River Ballroom</div>
+        <div class="venue-row"><span class="venue-dot" style="background:#f4a261"></span>Local 506</div>
+        <div class="venue-row"><span class="venue-dot" style="background:#06b6d4"></span>Lincoln Theatre</div>
+        <div class="venue-row"><span class="venue-dot" style="background:#84cc16"></span>The Pinhook</div>
+        <div class="venue-row"><span class="venue-dot" style="background:#f59e0b"></span>Koka Booth Amphitheatre</div>
+      </div>
+    </div>
+  </aside>
+
+  <main class="calendar-area">
+    <div id="calendar"></div>
+  </main>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.15/index.global.min.js"></script>
+<script>
+const VENUES = [
+  { name: "Red Hat Amphitheater", color: "#e85d04" },
+  { name: "DPAC", color: "#7209b7" },
+  { name: "Cat's Cradle", color: "#2d6a4f" },
+  { name: "The Ritz", color: "#e63946" },
+  { name: "Motorco Music Hall", color: "#457b9d" },
+  { name: "Haw River Ballroom", color: "#d946ef" },
+  { name: "Local 506", color: "#f4a261" },
+  { name: "Lincoln Theatre", color: "#06b6d4" },
+];
+
+const EVENTS = [
+  { title:"Hozier", date:"2026-02-27", venue:"Red Hat Amphitheater" },
+  { title:"boygenius", date:"2026-02-28", venue:"DPAC" },
+  { title:"Wednesday", date:"2026-03-01", venue:"Cat's Cradle" },
+  { title:"Waxahatchee", date:"2026-03-01", venue:"Motorco Music Hall" },
+  { title:"Indigo De Souza", date:"2026-03-03", venue:"The Ritz" },
+  { title:"Angel Olsen", date:"2026-03-05", venue:"Lincoln Theatre" },
+  { title:"Turnpike Troubadours", date:"2026-03-06", venue:"Red Hat Amphitheater" },
+  { title:"Mdou Moctar", date:"2026-03-07", venue:"Cat's Cradle" },
+  { title:"Amythyst Kiah", date:"2026-03-07", venue:"Haw River Ballroom" },
+  { title:"King Gizzard", date:"2026-03-08", venue:"The Ritz" },
+  { title:"Yaya Bey", date:"2026-03-10", venue:"Local 506" },
+  { title:"Trampled by Turtles", date:"2026-03-11", venue:"DPAC" },
+  { title:"Deerhoof", date:"2026-03-12", venue:"Motorco Music Hall" },
+  { title:"Caroline Polachek", date:"2026-03-13", venue:"Red Hat Amphitheater" },
+  { title:"Low Cut Connie", date:"2026-03-14", venue:"Cat's Cradle" },
+  { title:"MUNA", date:"2026-03-15", venue:"Lincoln Theatre" },
+  { title:"Samia", date:"2026-03-15", venue:"Local 506" },
+  { title:"Built to Spill", date:"2026-03-17", venue:"Cat's Cradle" },
+  { title:"Son Volt", date:"2026-03-18", venue:"Motorco Music Hall" },
+  { title:"Hand Habits", date:"2026-03-19", venue:"Haw River Ballroom" },
+  { title:"Jeff Tweedy", date:"2026-03-20", venue:"DPAC" },
+  { title:"Weyes Blood", date:"2026-03-21", venue:"Lincoln Theatre" },
+  { title:"Soccer Mommy", date:"2026-03-25", venue:"The Ritz" },
+  { title:"Adrianne Lenker", date:"2026-03-26", venue:"Haw River Ballroom" },
+  { title:"Bonny Light Horseman", date:"2026-03-27", venue:"Cat's Cradle" },
+  { title:"Lyle Lovett", date:"2026-03-28", venue:"DPAC" },
+  { title:"Gillian Welch", date:"2026-03-29", venue:"Red Hat Amphitheater" },
+];
+
+function venueColor(name) {
+  const v = VENUES.find(v => v.name === name);
+  return v ? v.color : "#888";
+}
+
+const fcEvents = EVENTS.map(e => ({
+  title: e.title,
+  start: e.date,
+  allDay: true,
+  backgroundColor: venueColor(e.venue),
+  borderColor: venueColor(e.venue),
+  textColor: "#ffffff",
+  extendedProps: { venue_name: e.venue },
+}));
+
+document.addEventListener("DOMContentLoaded", () => {
+  const cal = new FullCalendar.Calendar(document.getElementById("calendar"), {
+    initialView: "dayGridMonth",
+    initialDate: "2026-02-26",
+    headerToolbar: {
+      left: "prev,next today",
+      center: "title",
+      right: "dayGridMonth,listMonth",
+    },
+    height: "auto",
+    fixedWeekCount: false,
+    events: fcEvents,
+    eventContent: function(arg) {
+      const p = arg.event.extendedProps;
+      return { html: `<div class="ev">
+        <span class="ev-title">${arg.event.title}</span>
+        <span class="ev-venue">${p.venue_name}</span>
+      </div>` };
+    },
+  });
+  cal.render();
+});
+</script>
+</body>
+</html>

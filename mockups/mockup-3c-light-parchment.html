@@ -1,0 +1,616 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Triangle Shows — Light Parchment</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Mono:ital,wght@0,400;0,700;1,400;1,700&display=swap" rel="stylesheet" />
+  <link href="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.15/index.global.min.css" rel="stylesheet" />
+  <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.15/index.global.min.js"></script>
+
+  <style>
+    /* ─── THEME: LIGHT PARCHMENT ─────────────────────────────────────
+       Warm cream background, Claude salmon accent (#da7756),
+       Space Mono throughout. Concentric-ring ASCII art header.
+    ──────────────────────────────────────────────────────────────── */
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:           #fdf6ed;
+      --surface:      #ffffff;
+      --surface2:     #fdf0e4;
+      --border:       #e8d5bf;
+      --border2:      #d4b89a;
+      --text:         #2c1a08;
+      --muted:        #8c6a50;
+      --dim:          #c4a882;
+      --accent:       #da7756;   /* Claude salmon */
+      --accent-dark:  #b85e40;
+      --accent-bg:    #fdf0eb;
+    }
+
+    html, body {
+      height: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Space Mono', monospace;
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { color: var(--accent-dark); text-decoration: underline; }
+
+    /* ─── Layout ─────────────────────────────────────────────────── */
+    .app-wrapper {
+      display: flex;
+      flex-direction: column;
+      min-height: 100vh;
+    }
+
+    /* ─── Header ─────────────────────────────────────────────────── */
+    .app-header {
+      background: var(--bg);
+      border-bottom: 2px solid var(--border2);
+      padding: 20px 16px 14px;
+      text-align: center;
+      overflow: hidden;
+    }
+
+    /* ASCII art block — concentric rings radiating from the title */
+    .ascii-art {
+      font-family: 'Space Mono', monospace;
+      font-size: 10.5px;
+      line-height: 1.35;
+      color: var(--accent);
+      white-space: pre;
+      display: inline-block;
+      text-align: left;
+      letter-spacing: 0;
+      user-select: none;
+      overflow: hidden;
+      max-width: 100%;
+    }
+
+    /* The title line inside the art uses a stronger weight */
+    .ascii-art .art-title {
+      color: var(--text);
+      font-weight: 700;
+    }
+
+    .header-subtitle {
+      font-size: 9px;
+      letter-spacing: 0.32em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-top: 5px;
+      font-variant: small-caps;
+    }
+
+    .mockup-label {
+      font-size: 8px;
+      letter-spacing: 0.1em;
+      color: var(--dim);
+      margin-top: 3px;
+    }
+
+    /* ─── Body ───────────────────────────────────────────────────── */
+    .app-body {
+      display: flex;
+      flex: 1;
+      overflow: hidden;
+    }
+
+    /* ─── Sidebar ─────────────────────────────────────────────────── */
+    .sidebar {
+      width: 225px;
+      flex-shrink: 0;
+      background: var(--surface);
+      border-right: 1px solid var(--border);
+      overflow-y: auto;
+      padding: 18px 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    .sidebar::-webkit-scrollbar { width: 4px; }
+    .sidebar::-webkit-scrollbar-track { background: var(--bg); }
+    .sidebar::-webkit-scrollbar-thumb { background: var(--dim); border-radius: 2px; }
+
+    .section-label {
+      font-size: 8.5px;
+      font-weight: 700;
+      letter-spacing: 0.22em;
+      text-transform: uppercase;
+      color: var(--accent);
+      margin-bottom: 8px;
+      padding-bottom: 4px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    /* Filter chips */
+    .filter-chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 5px;
+    }
+
+    .chip {
+      font-family: 'Space Mono', monospace;
+      font-size: 9px;
+      padding: 3px 8px;
+      border: 1px solid var(--border2);
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+      border-radius: 2px;
+      letter-spacing: 0.05em;
+      transition: all 0.15s;
+    }
+
+    .chip:hover {
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+
+    .chip.active {
+      border-color: var(--accent);
+      color: var(--accent);
+      background: var(--accent-bg);
+    }
+
+    /* Venue list */
+    .venue-list {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .venue-item {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      font-size: 10px;
+      color: var(--text);
+      cursor: pointer;
+      padding: 1px 0;
+    }
+
+    .venue-item:hover { color: var(--accent); }
+
+    .venue-swatch {
+      width: 9px;
+      height: 9px;
+      flex-shrink: 0;
+      border-radius: 0; /* square swatches */
+    }
+
+    /* Blogroll */
+    .blogroll-list {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+    }
+
+    .blogroll-list a {
+      font-size: 10px;
+      color: var(--muted);
+      display: flex;
+      align-items: baseline;
+      gap: 5px;
+      transition: color 0.15s;
+    }
+
+    .blogroll-list a::before {
+      content: '›';
+      color: var(--accent);
+      font-size: 12px;
+      line-height: 1;
+    }
+
+    .blogroll-list a:hover {
+      color: var(--accent);
+      text-decoration: none;
+    }
+
+    /* Ko-fi */
+    .kofi-section {
+      margin-top: auto;
+    }
+
+    .kofi-section p {
+      font-size: 9px;
+      font-style: italic;
+      color: var(--muted);
+      margin-bottom: 7px;
+    }
+
+    .kofi-btn {
+      display: inline-block;
+      font-family: 'Space Mono', monospace;
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      padding: 6px 12px;
+      background: var(--accent);
+      color: #fff;
+      border-radius: 2px;
+      transition: background 0.15s;
+      text-decoration: none;
+    }
+
+    .kofi-btn:hover {
+      background: var(--accent-dark);
+      color: #fff;
+      text-decoration: none;
+    }
+
+    /* ─── Calendar ────────────────────────────────────────────────── */
+    .calendar-area {
+      flex: 1;
+      padding: 18px;
+      overflow: auto;
+      background: var(--bg);
+    }
+
+    /* ─── FullCalendar Overrides ──────────────────────────────────── */
+    #calendar { font-family: 'Space Mono', monospace !important; }
+
+    .fc .fc-toolbar {
+      margin-bottom: 12px;
+      padding-bottom: 10px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .fc .fc-toolbar-title {
+      font-family: 'Space Mono', monospace !important;
+      font-size: 15px !important;
+      font-style: italic;
+      color: var(--text) !important;
+      letter-spacing: 0.04em;
+    }
+
+    .fc .fc-button {
+      font-family: 'Space Mono', monospace !important;
+      font-size: 9.5px !important;
+      font-weight: 700 !important;
+      letter-spacing: 0.1em !important;
+      text-transform: uppercase !important;
+      background: var(--surface) !important;
+      border: 1px solid var(--border2) !important;
+      color: var(--muted) !important;
+      border-radius: 2px !important;
+      padding: 4px 10px !important;
+      box-shadow: none !important;
+      transition: all 0.15s !important;
+    }
+
+    .fc .fc-button:hover {
+      border-color: var(--accent) !important;
+      color: var(--accent) !important;
+      background: var(--accent-bg) !important;
+    }
+
+    .fc .fc-button-active,
+    .fc .fc-button:active {
+      background: var(--accent-bg) !important;
+      border-color: var(--accent) !important;
+      color: var(--accent) !important;
+    }
+
+    .fc .fc-button:focus {
+      box-shadow: 0 0 0 2px rgba(218,119,86,0.2) !important;
+    }
+
+    .fc table { border-collapse: collapse; }
+
+    .fc .fc-scrollgrid {
+      border: 1px solid var(--border) !important;
+      border-radius: 2px;
+      background: var(--surface);
+    }
+
+    .fc .fc-scrollgrid-section > td,
+    .fc .fc-scrollgrid-section > th { border: none !important; }
+
+    .fc .fc-col-header { background: var(--surface2); }
+
+    .fc .fc-col-header-cell {
+      border-bottom: 1px solid var(--border) !important;
+      border-right: 1px solid var(--border) !important;
+      padding: 6px 4px !important;
+    }
+
+    .fc .fc-col-header-cell-cushion {
+      font-family: 'Space Mono', monospace !important;
+      font-size: 8.5px !important;
+      font-weight: 700 !important;
+      letter-spacing: 0.2em !important;
+      text-transform: uppercase !important;
+      color: var(--muted) !important;
+      padding: 0 !important;
+      text-decoration: none !important;
+    }
+
+    .fc .fc-daygrid-day {
+      background: var(--surface) !important;
+      border-right: 1px solid var(--border) !important;
+      border-bottom: 1px solid var(--border) !important;
+    }
+
+    .fc .fc-daygrid-day:hover { background: var(--surface2) !important; }
+
+    .fc .fc-day-other { background: var(--bg) !important; }
+    .fc .fc-day-other .fc-daygrid-day-number { color: var(--dim) !important; }
+
+    .fc .fc-daygrid-day-number {
+      font-family: 'Space Mono', monospace !important;
+      font-size: 10px !important;
+      color: var(--muted) !important;
+      padding: 4px 6px !important;
+      text-decoration: none !important;
+    }
+
+    .fc .fc-day-today { background: rgba(218,119,86,0.06) !important; }
+    .fc .fc-day-today .fc-daygrid-day-number {
+      color: var(--accent) !important;
+      font-weight: 700 !important;
+    }
+
+    .fc .fc-daygrid-event {
+      border-radius: 1px !important;
+      border: none !important;
+      margin-bottom: 2px !important;
+    }
+
+    .fc .fc-daygrid-more-link {
+      font-family: 'Space Mono', monospace !important;
+      font-size: 8.5px !important;
+      color: var(--muted) !important;
+    }
+
+    .fc .fc-daygrid-more-link:hover { color: var(--accent) !important; }
+
+    .fc .fc-popover {
+      background: var(--surface) !important;
+      border: 1px solid var(--accent) !important;
+      border-radius: 2px !important;
+      box-shadow: 0 4px 16px rgba(44,26,8,0.15) !important;
+    }
+
+    .fc .fc-popover-header {
+      background: var(--surface2) !important;
+      color: var(--text) !important;
+      font-family: 'Space Mono', monospace !important;
+      font-size: 10px !important;
+      padding: 6px 10px !important;
+      border-bottom: 1px solid var(--border) !important;
+    }
+
+    .fc .fc-scrollgrid td,
+    .fc .fc-scrollgrid th { border-color: var(--border) !important; }
+
+    /* Event tiles */
+    .ev-inner {
+      font-family: 'Space Mono', monospace;
+      font-size: 9px;
+      line-height: 1.3;
+      padding: 2px 5px 3px;
+    }
+
+    .ev-title {
+      font-weight: 700;
+      color: #fff;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      font-size: 9px;
+    }
+
+    .ev-venue {
+      color: rgba(255,255,255,0.7);
+      font-size: 8px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+  </style>
+</head>
+<body>
+<div class="app-wrapper">
+
+  <!-- ── Header ──────────────────────────────────────────────────── -->
+  <header class="app-header">
+    <!--
+      ASCII Art: concentric rings of characters radiating outward.
+      Densest at center (∿∿∿), progressively lighter toward edges.
+      The rhythm creates a sound-wave / ripple-in-water effect.
+    -->
+    <pre class="ascii-art">
+  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .
+    ∘   ∘   ∘   ∘   ∘   ∘   ∘   ∘   ∘   ∘   ∘   ∘   ∘   ∘   ∘   ∘   ∘   ∘   ∘   ∘   ∘   ∘
+      ~   ~   ~   ~   ~   ~   ~   ~   ~   ~   ~   ~   ~   ~   ~   ~   ~   ~   ~   ~   ~
+        ≈  ≈  ≈  ≈  ≈  ≈  ≈  ≈  ≈  ≈  ≈  ≈  ≈  ≈  ≈  ≈  ≈  ≈  ≈  ≈  ≈  ≈  ≈  ≈  ≈
+         ≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋
+          ∿∿∿∿∿∿∿∿∿∿∿∿∿∿∿∿∿∿∿∿∿∿∿∿∿∿∿∿∿∿∿∿∿∿∿∿∿∿∿∿∿∿∿∿∿∿∿∿∿∿∿∿∿∿∿∿∿∿∿
+  ──────  ◌  °  ·  ·  T  R  I  A  N  G  L  E     S  H  O  W  S  ·  ·  °  ◌  ──────
+                                   ·  R D U  ·
+          ∿∿∿∿∿∿∿∿∿∿∿∿∿∿∿∿∿∿∿∿∿∿∿∿∿∿∿∿∿∿∿∿∿∿∿∿∿∿∿∿∿∿∿∿∿∿∿∿∿∿∿∿∿∿∿∿∿∿∿
+         ≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋
+        ≈  ≈  ≈  ≈  ≈  ≈  ≈  ≈  ≈  ≈  ≈  ≈  ≈  ≈  ≈  ≈  ≈  ≈  ≈  ≈  ≈  ≈  ≈  ≈  ≈
+      ~   ~   ~   ~   ~   ~   ~   ~   ~   ~   ~   ~   ~   ~   ~   ~   ~   ~   ~   ~   ~
+    ∘   ∘   ∘   ∘   ∘   ∘   ∘   ∘   ∘   ∘   ∘   ∘   ∘   ∘   ∘   ∘   ∘   ∘   ∘   ∘   ∘   ∘
+  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .</pre>
+    <div class="mockup-label">Mockup 3c — Light Parchment</div>
+  </header>
+
+  <!-- ── Body ──────────────────────────────────────────────────── -->
+  <div class="app-body">
+
+    <!-- Sidebar -->
+    <aside class="sidebar">
+
+      <!-- View -->
+      <div>
+        <div class="section-label">View</div>
+        <div class="filter-chips">
+          <button class="chip active" data-view="dayGridMonth">Month</button>
+          <button class="chip" data-view="listMonth">List</button>
+          <button class="chip" data-view="listWeek">This week</button>
+        </div>
+      </div>
+
+      <!-- City -->
+      <div>
+        <div class="section-label">City</div>
+        <div class="filter-chips">
+          <button class="chip active">Raleigh</button>
+          <button class="chip">Durham</button>
+          <button class="chip active">Chapel Hill</button>
+          <button class="chip">Carrboro</button>
+          <button class="chip">Saxapahaw</button>
+        </div>
+      </div>
+
+      <!-- Size -->
+      <div>
+        <div class="section-label">Size</div>
+        <div class="filter-chips">
+          <button class="chip">Intimate</button>
+          <button class="chip active">Club</button>
+          <button class="chip">Theater</button>
+          <button class="chip">Amph.</button>
+        </div>
+      </div>
+
+      <!-- Venues -->
+      <div>
+        <div class="section-label">Venues</div>
+        <div class="venue-list" id="venueList"></div>
+      </div>
+
+      <!-- Blogroll -->
+      <div>
+        <div class="section-label">Find more shows</div>
+        <div class="blogroll-list">
+          <a href="#">The Fuzzy Needle</a>
+          <a href="#">Perfect Lovers Cafe</a>
+          <a href="#">Weirs</a>
+          <a href="#">Sluice</a>
+          <a href="#">Field Guide · Indy Week</a>
+        </div>
+      </div>
+
+      <!-- Ko-fi -->
+      <div class="kofi-section">
+        <div class="section-label">Support</div>
+        <p>Keeps the scraper alive:</p>
+        <a href="https://ko-fi.com/" class="kofi-btn">☕ Buy me a coffee</a>
+      </div>
+
+    </aside>
+
+    <!-- Calendar -->
+    <main class="calendar-area">
+      <div id="calendar"></div>
+    </main>
+
+  </div>
+</div>
+
+<script>
+  const VENUES = [
+    { name: "Red Hat Amphitheater", color: "#e85d04" },
+    { name: "DPAC",                 color: "#7209b7" },
+    { name: "Cat's Cradle",         color: "#2d6a4f" },
+    { name: "The Ritz",             color: "#e63946" },
+    { name: "Motorco Music Hall",   color: "#457b9d" },
+    { name: "Haw River Ballroom",   color: "#d946ef" },
+    { name: "Local 506",            color: "#f4a261" },
+    { name: "Lincoln Theatre",      color: "#06b6d4" },
+  ];
+
+  const EVENTS = [
+    { title:"Hozier",               date:"2026-02-27", venue:"Red Hat Amphitheater" },
+    { title:"boygenius",            date:"2026-02-28", venue:"DPAC" },
+    { title:"Wednesday",            date:"2026-03-01", venue:"Cat's Cradle" },
+    { title:"Waxahatchee",          date:"2026-03-01", venue:"Motorco Music Hall" },
+    { title:"Indigo De Souza",      date:"2026-03-03", venue:"The Ritz" },
+    { title:"Angel Olsen",          date:"2026-03-05", venue:"Lincoln Theatre" },
+    { title:"Turnpike Troubadours", date:"2026-03-06", venue:"Red Hat Amphitheater" },
+    { title:"Mdou Moctar",          date:"2026-03-07", venue:"Cat's Cradle" },
+    { title:"King Gizzard",         date:"2026-03-08", venue:"The Ritz" },
+    { title:"Yaya Bey",             date:"2026-03-10", venue:"Local 506" },
+    { title:"Trampled by Turtles",  date:"2026-03-11", venue:"DPAC" },
+    { title:"Deerhoof",             date:"2026-03-12", venue:"Motorco Music Hall" },
+    { title:"Caroline Polachek",    date:"2026-03-13", venue:"Red Hat Amphitheater" },
+    { title:"MUNA",                 date:"2026-03-15", venue:"Lincoln Theatre" },
+    { title:"Samia",                date:"2026-03-15", venue:"Local 506" },
+    { title:"Built to Spill",       date:"2026-03-17", venue:"Cat's Cradle" },
+    { title:"Jeff Tweedy",          date:"2026-03-20", venue:"DPAC" },
+    { title:"Weyes Blood",          date:"2026-03-21", venue:"Lincoln Theatre" },
+    { title:"Soccer Mommy",         date:"2026-03-25", venue:"The Ritz" },
+    { title:"Adrianne Lenker",      date:"2026-03-26", venue:"Haw River Ballroom" },
+    { title:"Gillian Welch",        date:"2026-03-29", venue:"Red Hat Amphitheater" },
+  ];
+
+  const venueMap = {};
+  VENUES.forEach(v => { venueMap[v.name] = v.color; });
+
+  // Build venue list
+  const venueListEl = document.getElementById('venueList');
+  VENUES.forEach(v => {
+    const item = document.createElement('div');
+    item.className = 'venue-item';
+    item.innerHTML = `<span class="venue-swatch" style="background:${v.color}"></span><span>${v.name}</span>`;
+    venueListEl.appendChild(item);
+  });
+
+  const fcEvents = EVENTS.map(e => ({
+    title: e.title,
+    date: e.date,
+    allDay: true,
+    extendedProps: { venue: e.venue },
+    backgroundColor: venueMap[e.venue] || '#888',
+    borderColor: 'transparent',
+    textColor: '#fff',
+  }));
+
+  document.addEventListener('DOMContentLoaded', () => {
+    const calendar = new FullCalendar.Calendar(document.getElementById('calendar'), {
+      initialView: 'dayGridMonth',
+      initialDate: '2026-02-26',
+      fixedWeekCount: false,
+      headerToolbar: {
+        left: 'prev,next today',
+        center: 'title',
+        right: '',
+      },
+      events: fcEvents,
+      eventContent: function(arg) {
+        const venue = arg.event.extendedProps.venue;
+        return { html: `<div class="ev-inner"><div class="ev-title">${arg.event.title}</div><div class="ev-venue">${venue}</div></div>` };
+      },
+      eventDidMount: function(info) {
+        info.el.style.border = 'none';
+        info.el.style.borderRadius = '1px';
+      },
+    });
+    calendar.render();
+
+    document.querySelectorAll('.chip[data-view]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.chip[data-view]').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        calendar.changeView(btn.dataset.view);
+      });
+    });
+  });
+</script>
+</body>
+</html>

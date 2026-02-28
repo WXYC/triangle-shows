@@ -1,0 +1,90 @@
+# Cloud Build CI/CD pipeline for triangle-shows
+#
+# INITIAL SETUP (run once before first deploy):
+#
+#   1. Create Artifact Registry repository:
+#      gcloud artifacts repositories create triangle-shows \
+#        --repository-format=docker --location=us-east1
+#
+#   2. Create secrets in Secret Manager:
+#      gcloud secrets create triangle-shows-db-url \
+#        --data-file=- <<< "postgresql+asyncpg://user:pass@host/dbname"
+#      gcloud secrets create triangle-shows-tm-api-key \
+#        --data-file=- <<< "your_ticketmaster_api_key"
+#
+#   3. Grant the Cloud Build service account permission to deploy to Cloud Run
+#      and access secrets (in IAM Console, or):
+#      PROJECT_NUM=$(gcloud projects describe $PROJECT_ID --format='value(projectNumber)')
+#      gcloud projects add-iam-policy-binding $PROJECT_ID \
+#        --member="serviceAccount:$PROJECT_NUM@cloudbuild.gserviceaccount.com" \
+#        --role="roles/run.admin"
+#      gcloud projects add-iam-policy-binding $PROJECT_ID \
+#        --member="serviceAccount:$PROJECT_NUM@cloudbuild.gserviceaccount.com" \
+#        --role="roles/secretmanager.secretAccessor"
+#      gcloud iam service-accounts add-iam-policy-binding \
+#        $PROJECT_NUM-compute@developer.gserviceaccount.com \
+#        --member="serviceAccount:$PROJECT_NUM@cloudbuild.gserviceaccount.com" \
+#        --role="roles/iam.serviceAccountUser"
+#
+#   4. Create Cloud Scheduler job for periodic scrapes:
+#      gcloud scheduler jobs create http triangle-shows-scrape \
+#        --schedule="0 */6 * * *" \
+#        --uri="https://YOUR_CLOUD_RUN_URL/api/scrape" \
+#        --http-method=POST \
+#        --location=us-east1 \
+#        --oidc-service-account-email=YOUR_SA@PROJECT_ID.iam.gserviceaccount.com
+#
+# TO RUN MANUALLY:
+#   gcloud builds submit --config cloudbuild.yaml
+#
+# TO CONNECT A GITHUB TRIGGER:
+#   Cloud Build console → Triggers → Connect Repository → set trigger on push to main
+
+substitutions:
+  _REGION: us-east1
+  _SERVICE: triangle-shows
+  _REPO: triangle-shows  # Artifact Registry repository name
+
+steps:
+  # Build Docker image
+  - name: gcr.io/cloud-builders/docker
+    id: build
+    args:
+      - build
+      - -t
+      - $_REGION-docker.pkg.dev/$PROJECT_ID/$_REPO/api:$COMMIT_SHA
+      - -t
+      - $_REGION-docker.pkg.dev/$PROJECT_ID/$_REPO/api:latest
+      - .
+
+  # Push image to Artifact Registry
+  - name: gcr.io/cloud-builders/docker
+    id: push
+    args:
+      - push
+      - --all-tags
+      - $_REGION-docker.pkg.dev/$PROJECT_ID/$_REPO/api
+
+  # Deploy to Cloud Run
+  - name: gcr.io/cloud-builders/gcloud
+    id: deploy
+    args:
+      - run
+      - deploy
+      - $_SERVICE
+      - --image=$_REGION-docker.pkg.dev/$PROJECT_ID/$_REPO/api:$COMMIT_SHA
+      - --platform=managed
+      - --region=$_REGION
+      - --port=8000
+      - --memory=512Mi
+      - --cpu=1
+      - --min-instances=1
+      - --max-instances=2
+      - --timeout=300
+      - --set-env-vars=APP_ENV=production,ENABLE_SCHEDULER=false,LOG_LEVEL=INFO
+      - --update-secrets=DATABASE_URL=triangle-shows-db-url:latest
+      - --update-secrets=TICKETMASTER_API_KEY=triangle-shows-tm-api-key:latest
+
+images:
+  - $_REGION-docker.pkg.dev/$PROJECT_ID/$_REPO/api:$COMMIT_SHA
+  - $_REGION-docker.pkg.dev/$PROJECT_ID/$_REPO/api:latest

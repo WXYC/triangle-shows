@@ -1,0 +1,719 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Triangle Shows — Broadsheet Editorial</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Space+Mono:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet" />
+  <link href="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.15/index.global.min.css" rel="stylesheet" />
+  <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.15/index.global.min.js"></script>
+
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:        #0c0c0c;
+      --surface:   #161616;
+      --border:    #2a2a2a;
+      --accent:    #e8312a;
+      --text:      #e0e0e0;
+      --text-muted:#888;
+      --font:      'Space Mono', monospace;
+      --font-head: 'Bebas Neue', sans-serif;
+    }
+
+    html, body {
+      height: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font);
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    /* ── MASTHEAD ─────────────────────────────────────── */
+    #masthead {
+      background: var(--bg);
+      padding: 22px 28px 0;
+      border-bottom: 2px solid var(--accent);
+    }
+
+    .masthead-top {
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      padding-bottom: 10px;
+    }
+
+    .masthead-title {
+      font-family: var(--font-head);
+      font-size: clamp(52px, 7vw, 96px);
+      letter-spacing: 0.02em;
+      color: #fff;
+      line-height: 0.9;
+    }
+
+    .masthead-badge {
+      font-family: var(--font);
+      font-size: 10px;
+      color: var(--accent);
+      text-transform: uppercase;
+      letter-spacing: 0.2em;
+      border: 1px solid var(--accent);
+      padding: 4px 8px;
+      margin-bottom: 4px;
+    }
+
+    .masthead-sub {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 6px 0 8px;
+      border-top: 1px solid var(--border);
+      margin-top: 6px;
+      font-size: 10px;
+      color: var(--text-muted);
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+
+    .masthead-sub .mockup-label {
+      color: var(--accent);
+      font-weight: 700;
+      letter-spacing: 0.18em;
+    }
+
+    /* ── LAYOUT ───────────────────────────────────────── */
+    #layout {
+      display: flex;
+      height: calc(100vh - var(--masthead-h, 130px));
+      min-height: 0;
+    }
+
+    /* ── SIDEBAR ──────────────────────────────────────── */
+    #sidebar {
+      width: 260px;
+      min-width: 220px;
+      flex-shrink: 0;
+      background: var(--surface);
+      border-right: 1px solid var(--border);
+      overflow-y: auto;
+      padding: 24px 0 32px;
+      display: flex;
+      flex-direction: column;
+      gap: 0;
+    }
+
+    #sidebar::-webkit-scrollbar { width: 4px; }
+    #sidebar::-webkit-scrollbar-track { background: transparent; }
+    #sidebar::-webkit-scrollbar-thumb { background: var(--border); }
+
+    .sidebar-section {
+      padding: 0 20px 24px;
+    }
+
+    .sidebar-label {
+      font-family: var(--font);
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.18em;
+      color: var(--text);
+      padding: 4px 0 4px 12px;
+      border-left: 4px solid var(--accent);
+      margin-bottom: 14px;
+    }
+
+    /* ── VENUE FILTER CHIPS ───────────────────────────── */
+    .venue-list {
+      list-style: none;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .venue-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      cursor: pointer;
+      padding: 5px 8px;
+      border-radius: 2px;
+      border: 1px solid transparent;
+      transition: background 0.15s, border-color 0.15s;
+      user-select: none;
+    }
+
+    .venue-item:hover {
+      background: rgba(255,255,255,0.04);
+    }
+
+    .venue-item.active {
+      border-color: var(--border);
+      background: rgba(255,255,255,0.06);
+    }
+
+    .venue-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+
+    .venue-name {
+      font-size: 11px;
+      letter-spacing: 0.04em;
+      color: var(--text);
+      flex: 1;
+    }
+
+    .venue-check {
+      font-size: 10px;
+      color: var(--accent);
+      opacity: 0;
+      transition: opacity 0.15s;
+    }
+
+    .venue-item.active .venue-check { opacity: 1; }
+
+    /* ── UPCOMING LIST ────────────────────────────────── */
+    .upcoming-list {
+      list-style: none;
+      display: flex;
+      flex-direction: column;
+      gap: 0;
+    }
+
+    .upcoming-item {
+      display: flex;
+      gap: 10px;
+      padding: 8px 0;
+      border-bottom: 1px solid var(--border);
+      align-items: flex-start;
+    }
+
+    .upcoming-item:last-child { border-bottom: none; }
+
+    .upcoming-date {
+      font-size: 10px;
+      color: var(--text-muted);
+      letter-spacing: 0.08em;
+      flex-shrink: 0;
+      padding-top: 1px;
+      min-width: 52px;
+    }
+
+    .upcoming-info { flex: 1; }
+
+    .upcoming-title {
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--text);
+      letter-spacing: 0.04em;
+      line-height: 1.3;
+    }
+
+    .upcoming-venue {
+      font-size: 10px;
+      color: var(--text-muted);
+      letter-spacing: 0.04em;
+      margin-top: 1px;
+    }
+
+    .upcoming-swatch {
+      width: 3px;
+      flex-shrink: 0;
+      align-self: stretch;
+      border-radius: 1px;
+    }
+
+    /* ── BLOGROLL ─────────────────────────────────────── */
+    .blogroll-list {
+      list-style: none;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .blogroll-list a {
+      font-size: 11px;
+      color: var(--text-muted);
+      text-decoration: none;
+      letter-spacing: 0.06em;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      transition: color 0.15s;
+    }
+
+    .blogroll-list a::before {
+      content: '';
+      display: inline-block;
+      width: 6px;
+      height: 1px;
+      background: var(--accent);
+      flex-shrink: 0;
+    }
+
+    .blogroll-list a:hover { color: var(--text); }
+
+    /* ── KO-FI ────────────────────────────────────────── */
+    .kofi-block {
+      padding: 14px 20px;
+      background: rgba(232,49,42,0.07);
+      border-left: 4px solid var(--accent);
+      margin: 0 20px;
+    }
+
+    .kofi-pitch {
+      font-size: 10px;
+      color: var(--text-muted);
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      margin-bottom: 10px;
+      line-height: 1.5;
+    }
+
+    .kofi-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      font-family: var(--font);
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      padding: 7px 14px;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+
+    .kofi-btn:hover { background: #c8281f; }
+
+    /* ── MAIN CALENDAR AREA ───────────────────────────── */
+    #main {
+      flex: 1;
+      min-width: 0;
+      overflow: hidden;
+      padding: 20px 24px 20px;
+      display: flex;
+      flex-direction: column;
+    }
+
+    #calendar-wrap {
+      flex: 1;
+      min-height: 0;
+      overflow: hidden;
+    }
+
+    /* ── FULLCALENDAR DARK OVERRIDES ─────────────────── */
+    .fc {
+      height: 100%;
+      font-family: var(--font) !important;
+      font-size: 12px;
+    }
+
+    /* Toolbar */
+    .fc .fc-toolbar {
+      margin-bottom: 14px;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .fc .fc-toolbar-title {
+      font-family: var(--font-head) !important;
+      font-size: 32px !important;
+      letter-spacing: 0.05em;
+      color: #fff !important;
+    }
+
+    .fc .fc-button {
+      background: transparent !important;
+      border: 1px solid var(--border) !important;
+      color: var(--text) !important;
+      font-family: var(--font) !important;
+      font-size: 10px !important;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      padding: 5px 10px !important;
+      border-radius: 0 !important;
+      box-shadow: none !important;
+      transition: background 0.15s, border-color 0.15s !important;
+    }
+
+    .fc .fc-button:hover {
+      background: rgba(232,49,42,0.15) !important;
+      border-color: var(--accent) !important;
+      color: #fff !important;
+    }
+
+    .fc .fc-button-active,
+    .fc .fc-button:focus {
+      background: var(--accent) !important;
+      border-color: var(--accent) !important;
+      color: #fff !important;
+      outline: none !important;
+    }
+
+    /* Header row */
+    .fc .fc-col-header {
+      background: var(--bg);
+    }
+
+    .fc .fc-col-header-cell {
+      border-color: var(--border) !important;
+      padding: 6px 0 !important;
+    }
+
+    .fc .fc-col-header-cell-cushion {
+      font-size: 9px !important;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--text-muted) !important;
+      font-weight: 400 !important;
+      text-decoration: none !important;
+    }
+
+    /* Day cells */
+    .fc-theme-standard td,
+    .fc-theme-standard th {
+      border-color: var(--border) !important;
+    }
+
+    .fc .fc-daygrid-body {
+      background: var(--bg);
+    }
+
+    .fc .fc-daygrid-day {
+      background: var(--bg) !important;
+    }
+
+    .fc .fc-daygrid-day:hover {
+      background: rgba(255,255,255,0.02) !important;
+    }
+
+    .fc .fc-day-today {
+      background: rgba(232,49,42,0.07) !important;
+    }
+
+    .fc .fc-day-today .fc-daygrid-day-number {
+      color: var(--accent) !important;
+      font-weight: 700;
+    }
+
+    .fc .fc-daygrid-day-number {
+      font-size: 11px !important;
+      color: var(--text-muted) !important;
+      text-decoration: none !important;
+      padding: 4px 6px !important;
+      font-weight: 400;
+    }
+
+    .fc .fc-daygrid-day-top { justify-content: flex-end; }
+
+    /* Events */
+    .fc .fc-daygrid-event {
+      border: none !important;
+      border-radius: 1px !important;
+      font-size: 10px !important;
+      font-family: var(--font) !important;
+      padding: 1px 4px !important;
+      margin: 1px 2px !important;
+      font-weight: 700;
+      letter-spacing: 0.03em;
+      cursor: pointer;
+      opacity: 0.92;
+      transition: opacity 0.15s, filter 0.15s;
+    }
+
+    .fc .fc-daygrid-event:hover {
+      opacity: 1;
+      filter: brightness(1.15);
+      z-index: 5;
+    }
+
+    .fc .fc-event-title {
+      font-weight: 700 !important;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .fc .fc-more-link {
+      font-size: 9px !important;
+      color: var(--text-muted) !important;
+      font-family: var(--font) !important;
+      letter-spacing: 0.06em;
+      text-decoration: none;
+    }
+
+    .fc .fc-more-link:hover { color: var(--accent) !important; }
+
+    /* Popover */
+    .fc .fc-popover {
+      background: var(--surface) !important;
+      border: 1px solid var(--border) !important;
+      border-radius: 0 !important;
+      box-shadow: 0 4px 24px rgba(0,0,0,0.6) !important;
+    }
+
+    .fc .fc-popover-header {
+      background: var(--bg) !important;
+      border-bottom: 1px solid var(--border) !important;
+      font-size: 10px !important;
+      font-family: var(--font) !important;
+      color: var(--text-muted) !important;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      padding: 6px 10px !important;
+    }
+
+    .fc .fc-popover-close {
+      color: var(--text-muted) !important;
+    }
+
+    /* Other month days */
+    .fc .fc-day-other .fc-daygrid-day-number {
+      color: #3a3a3a !important;
+    }
+
+    .fc .fc-day-other {
+      background: rgba(0,0,0,0.3) !important;
+    }
+
+    /* Scrollbar in fc */
+    .fc-scroller::-webkit-scrollbar { width: 4px; height: 4px; }
+    .fc-scroller::-webkit-scrollbar-track { background: transparent; }
+    .fc-scroller::-webkit-scrollbar-thumb { background: var(--border); }
+
+    /* ── DIVIDER ──────────────────────────────────────── */
+    .sidebar-divider {
+      height: 1px;
+      background: var(--border);
+      margin: 0 20px 24px;
+    }
+  </style>
+</head>
+<body>
+
+<!-- MASTHEAD -->
+<header id="masthead">
+  <div class="masthead-top">
+    <div class="masthead-title">Triangle Shows</div>
+    <div class="masthead-badge">Mockup 1-A &mdash; Broadsheet Editorial</div>
+  </div>
+  <div class="masthead-sub">
+    <span>The Triangle's Independent Concert Calendar &bull; Raleigh &ndash; Durham &ndash; Chapel Hill</span>
+    <span class="mockup-label">Est. 2026 &bull; Free &bull; No Algorithms</span>
+  </div>
+</header>
+
+<!-- LAYOUT -->
+<div id="layout">
+
+  <!-- SIDEBAR -->
+  <aside id="sidebar">
+
+    <!-- VENUE FILTER -->
+    <div class="sidebar-section">
+      <div class="sidebar-label">Venues</div>
+      <ul class="venue-list" id="venueList"></ul>
+    </div>
+
+    <div class="sidebar-divider"></div>
+
+    <!-- UPCOMING -->
+    <div class="sidebar-section">
+      <div class="sidebar-label">Upcoming</div>
+      <ul class="upcoming-list" id="upcomingList"></ul>
+    </div>
+
+    <div class="sidebar-divider"></div>
+
+    <!-- BLOGROLL -->
+    <div class="sidebar-section">
+      <div class="sidebar-label">Friends &amp; Feeds</div>
+      <ul class="blogroll-list">
+        <li><a href="#">Fuzzy Needle IG</a></li>
+        <li><a href="#">Perfect Lovers Cafe IG</a></li>
+        <li><a href="#">Weirs IG</a></li>
+        <li><a href="#">Sluice IG</a></li>
+        <li><a href="#">Field Guide Newsletter</a></li>
+      </ul>
+    </div>
+
+    <div class="sidebar-divider"></div>
+
+    <!-- KO-FI -->
+    <div class="kofi-block">
+      <div class="kofi-pitch">Keeps the scraper alive:</div>
+      <button class="kofi-btn">&#9749; Buy a Coffee</button>
+    </div>
+
+  </aside>
+
+  <!-- MAIN -->
+  <main id="main">
+    <div id="calendar-wrap">
+      <div id="calendar"></div>
+    </div>
+  </main>
+
+</div><!-- /layout -->
+
+<script>
+  const VENUES = [
+    { name: "Red Hat Amphitheater",  color: "#e85d04" },
+    { name: "DPAC",                  color: "#7209b7" },
+    { name: "Cat's Cradle",          color: "#2d6a4f" },
+    { name: "The Ritz",              color: "#e63946" },
+    { name: "Motorco Music Hall",    color: "#457b9d" },
+    { name: "Haw River Ballroom",    color: "#d946ef" },
+    { name: "Local 506",             color: "#f4a261" },
+    { name: "Lincoln Theatre",       color: "#06b6d4" },
+  ];
+
+  const EVENTS = [
+    { title:"Hozier",              date:"2026-02-27", venue:"Red Hat Amphitheater" },
+    { title:"boygenius",           date:"2026-02-28", venue:"DPAC" },
+    { title:"Wednesday",           date:"2026-03-01", venue:"Cat's Cradle" },
+    { title:"Waxahatchee",         date:"2026-03-01", venue:"Motorco Music Hall" },
+    { title:"Indigo De Souza",     date:"2026-03-03", venue:"The Ritz" },
+    { title:"Angel Olsen",         date:"2026-03-05", venue:"Lincoln Theatre" },
+    { title:"Turnpike Troubadours",date:"2026-03-06", venue:"Red Hat Amphitheater" },
+    { title:"Mdou Moctar",         date:"2026-03-07", venue:"Cat's Cradle" },
+    { title:"King Gizzard",        date:"2026-03-08", venue:"The Ritz" },
+    { title:"Yaya Bey",            date:"2026-03-10", venue:"Local 506" },
+    { title:"Trampled by Turtles", date:"2026-03-11", venue:"DPAC" },
+    { title:"Deerhoof",            date:"2026-03-12", venue:"Motorco Music Hall" },
+    { title:"Caroline Polachek",   date:"2026-03-13", venue:"Red Hat Amphitheater" },
+    { title:"MUNA",                date:"2026-03-15", venue:"Lincoln Theatre" },
+    { title:"Samia",               date:"2026-03-15", venue:"Local 506" },
+    { title:"Built to Spill",      date:"2026-03-17", venue:"Cat's Cradle" },
+    { title:"Jeff Tweedy",         date:"2026-03-20", venue:"DPAC" },
+    { title:"Weyes Blood",         date:"2026-03-21", venue:"Lincoln Theatre" },
+    { title:"Soccer Mommy",        date:"2026-03-25", venue:"The Ritz" },
+    { title:"Adrianne Lenker",     date:"2026-03-26", venue:"Haw River Ballroom" },
+    { title:"Gillian Welch",       date:"2026-03-29", venue:"Red Hat Amphitheater" },
+  ];
+
+  // ── State ───────────────────────────────────────────
+  const venueMap = {};
+  VENUES.forEach(v => { venueMap[v.name] = v; });
+
+  let activeVenues = new Set(VENUES.map(v => v.name));
+  let calendarInstance = null;
+
+  // ── Build venue filter list ─────────────────────────
+  function buildVenueList() {
+    const ul = document.getElementById('venueList');
+    VENUES.forEach(v => {
+      const li = document.createElement('li');
+      li.className = 'venue-item active';
+      li.dataset.venue = v.name;
+      li.innerHTML = `
+        <span class="venue-dot" style="background:${v.color}"></span>
+        <span class="venue-name">${v.name}</span>
+        <span class="venue-check">&#10003;</span>
+      `;
+      li.addEventListener('click', () => toggleVenue(v.name, li));
+      ul.appendChild(li);
+    });
+  }
+
+  function toggleVenue(name, el) {
+    if (activeVenues.has(name)) {
+      activeVenues.delete(name);
+      el.classList.remove('active');
+    } else {
+      activeVenues.add(name);
+      el.classList.add('active');
+    }
+    refreshCalendar();
+  }
+
+  // ── Build upcoming list ─────────────────────────────
+  function buildUpcoming() {
+    const ul = document.getElementById('upcomingList');
+    const today = new Date('2026-02-26');
+    const sorted = [...EVENTS]
+      .filter(e => new Date(e.date) >= today)
+      .sort((a,b) => a.date.localeCompare(b.date))
+      .slice(0, 8);
+
+    sorted.forEach(e => {
+      const v = venueMap[e.venue];
+      const d = new Date(e.date + 'T00:00:00');
+      const label = d.toLocaleDateString('en-US', { month:'short', day:'numeric' });
+      const li = document.createElement('li');
+      li.className = 'upcoming-item';
+      li.innerHTML = `
+        <div class="upcoming-swatch" style="background:${v ? v.color : '#666'}"></div>
+        <div class="upcoming-info">
+          <div class="upcoming-title">${e.title}</div>
+          <div class="upcoming-venue">${e.venue}</div>
+        </div>
+        <div class="upcoming-date">${label}</div>
+      `;
+      ul.appendChild(li);
+    });
+  }
+
+  // ── Filtered FC events ──────────────────────────────
+  function getFilteredEvents() {
+    return EVENTS
+      .filter(e => activeVenues.has(e.venue))
+      .map(e => {
+        const v = venueMap[e.venue];
+        return {
+          title: e.title,
+          start: e.date,
+          allDay: true,
+          backgroundColor: v ? v.color : '#666',
+          borderColor: v ? v.color : '#666',
+          extendedProps: { venue: e.venue }
+        };
+      });
+  }
+
+  function refreshCalendar() {
+    if (!calendarInstance) return;
+    const src = calendarInstance.getEventSources()[0];
+    if (src) src.remove();
+    calendarInstance.addEventSource(getFilteredEvents());
+  }
+
+  // ── Init calendar ───────────────────────────────────
+  document.addEventListener('DOMContentLoaded', () => {
+    buildVenueList();
+    buildUpcoming();
+
+    const el = document.getElementById('calendar');
+    calendarInstance = new FullCalendar.Calendar(el, {
+      initialView: 'dayGridMonth',
+      initialDate: '2026-02-26',
+      fixedWeekCount: false,
+      headerToolbar: {
+        left:   'prev,next today',
+        center: 'title',
+        right:  'dayGridMonth,dayGridWeek'
+      },
+      events: getFilteredEvents(),
+      eventDidMount(info) {
+        info.el.title = `${info.event.title} @ ${info.event.extendedProps.venue}`;
+      }
+    });
+
+    calendarInstance.render();
+
+    // Recalculate height after render
+    window.addEventListener('resize', () => calendarInstance.updateSize());
+  });
+</script>
+</body>
+</html>

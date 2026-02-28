@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mockup 3 — Terminal</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Space+Mono:ital,wght@0,400;0,700;1,700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.15/index.global.min.css">
+  <style>
+    /* === THEME: TERMINAL ===
+       Black background, neon green accent, Space Mono throughout.
+       Command-line / hacker aesthetic — like a venue crawler running in a terminal. */
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:      #080c08;
+      --surface: #0d120d;
+      --surface2:#121a12;
+      --border:  #1a2e1a;
+      --text:    #c8f5c8;
+      --muted:   #5a8a5a;
+      --accent:  #00e676;
+      --accent2: #69ff47;
+      --dim:     #2a4a2a;
+      --sidebar: 270px;
+    }
+
+    body {
+      font-family: 'Space Mono', monospace;
+      background: var(--bg);
+      color: var(--text);
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: var(--sidebar) 1fr;
+      grid-template-rows: auto 1fr;
+      min-height: 100vh;
+    }
+
+    /* === Header === */
+    header {
+      grid-column: 1 / -1;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 0.8rem 1.4rem;
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+    }
+
+    .prompt-prefix {
+      color: var(--accent);
+      font-size: 0.85rem;
+      font-weight: 700;
+    }
+
+    header h1 {
+      font-size: 0.95rem;
+      font-weight: 700;
+      color: var(--text);
+      text-transform: lowercase;
+      letter-spacing: 0.02em;
+    }
+    header h1 span.cursor {
+      display: inline-block;
+      width: 9px; height: 1.1em;
+      background: var(--accent);
+      margin-left: 2px;
+      vertical-align: text-bottom;
+      animation: blink 1.1s step-end infinite;
+    }
+    @keyframes blink { 50% { opacity: 0; } }
+
+    .header-status {
+      margin-left: auto;
+      font-size: 0.62rem;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+    }
+    .header-status .dot {
+      display: inline-block;
+      width: 6px; height: 6px;
+      border-radius: 50%;
+      background: var(--accent);
+      margin-right: 0.35rem;
+      animation: blink 2s ease-in-out infinite;
+    }
+
+    /* === Sidebar === */
+    .sidebar {
+      background: var(--surface);
+      border-right: 1px solid var(--border);
+      padding: 1.1rem 1rem;
+      overflow-y: auto;
+      max-height: calc(100vh - 52px);
+      position: sticky;
+      top: 52px;
+    }
+
+    .filter-label {
+      font-size: 0.6rem;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      color: var(--muted);
+      margin-bottom: 0.45rem;
+      font-weight: 700;
+    }
+    .filter-label::before { content: "# "; color: var(--accent); }
+
+    .filter-section { margin-bottom: 1.4rem; }
+
+    .search-input {
+      width: 100%;
+      font-family: 'Space Mono', monospace;
+      font-size: 0.75rem;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 0.4rem 0.6rem;
+      outline: none;
+      border-radius: 1px;
+    }
+    .search-input::placeholder { color: var(--dim); }
+    .search-input:focus { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(0,230,118,0.12); }
+
+    .chip-group { display: flex; flex-wrap: wrap; gap: 0.3rem; }
+    .chip {
+      font-family: 'Space Mono', monospace;
+      font-size: 0.6rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      padding: 0.18rem 0.5rem;
+      border: 1px solid var(--dim);
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+      border-radius: 1px;
+      transition: all 0.12s;
+    }
+    .chip:hover { border-color: var(--accent); color: var(--accent); }
+    .chip.active {
+      background: rgba(0,230,118,0.12);
+      border-color: var(--accent);
+      color: var(--accent2);
+    }
+
+    .venue-list { display: flex; flex-direction: column; gap: 0.35rem; }
+    .venue-row {
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+      font-size: 0.7rem;
+      color: var(--muted);
+      cursor: pointer;
+    }
+    .venue-row::before { content: "> "; color: var(--dim); }
+    .venue-dot {
+      width: 6px; height: 6px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+
+    /* === Calendar === */
+    .calendar-area {
+      padding: 1.1rem 1.25rem;
+      background: var(--bg);
+    }
+
+    .fc {
+      --fc-border-color: var(--border);
+      --fc-button-bg-color: var(--surface2);
+      --fc-button-border-color: var(--border);
+      --fc-button-hover-bg-color: rgba(0,230,118,0.15);
+      --fc-button-hover-border-color: var(--accent);
+      --fc-button-active-bg-color: rgba(0,230,118,0.2);
+      --fc-button-active-border-color: var(--accent);
+      --fc-today-bg-color: rgba(0,230,118,0.05);
+      --fc-page-bg-color: var(--surface);
+      --fc-list-event-hover-bg-color: var(--surface2);
+      font-family: 'Space Mono', monospace;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 2px;
+    }
+
+    .fc .fc-toolbar-title {
+      font-size: 1rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--accent);
+    }
+    .fc .fc-toolbar-title::before { content: "$ "; opacity: 0.4; }
+
+    .fc .fc-button {
+      font-family: 'Space Mono', monospace;
+      font-size: 0.6rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      border-radius: 1px;
+      color: var(--text);
+    }
+
+    .fc .fc-col-header-cell-cushion {
+      font-size: 0.62rem;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: var(--muted);
+      text-decoration: none;
+    }
+
+    .fc .fc-daygrid-day-number {
+      font-size: 0.7rem;
+      color: var(--muted);
+      text-decoration: none;
+    }
+
+    .fc .fc-day-today .fc-daygrid-day-number {
+      color: var(--accent);
+      font-weight: 700;
+    }
+
+    .fc .fc-list-day-cushion {
+      background: var(--surface2) !important;
+    }
+    .fc .fc-list-day-text,
+    .fc .fc-list-day-side-text {
+      color: var(--accent);
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      text-decoration: none;
+    }
+
+    .ev {
+      display: flex;
+      flex-direction: column;
+      padding: 2px 4px;
+      overflow: hidden;
+    }
+    .ev-title {
+      font-size: 0.67rem;
+      font-weight: 700;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      color: #fff;
+    }
+    .ev-venue {
+      font-size: 0.56rem;
+      color: rgba(255,255,255,0.6);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+  </style>
+</head>
+<body>
+<div class="layout">
+  <header>
+    <span class="prompt-prefix">$</span>
+    <h1>triangle-shows<span class="cursor"></span></h1>
+    <span class="header-status">
+      <span class="dot"></span>live · 631 events · 15 venues
+      &nbsp;&nbsp;|&nbsp;&nbsp;Mockup 3 — Terminal
+    </span>
+  </header>
+
+  <aside class="sidebar">
+    <div class="filter-section">
+      <input class="search-input" type="text" placeholder="grep artists...">
+    </div>
+
+    <div class="filter-section">
+      <div class="filter-label">City</div>
+      <div class="chip-group">
+        <button class="chip active">Raleigh</button>
+        <button class="chip">Durham</button>
+        <button class="chip active">Chapel Hill</button>
+        <button class="chip">Carrboro</button>
+        <button class="chip">Saxapahaw</button>
+      </div>
+    </div>
+
+    <div class="filter-section">
+      <div class="filter-label">Size</div>
+      <div class="chip-group">
+        <button class="chip">Intimate</button>
+        <button class="chip active">Club</button>
+        <button class="chip">Theater</button>
+        <button class="chip">Amphitheater</button>
+      </div>
+    </div>
+
+    <div class="filter-section">
+      <div class="filter-label">Genre</div>
+      <div class="chip-group">
+        <button class="chip">Rock</button>
+        <button class="chip active">Indie</button>
+        <button class="chip">Country</button>
+        <button class="chip">Hip-Hop</button>
+        <button class="chip">Jazz</button>
+        <button class="chip">Electronic</button>
+      </div>
+    </div>
+
+    <div class="filter-section">
+      <div class="filter-label">Venues</div>
+      <div class="venue-list">
+        <div class="venue-row"><span class="venue-dot" style="background:#e85d04"></span>Red Hat Amphitheater</div>
+        <div class="venue-row"><span class="venue-dot" style="background:#7209b7"></span>DPAC</div>
+        <div class="venue-row"><span class="venue-dot" style="background:#2d6a4f"></span>Cat's Cradle</div>
+        <div class="venue-row"><span class="venue-dot" style="background:#e63946"></span>The Ritz</div>
+        <div class="venue-row"><span class="venue-dot" style="background:#457b9d"></span>Motorco Music Hall</div>
+        <div class="venue-row"><span class="venue-dot" style="background:#d946ef"></span>Haw River Ballroom</div>
+        <div class="venue-row"><span class="venue-dot" style="background:#f4a261"></span>Local 506</div>
+        <div class="venue-row"><span class="venue-dot" style="background:#06b6d4"></span>Lincoln Theatre</div>
+        <div class="venue-row"><span class="venue-dot" style="background:#84cc16"></span>The Pinhook</div>
+        <div class="venue-row"><span class="venue-dot" style="background:#f59e0b"></span>Koka Booth Amphitheatre</div>
+      </div>
+    </div>
+  </aside>
+
+  <main class="calendar-area">
+    <div id="calendar"></div>
+  </main>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.15/index.global.min.js"></script>
+<script>
+const VENUES = [
+  { name: "Red Hat Amphitheater", color: "#e85d04" },
+  { name: "DPAC", color: "#7209b7" },
+  { name: "Cat's Cradle", color: "#2d6a4f" },
+  { name: "The Ritz", color: "#e63946" },
+  { name: "Motorco Music Hall", color: "#457b9d" },
+  { name: "Haw River Ballroom", color: "#d946ef" },
+  { name: "Local 506", color: "#f4a261" },
+  { name: "Lincoln Theatre", color: "#06b6d4" },
+];
+const EVENTS = [
+  { title:"Hozier", date:"2026-02-27", venue:"Red Hat Amphitheater" },
+  { title:"boygenius", date:"2026-02-28", venue:"DPAC" },
+  { title:"Wednesday", date:"2026-03-01", venue:"Cat's Cradle" },
+  { title:"Waxahatchee", date:"2026-03-01", venue:"Motorco Music Hall" },
+  { title:"Indigo De Souza", date:"2026-03-03", venue:"The Ritz" },
+  { title:"Angel Olsen", date:"2026-03-05", venue:"Lincoln Theatre" },
+  { title:"Turnpike Troubadours", date:"2026-03-06", venue:"Red Hat Amphitheater" },
+  { title:"Mdou Moctar", date:"2026-03-07", venue:"Cat's Cradle" },
+  { title:"Amythyst Kiah", date:"2026-03-07", venue:"Haw River Ballroom" },
+  { title:"King Gizzard", date:"2026-03-08", venue:"The Ritz" },
+  { title:"Yaya Bey", date:"2026-03-10", venue:"Local 506" },
+  { title:"Trampled by Turtles", date:"2026-03-11", venue:"DPAC" },
+  { title:"Deerhoof", date:"2026-03-12", venue:"Motorco Music Hall" },
+  { title:"Caroline Polachek", date:"2026-03-13", venue:"Red Hat Amphitheater" },
+  { title:"MUNA", date:"2026-03-15", venue:"Lincoln Theatre" },
+  { title:"Samia", date:"2026-03-15", venue:"Local 506" },
+  { title:"Built to Spill", date:"2026-03-17", venue:"Cat's Cradle" },
+  { title:"Jeff Tweedy", date:"2026-03-20", venue:"DPAC" },
+  { title:"Weyes Blood", date:"2026-03-21", venue:"Lincoln Theatre" },
+  { title:"Soccer Mommy", date:"2026-03-25", venue:"The Ritz" },
+  { title:"Adrianne Lenker", date:"2026-03-26", venue:"Haw River Ballroom" },
+  { title:"Gillian Welch", date:"2026-03-29", venue:"Red Hat Amphitheater" },
+];
+function venueColor(n) { const v = VENUES.find(v=>v.name===n); return v?v.color:"#888"; }
+const fcEvents = EVENTS.map(e => ({
+  title: e.title, start: e.date, allDay: true,
+  backgroundColor: venueColor(e.venue), borderColor: venueColor(e.venue), textColor: "#fff",
+  extendedProps: { venue_name: e.venue },
+}));
+document.addEventListener("DOMContentLoaded", () => {
+  new FullCalendar.Calendar(document.getElementById("calendar"), {
+    initialView: "dayGridMonth", initialDate: "2026-02-26",
+    headerToolbar: { left:"prev,next today", center:"title", right:"dayGridMonth,listMonth" },
+    height: "auto", fixedWeekCount: false, events: fcEvents,
+    eventContent: function(arg) {
+      const p = arg.event.extendedProps;
+      return { html: `<div class="ev"><span class="ev-title">${arg.event.title}</span><span class="ev-venue">${p.venue_name}</span></div>` };
+    },
+  }).render();
+});
+</script>
+</body>
+</html>

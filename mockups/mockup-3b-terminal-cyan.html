@@ -1,0 +1,665 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Triangle Shows — Terminal Cyan</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Mono:ital,wght@0,400;0,700;1,400;1,700&display=swap" rel="stylesheet" />
+  <link href="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.15/index.global.min.css" rel="stylesheet" />
+  <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.15/index.global.min.js"></script>
+
+  <style>
+    /* ─── Reset & Base ─────────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:       #070d14;
+      --surface:  #0a1220;
+      --surface2: #0d1828;
+      --border:   #0f2035;
+      --border2:  #1a3050;
+      --text:     #b8d4e8;
+      --muted:    #4a7a9b;
+      --accent:   #00cfcf;
+      --accent2:  #40efef;
+      --dim:      #1a3050;
+      --dimtext:  #2a5070;
+    }
+
+    html, body {
+      height: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Space Mono', monospace;
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { color: var(--accent2); text-decoration: underline; }
+
+    /* ─── Layout ───────────────────────────────────────────────────── */
+    .app-wrapper {
+      display: flex;
+      flex-direction: column;
+      min-height: 100vh;
+    }
+
+    /* ─── Header ────────────────────────────────────────────────────── */
+    .app-header {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border2);
+      display: flex;
+      align-items: stretch;
+      min-height: 72px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    /* Cyan left accent bar */
+    .header-accent-bar {
+      width: 8px;
+      flex-shrink: 0;
+      background: var(--accent);
+    }
+
+    .header-content {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 14px 24px;
+    }
+
+    .header-left {}
+
+    .header-title {
+      font-family: 'Space Mono', monospace;
+      font-size: 26px;
+      font-weight: 700;
+      color: #ffffff;
+      letter-spacing: 0.08em;
+      line-height: 1;
+      text-transform: uppercase;
+    }
+
+    .header-tagline {
+      font-size: 9px;
+      letter-spacing: 0.3em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-top: 5px;
+      font-variant: small-caps;
+    }
+
+    .header-right {}
+
+    .event-count {
+      font-family: 'Space Mono', monospace;
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--accent);
+      letter-spacing: 0.1em;
+      white-space: nowrap;
+    }
+
+    .event-count .bracket {
+      color: var(--accent2);
+    }
+
+    /* ─── Body ──────────────────────────────────────────────────────── */
+    .app-body {
+      display: flex;
+      flex: 1;
+      overflow: hidden;
+    }
+
+    /* ─── Sidebar ───────────────────────────────────────────────────── */
+    .sidebar {
+      width: 220px;
+      flex-shrink: 0;
+      background: var(--surface);
+      border-right: 1px solid var(--border2);
+      overflow-y: auto;
+      padding: 18px 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 22px;
+    }
+
+    .sidebar::-webkit-scrollbar { width: 4px; }
+    .sidebar::-webkit-scrollbar-track { background: var(--bg); }
+    .sidebar::-webkit-scrollbar-thumb { background: var(--dim); border-radius: 2px; }
+
+    .sidebar-section-label {
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: 0.15em;
+      color: var(--accent);
+      margin-bottom: 8px;
+      font-family: 'Space Mono', monospace;
+      padding-bottom: 5px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    /* Filter chips */
+    .filter-chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 5px;
+    }
+
+    .chip {
+      font-family: 'Space Mono', monospace;
+      font-size: 9px;
+      padding: 3px 8px;
+      border: 1px solid var(--border2);
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+      border-radius: 2px;
+      letter-spacing: 0.05em;
+      transition: all 0.15s;
+    }
+
+    .chip:hover {
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+
+    .chip.active {
+      border-color: var(--accent);
+      background: var(--accent);
+      color: var(--bg);
+      font-weight: 700;
+    }
+
+    /* Venue list */
+    .venue-list {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .venue-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 10px;
+      color: var(--text);
+      cursor: pointer;
+      padding: 2px 0;
+      transition: color 0.15s;
+    }
+
+    .venue-item:hover { color: var(--accent2); }
+
+    .venue-dot {
+      width: 8px;
+      height: 8px;
+      flex-shrink: 0;
+      border-radius: 50%;
+    }
+
+    .venue-name {
+      font-size: 10px;
+      line-height: 1.3;
+    }
+
+    /* Blogroll */
+    .blogroll-list {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+    }
+
+    .blogroll-list a {
+      font-size: 10px;
+      color: var(--muted);
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      transition: color 0.15s;
+    }
+
+    .blogroll-list a::before {
+      content: '→';
+      color: var(--dimtext);
+      font-size: 9px;
+    }
+
+    .blogroll-list a:hover {
+      color: var(--accent2);
+      text-decoration: none;
+    }
+
+    .blogroll-list a:hover::before {
+      color: var(--accent);
+    }
+
+    /* Ko-fi */
+    .kofi-section p {
+      font-size: 10px;
+      color: var(--muted);
+      margin-bottom: 8px;
+      line-height: 1.5;
+    }
+
+    .kofi-btn {
+      display: inline-block;
+      font-family: 'Space Mono', monospace;
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      padding: 6px 12px;
+      background: transparent;
+      color: var(--accent);
+      border: 1px solid var(--accent);
+      cursor: pointer;
+      border-radius: 2px;
+      transition: all 0.15s;
+      text-decoration: none;
+    }
+
+    .kofi-btn:hover {
+      background: var(--accent);
+      color: var(--bg);
+      text-decoration: none;
+    }
+
+    /* ─── Calendar Area ──────────────────────────────────────────────── */
+    .calendar-area {
+      flex: 1;
+      padding: 18px;
+      overflow: auto;
+      background: var(--bg);
+    }
+
+    /* ─── FullCalendar Overrides ─────────────────────────────────────── */
+    #calendar {
+      font-family: 'Space Mono', monospace !important;
+    }
+
+    /* Toolbar */
+    .fc .fc-toolbar {
+      margin-bottom: 12px;
+      padding-bottom: 10px;
+      border-bottom: 1px solid var(--border2);
+    }
+
+    .fc .fc-toolbar-title {
+      font-family: 'Space Mono', monospace !important;
+      font-size: 15px !important;
+      color: var(--text) !important;
+      letter-spacing: 0.08em !important;
+      font-weight: 700 !important;
+    }
+
+    .fc .fc-button {
+      font-family: 'Space Mono', monospace !important;
+      font-size: 10px !important;
+      font-weight: 700 !important;
+      letter-spacing: 0.1em !important;
+      text-transform: uppercase !important;
+      background: var(--surface2) !important;
+      border: 1px solid var(--border2) !important;
+      color: var(--muted) !important;
+      border-radius: 2px !important;
+      padding: 4px 10px !important;
+      box-shadow: none !important;
+      transition: all 0.15s !important;
+    }
+
+    .fc .fc-button:hover {
+      background: var(--surface) !important;
+      border-color: var(--accent) !important;
+      color: var(--accent) !important;
+    }
+
+    .fc .fc-button-active,
+    .fc .fc-button:active {
+      background: rgba(0, 207, 207, 0.12) !important;
+      border-color: var(--accent) !important;
+      color: var(--accent) !important;
+    }
+
+    .fc .fc-button:focus {
+      box-shadow: 0 0 0 2px rgba(0, 207, 207, 0.2) !important;
+    }
+
+    /* Table structure */
+    .fc table { border-collapse: collapse; }
+
+    .fc .fc-scrollgrid {
+      border: 1px solid var(--border2) !important;
+      border-radius: 2px;
+      background: var(--surface);
+    }
+
+    .fc .fc-scrollgrid-section > td,
+    .fc .fc-scrollgrid-section > th {
+      border: none !important;
+    }
+
+    /* Column headers — cyan */
+    .fc .fc-col-header {
+      background: var(--surface2);
+      border-bottom: 1px solid var(--accent) !important;
+    }
+
+    .fc .fc-col-header-cell {
+      border-bottom: 1px solid var(--accent) !important;
+      border-right: 1px solid var(--border2) !important;
+      padding: 7px 4px !important;
+    }
+
+    .fc .fc-col-header-cell-cushion {
+      font-family: 'Space Mono', monospace !important;
+      font-size: 9px !important;
+      font-weight: 700 !important;
+      letter-spacing: 0.25em !important;
+      text-transform: uppercase !important;
+      color: var(--accent) !important;
+      padding: 0 !important;
+    }
+
+    /* Day cells */
+    .fc .fc-daygrid-day {
+      background: var(--surface) !important;
+      border-right: 1px solid var(--border) !important;
+      border-bottom: 1px solid var(--border) !important;
+    }
+
+    .fc .fc-daygrid-day:hover {
+      background: var(--surface2) !important;
+    }
+
+    .fc .fc-day-other {
+      background: var(--bg) !important;
+    }
+
+    .fc .fc-day-other .fc-daygrid-day-number {
+      color: var(--dimtext) !important;
+    }
+
+    .fc .fc-daygrid-day-number {
+      font-family: 'Space Mono', monospace !important;
+      font-size: 10px !important;
+      color: var(--muted) !important;
+      padding: 4px 6px !important;
+    }
+
+    /* Today — subtle cyan tint */
+    .fc .fc-day-today {
+      background: rgba(0, 207, 207, 0.05) !important;
+    }
+
+    .fc .fc-day-today .fc-daygrid-day-number {
+      color: var(--accent) !important;
+      font-weight: 700 !important;
+    }
+
+    /* Events */
+    .fc .fc-daygrid-event {
+      border-radius: 1px !important;
+      border: none !important;
+      margin-bottom: 2px !important;
+      padding: 0 !important;
+    }
+
+    .fc .fc-event { cursor: pointer; }
+
+    .fc .fc-event-main {
+      padding: 2px 5px !important;
+    }
+
+    /* More link */
+    .fc .fc-daygrid-more-link {
+      font-family: 'Space Mono', monospace !important;
+      font-size: 9px !important;
+      color: var(--muted) !important;
+    }
+
+    .fc .fc-daygrid-more-link:hover {
+      color: var(--accent) !important;
+    }
+
+    /* Popover */
+    .fc .fc-popover {
+      background: var(--surface2) !important;
+      border: 1px solid var(--accent) !important;
+      border-radius: 2px !important;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.6), 0 0 12px rgba(0, 207, 207, 0.15) !important;
+    }
+
+    .fc .fc-popover-header {
+      background: var(--surface) !important;
+      color: var(--accent) !important;
+      font-family: 'Space Mono', monospace !important;
+      font-size: 10px !important;
+      padding: 6px 10px !important;
+      border-bottom: 1px solid var(--accent) !important;
+    }
+
+    .fc .fc-popover-close {
+      color: var(--muted) !important;
+    }
+
+    /* Scrollgrid border fix */
+    .fc .fc-scrollgrid td,
+    .fc .fc-scrollgrid th {
+      border-color: var(--border) !important;
+    }
+
+    /* Custom event content */
+    .ev-inner {
+      font-family: 'Space Mono', monospace;
+      font-size: 9px;
+      line-height: 1.3;
+      padding: 2px 5px 3px;
+    }
+
+    .ev-title {
+      font-weight: 700;
+      color: #fff;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      font-size: 9px;
+    }
+
+    .ev-venue {
+      color: rgba(255,255,255,0.6);
+      font-size: 8px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      margin-top: 0px;
+    }
+  </style>
+</head>
+<body>
+<div class="app-wrapper">
+
+  <!-- ── Header ──────────────────────────────────────────────── -->
+  <header class="app-header">
+    <div class="header-accent-bar"></div>
+    <div class="header-content">
+      <div class="header-left">
+        <div class="header-title">Triangle Shows</div>
+        <div class="header-tagline">Live Music &middot; Raleigh &middot; Durham &middot; Chapel Hill</div>
+      </div>
+      <div class="header-right">
+        <div class="event-count">
+          <span class="bracket">[</span>
+          <span id="eventCountDisplay">21 EVENTS</span>
+          <span class="bracket">]</span>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- ── Body ────────────────────────────────────────────────── -->
+  <div class="app-body">
+
+    <!-- Sidebar -->
+    <aside class="sidebar">
+
+      <!-- View filter -->
+      <div>
+        <div class="sidebar-section-label">// View</div>
+        <div class="filter-chips">
+          <button class="chip active" data-view="dayGridMonth">Month</button>
+          <button class="chip" data-view="listMonth">List</button>
+          <button class="chip" data-view="listWeek">Week</button>
+        </div>
+      </div>
+
+      <!-- Venues -->
+      <div>
+        <div class="sidebar-section-label">// Venues</div>
+        <div class="venue-list" id="venueList"></div>
+      </div>
+
+      <!-- Blogroll -->
+      <div>
+        <div class="sidebar-section-label">// External Links</div>
+        <div class="blogroll-list">
+          <a href="#">Fuzzy Needle</a>
+          <a href="#">Perfect Lovers Cafe</a>
+          <a href="#">Weirs</a>
+          <a href="#">Sluice</a>
+          <a href="#">Field Guide Newsletter</a>
+        </div>
+      </div>
+
+      <!-- Ko-fi -->
+      <div class="kofi-section">
+        <div class="sidebar-section-label">// Support</div>
+        <p>Keeps the scraper alive:</p>
+        <a href="#" class="kofi-btn">Ko-fi &rarr;</a>
+      </div>
+
+    </aside>
+
+    <!-- Calendar -->
+    <main class="calendar-area">
+      <div id="calendar"></div>
+    </main>
+
+  </div>
+</div>
+
+<script>
+  /* ─── Data ───────────────────────────────────────────────────────── */
+  const VENUES = [
+    { name: "Red Hat Amphitheater", color: "#e85d04" },
+    { name: "DPAC",                 color: "#7209b7" },
+    { name: "Cat's Cradle",         color: "#2d6a4f" },
+    { name: "The Ritz",             color: "#e63946" },
+    { name: "Motorco Music Hall",   color: "#457b9d" },
+    { name: "Haw River Ballroom",   color: "#d946ef" },
+    { name: "Local 506",            color: "#f4a261" },
+    { name: "Lincoln Theatre",      color: "#06b6d4" },
+  ];
+
+  const EVENTS = [
+    { title:"Hozier",               date:"2026-02-27", venue:"Red Hat Amphitheater" },
+    { title:"boygenius",            date:"2026-02-28", venue:"DPAC" },
+    { title:"Wednesday",            date:"2026-03-01", venue:"Cat's Cradle" },
+    { title:"Waxahatchee",          date:"2026-03-01", venue:"Motorco Music Hall" },
+    { title:"Indigo De Souza",      date:"2026-03-03", venue:"The Ritz" },
+    { title:"Angel Olsen",          date:"2026-03-05", venue:"Lincoln Theatre" },
+    { title:"Turnpike Troubadours", date:"2026-03-06", venue:"Red Hat Amphitheater" },
+    { title:"Mdou Moctar",          date:"2026-03-07", venue:"Cat's Cradle" },
+    { title:"King Gizzard",         date:"2026-03-08", venue:"The Ritz" },
+    { title:"Yaya Bey",             date:"2026-03-10", venue:"Local 506" },
+    { title:"Trampled by Turtles",  date:"2026-03-11", venue:"DPAC" },
+    { title:"Deerhoof",             date:"2026-03-12", venue:"Motorco Music Hall" },
+    { title:"Caroline Polachek",    date:"2026-03-13", venue:"Red Hat Amphitheater" },
+    { title:"MUNA",                 date:"2026-03-15", venue:"Lincoln Theatre" },
+    { title:"Samia",                date:"2026-03-15", venue:"Local 506" },
+    { title:"Built to Spill",       date:"2026-03-17", venue:"Cat's Cradle" },
+    { title:"Jeff Tweedy",          date:"2026-03-20", venue:"DPAC" },
+    { title:"Weyes Blood",          date:"2026-03-21", venue:"Lincoln Theatre" },
+    { title:"Soccer Mommy",         date:"2026-03-25", venue:"The Ritz" },
+    { title:"Adrianne Lenker",      date:"2026-03-26", venue:"Haw River Ballroom" },
+    { title:"Gillian Welch",        date:"2026-03-29", venue:"Red Hat Amphitheater" },
+  ];
+
+  /* ─── Venue lookup ───────────────────────────────────────────────── */
+  const venueMap = {};
+  VENUES.forEach(v => { venueMap[v.name] = v.color; });
+
+  /* ─── Event count display ────────────────────────────────────────── */
+  document.getElementById('eventCountDisplay').textContent = EVENTS.length + ' EVENTS';
+
+  /* ─── Build sidebar venue list ───────────────────────────────────── */
+  const venueListEl = document.getElementById('venueList');
+  VENUES.forEach(v => {
+    const item = document.createElement('div');
+    item.className = 'venue-item';
+    item.innerHTML = `
+      <span class="venue-dot" style="background:${v.color}"></span>
+      <span class="venue-name">${v.name}</span>
+    `;
+    venueListEl.appendChild(item);
+  });
+
+  /* ─── Build FC events ────────────────────────────────────────────── */
+  const fcEvents = EVENTS.map(e => ({
+    title: e.title,
+    date: e.date,
+    allDay: true,
+    extendedProps: { venue: e.venue },
+    backgroundColor: venueMap[e.venue] || '#888',
+    borderColor: 'transparent',
+    textColor: '#fff',
+  }));
+
+  /* ─── FullCalendar init ──────────────────────────────────────────── */
+  document.addEventListener('DOMContentLoaded', () => {
+    const calEl = document.getElementById('calendar');
+
+    const calendar = new FullCalendar.Calendar(calEl, {
+      initialView: 'dayGridMonth',
+      initialDate: '2026-02-26',
+      fixedWeekCount: false,
+      headerToolbar: {
+        left: 'prev,next today',
+        center: 'title',
+        right: '',
+      },
+      events: fcEvents,
+      eventContent: function(arg) {
+        const venue = arg.event.extendedProps.venue;
+        const html = `<div class="ev-inner">
+          <div class="ev-title">${arg.event.title}</div>
+          <div class="ev-venue">${venue}</div>
+        </div>`;
+        return { html };
+      },
+      eventDidMount: function(info) {
+        info.el.style.backgroundColor = info.event.backgroundColor;
+        info.el.style.border = 'none';
+        info.el.style.borderRadius = '1px';
+      },
+    });
+
+    calendar.render();
+
+    /* ─── View chip switcher ─── */
+    document.querySelectorAll('.chip[data-view]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.chip[data-view]').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        calendar.changeView(btn.dataset.view);
+      });
+    });
+  });
+</script>
+</body>
+</html>

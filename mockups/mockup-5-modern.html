@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mockup 5 — Modern</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.15/index.global.min.css">
+  <style>
+    /* === THEME: MODERN ===
+       Clean light UI with bold typography and a vivid gradient accent.
+       Contemporary SaaS / product feel — like a polished web app. */
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:       #f6f7fb;
+      --surface:  #ffffff;
+      --border:   #e4e7ef;
+      --text:     #111827;
+      --muted:    #6b7280;
+      --accent:   #6366f1;
+      --accent2:  #8b5cf6;
+      --accent-bg:#eef2ff;
+      --sidebar:  260px;
+      --radius:   10px;
+    }
+
+    body {
+      font-family: 'Inter', system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: var(--sidebar) 1fr;
+      grid-template-rows: auto 1fr;
+      min-height: 100vh;
+    }
+
+    /* === Header === */
+    header {
+      grid-column: 1 / -1;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 0.85rem 1.5rem;
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+    }
+
+    .logo-ring {
+      width: 34px; height: 34px;
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+    .logo-ring span {
+      color: #fff;
+      font-size: 0.85rem;
+      font-weight: 800;
+    }
+
+    header h1 {
+      font-size: 1.1rem;
+      font-weight: 800;
+      color: var(--text);
+      letter-spacing: -0.03em;
+    }
+    header .tagline {
+      font-size: 0.78rem;
+      color: var(--muted);
+      margin-left: 0.5rem;
+    }
+
+    .header-pills {
+      margin-left: auto;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    .pill {
+      font-size: 0.7rem;
+      font-weight: 600;
+      padding: 0.25rem 0.65rem;
+      border-radius: 100px;
+      background: var(--accent-bg);
+      color: var(--accent);
+    }
+    .pill-mock {
+      font-size: 0.65rem;
+      color: var(--muted);
+    }
+
+    /* === Sidebar === */
+    .sidebar {
+      background: var(--surface);
+      border-right: 1px solid var(--border);
+      padding: 1.1rem;
+      overflow-y: auto;
+      max-height: calc(100vh - 60px);
+      position: sticky;
+      top: 60px;
+    }
+
+    .filter-label {
+      font-size: 0.68rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--muted);
+      margin-bottom: 0.5rem;
+    }
+
+    .filter-section { margin-bottom: 1.4rem; }
+
+    .search-input {
+      width: 100%;
+      font-family: 'Inter', sans-serif;
+      font-size: 0.82rem;
+      border: 1.5px solid var(--border);
+      padding: 0.45rem 0.75rem;
+      border-radius: 8px;
+      color: var(--text);
+      background: var(--bg);
+      outline: none;
+      transition: border-color 0.15s, box-shadow 0.15s;
+    }
+    .search-input::placeholder { color: var(--muted); }
+    .search-input:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgba(99,102,241,0.12);
+    }
+
+    .chip-group { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+    .chip {
+      font-family: 'Inter', sans-serif;
+      font-size: 0.72rem;
+      font-weight: 500;
+      padding: 0.22rem 0.65rem;
+      border: 1.5px solid var(--border);
+      background: var(--surface);
+      color: var(--muted);
+      cursor: pointer;
+      border-radius: 100px;
+      transition: all 0.12s;
+    }
+    .chip:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-bg); }
+    .chip.active { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+
+    .venue-list { display: flex; flex-direction: column; gap: 0.4rem; }
+    .venue-row {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      font-size: 0.78rem;
+      color: var(--text);
+      font-weight: 500;
+    }
+    .venue-swatch {
+      width: 10px; height: 10px;
+      border-radius: 3px;
+      flex-shrink: 0;
+    }
+
+    /* === Calendar === */
+    .calendar-area {
+      padding: 1.1rem 1.25rem;
+    }
+
+    .fc {
+      --fc-border-color: var(--border);
+      --fc-button-bg-color: var(--surface);
+      --fc-button-border-color: var(--border);
+      --fc-button-text-color: var(--text);
+      --fc-button-hover-bg-color: var(--accent-bg);
+      --fc-button-hover-border-color: var(--accent);
+      --fc-button-active-bg-color: var(--accent);
+      --fc-button-active-border-color: var(--accent);
+      --fc-today-bg-color: rgba(99,102,241,0.06);
+      --fc-page-bg-color: var(--surface);
+      --fc-list-event-hover-bg-color: var(--bg);
+      font-family: 'Inter', sans-serif;
+      background: var(--surface);
+      border-radius: var(--radius);
+      border: 1px solid var(--border);
+      box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+    }
+
+    .fc .fc-toolbar-title {
+      font-size: 1.05rem;
+      font-weight: 800;
+      letter-spacing: -0.03em;
+      color: var(--text);
+    }
+
+    .fc .fc-button {
+      font-family: 'Inter', sans-serif;
+      font-size: 0.75rem;
+      font-weight: 600;
+      border-radius: 7px;
+      color: var(--text);
+      padding: 0.32rem 0.75rem;
+      box-shadow: none !important;
+    }
+    .fc .fc-button:hover { color: var(--accent); }
+    .fc .fc-button-active { color: #fff !important; }
+
+    .fc .fc-col-header-cell-cushion {
+      font-size: 0.7rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--muted);
+      text-decoration: none;
+    }
+
+    .fc .fc-daygrid-day-number {
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: var(--text);
+      text-decoration: none;
+    }
+
+    .fc .fc-day-today .fc-daygrid-day-number {
+      background: var(--accent);
+      color: #fff;
+      border-radius: 50%;
+      width: 24px; height: 24px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.75rem;
+    }
+
+    .fc .fc-daygrid-event { border-radius: 5px !important; }
+
+    .fc .fc-list-day-cushion {
+      background: var(--bg) !important;
+    }
+    .fc .fc-list-day-text,
+    .fc .fc-list-day-side-text {
+      font-weight: 700;
+      font-size: 0.8rem;
+      text-decoration: none;
+      color: var(--text);
+    }
+
+    .ev {
+      display: flex;
+      flex-direction: column;
+      padding: 2px 5px;
+      overflow: hidden;
+    }
+    .ev-title {
+      font-size: 0.7rem;
+      font-weight: 700;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      color: #fff;
+      letter-spacing: -0.01em;
+    }
+    .ev-venue {
+      font-size: 0.58rem;
+      color: rgba(255,255,255,0.72);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+  </style>
+</head>
+<body>
+<div class="layout">
+  <header>
+    <div class="logo-ring"><span>T</span></div>
+    <h1>Triangle Shows</h1>
+    <span class="tagline">Live music in the Triangle</span>
+    <div class="header-pills">
+      <span class="pill">631 events</span>
+      <span class="pill-mock">Mockup 5 — Modern</span>
+    </div>
+  </header>
+
+  <aside class="sidebar">
+    <div class="filter-section">
+      <input class="search-input" type="text" placeholder="Search artists & events...">
+    </div>
+
+    <div class="filter-section">
+      <div class="filter-label">City</div>
+      <div class="chip-group">
+        <button class="chip active">Raleigh</button>
+        <button class="chip">Durham</button>
+        <button class="chip active">Chapel Hill</button>
+        <button class="chip">Carrboro</button>
+        <button class="chip">Saxapahaw</button>
+      </div>
+    </div>
+
+    <div class="filter-section">
+      <div class="filter-label">Venue Size</div>
+      <div class="chip-group">
+        <button class="chip">Intimate</button>
+        <button class="chip active">Club</button>
+        <button class="chip">Theater</button>
+        <button class="chip">Amphitheater</button>
+      </div>
+    </div>
+
+    <div class="filter-section">
+      <div class="filter-label">Genre</div>
+      <div class="chip-group">
+        <button class="chip">Rock</button>
+        <button class="chip active">Indie</button>
+        <button class="chip">Country</button>
+        <button class="chip">Hip-Hop</button>
+        <button class="chip">Jazz</button>
+        <button class="chip">Electronic</button>
+      </div>
+    </div>
+
+    <div class="filter-section">
+      <div class="filter-label">Venues</div>
+      <div class="venue-list">
+        <div class="venue-row"><span class="venue-swatch" style="background:#e85d04"></span>Red Hat Amphitheater</div>
+        <div class="venue-row"><span class="venue-swatch" style="background:#7209b7"></span>DPAC</div>
+        <div class="venue-row"><span class="venue-swatch" style="background:#2d6a4f"></span>Cat's Cradle</div>
+        <div class="venue-row"><span class="venue-swatch" style="background:#e63946"></span>The Ritz</div>
+        <div class="venue-row"><span class="venue-swatch" style="background:#457b9d"></span>Motorco Music Hall</div>
+        <div class="venue-row"><span class="venue-swatch" style="background:#d946ef"></span>Haw River Ballroom</div>
+        <div class="venue-row"><span class="venue-swatch" style="background:#f4a261"></span>Local 506</div>
+        <div class="venue-row"><span class="venue-swatch" style="background:#06b6d4"></span>Lincoln Theatre</div>
+        <div class="venue-row"><span class="venue-swatch" style="background:#84cc16"></span>The Pinhook</div>
+        <div class="venue-row"><span class="venue-swatch" style="background:#f59e0b"></span>Koka Booth Amphitheatre</div>
+      </div>
+    </div>
+  </aside>
+
+  <main class="calendar-area">
+    <div id="calendar"></div>
+  </main>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.15/index.global.min.js"></script>
+<script>
+const VENUES=[{name:"Red Hat Amphitheater",color:"#e85d04"},{name:"DPAC",color:"#7209b7"},{name:"Cat's Cradle",color:"#2d6a4f"},{name:"The Ritz",color:"#e63946"},{name:"Motorco Music Hall",color:"#457b9d"},{name:"Haw River Ballroom",color:"#d946ef"},{name:"Local 506",color:"#f4a261"},{name:"Lincoln Theatre",color:"#06b6d4"}];
+const EVENTS=[{title:"Hozier",date:"2026-02-27",venue:"Red Hat Amphitheater"},{title:"boygenius",date:"2026-02-28",venue:"DPAC"},{title:"Wednesday",date:"2026-03-01",venue:"Cat's Cradle"},{title:"Waxahatchee",date:"2026-03-01",venue:"Motorco Music Hall"},{title:"Indigo De Souza",date:"2026-03-03",venue:"The Ritz"},{title:"Angel Olsen",date:"2026-03-05",venue:"Lincoln Theatre"},{title:"Turnpike Troubadours",date:"2026-03-06",venue:"Red Hat Amphitheater"},{title:"Mdou Moctar",date:"2026-03-07",venue:"Cat's Cradle"},{title:"Amythyst Kiah",date:"2026-03-07",venue:"Haw River Ballroom"},{title:"King Gizzard",date:"2026-03-08",venue:"The Ritz"},{title:"Yaya Bey",date:"2026-03-10",venue:"Local 506"},{title:"Trampled by Turtles",date:"2026-03-11",venue:"DPAC"},{title:"Deerhoof",date:"2026-03-12",venue:"Motorco Music Hall"},{title:"Caroline Polachek",date:"2026-03-13",venue:"Red Hat Amphitheater"},{title:"MUNA",date:"2026-03-15",venue:"Lincoln Theatre"},{title:"Samia",date:"2026-03-15",venue:"Local 506"},{title:"Built to Spill",date:"2026-03-17",venue:"Cat's Cradle"},{title:"Jeff Tweedy",date:"2026-03-20",venue:"DPAC"},{title:"Weyes Blood",date:"2026-03-21",venue:"Lincoln Theatre"},{title:"Soccer Mommy",date:"2026-03-25",venue:"The Ritz"},{title:"Adrianne Lenker",date:"2026-03-26",venue:"Haw River Ballroom"},{title:"Gillian Welch",date:"2026-03-29",venue:"Red Hat Amphitheater"}];
+function vc(n){const v=VENUES.find(v=>v.name===n);return v?v.color:"#888";}
+const fcEvents=EVENTS.map(e=>({title:e.title,start:e.date,allDay:true,backgroundColor:vc(e.venue),borderColor:vc(e.venue),textColor:"#fff",extendedProps:{venue_name:e.venue}}));
+document.addEventListener("DOMContentLoaded",()=>{
+  new FullCalendar.Calendar(document.getElementById("calendar"),{
+    initialView:"dayGridMonth",initialDate:"2026-02-26",
+    headerToolbar:{left:"prev,next today",center:"title",right:"dayGridMonth,listMonth"},
+    height:"auto",fixedWeekCount:false,events:fcEvents,
+    eventContent:function(arg){const p=arg.event.extendedProps;return{html:`<div class="ev"><span class="ev-title">${arg.event.title}</span><span class="ev-venue">${p.venue_name}</span></div>`};}
+  }).render();
+});
+</script>
+</body>
+</html>

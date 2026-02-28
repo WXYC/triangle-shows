@@ -1,0 +1,414 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mockup 4 — Velvet</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Space+Mono:ital,wght@0,400;0,700;1,700&family=Playfair+Display:ital,wght@0,700;1,700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.15/index.global.min.css">
+  <style>
+    /* === THEME: VELVET ===
+       Deep jewel-tone background, gold accent, Playfair Display headings + Space Mono data.
+       Like a high-end theater program or upscale venue marquee. */
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:      #12082a;
+      --surface: #1a0f38;
+      --surface2:#221445;
+      --border:  #2e1d5c;
+      --border2: #3d2870;
+      --text:    #ede8f8;
+      --muted:   #9080c0;
+      --gold:    #d4a847;
+      --gold2:   #f0c060;
+      --sidebar: 270px;
+    }
+
+    body {
+      font-family: 'Space Mono', monospace;
+      background: var(--bg);
+      color: var(--text);
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: var(--sidebar) 1fr;
+      grid-template-rows: auto 1fr;
+      min-height: 100vh;
+    }
+
+    /* === Header === */
+    header {
+      grid-column: 1 / -1;
+      background: linear-gradient(135deg, #1a0f38 0%, #0d0520 100%);
+      border-bottom: 1px solid var(--border2);
+      padding: 1rem 1.5rem;
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+    }
+
+    .header-mark {
+      width: 36px; height: 36px;
+      border: 2px solid var(--gold);
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+    .header-mark span {
+      font-family: 'Playfair Display', serif;
+      font-size: 1rem;
+      font-weight: 700;
+      font-style: italic;
+      color: var(--gold);
+    }
+
+    .header-text h1 {
+      font-family: 'Playfair Display', serif;
+      font-size: 1.45rem;
+      font-weight: 700;
+      font-style: italic;
+      color: var(--text);
+      letter-spacing: -0.01em;
+      line-height: 1;
+    }
+    .header-text .tagline {
+      font-size: 0.6rem;
+      text-transform: uppercase;
+      letter-spacing: 0.18em;
+      color: var(--gold);
+      margin-top: 0.15rem;
+    }
+
+    .header-right {
+      margin-left: auto;
+      text-align: right;
+    }
+    .event-count {
+      font-size: 1.5rem;
+      font-weight: 700;
+      color: var(--gold);
+      font-family: 'Playfair Display', serif;
+      line-height: 1;
+    }
+    .event-count-label {
+      font-size: 0.58rem;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: var(--muted);
+    }
+
+    /* === Sidebar === */
+    .sidebar {
+      background: var(--surface);
+      border-right: 1px solid var(--border);
+      padding: 1.2rem 1rem;
+      overflow-y: auto;
+      max-height: calc(100vh - 72px);
+      position: sticky;
+      top: 72px;
+    }
+
+    .filter-label {
+      font-size: 0.58rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.16em;
+      color: var(--gold);
+      margin-bottom: 0.5rem;
+      padding-bottom: 0.3rem;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .filter-section { margin-bottom: 1.5rem; }
+
+    .search-input {
+      width: 100%;
+      font-family: 'Space Mono', monospace;
+      font-size: 0.75rem;
+      background: var(--surface2);
+      border: 1px solid var(--border2);
+      color: var(--text);
+      padding: 0.45rem 0.65rem;
+      border-radius: 3px;
+      outline: none;
+    }
+    .search-input::placeholder { color: var(--muted); }
+    .search-input:focus { border-color: var(--gold); }
+
+    .chip-group { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+    .chip {
+      font-family: 'Space Mono', monospace;
+      font-size: 0.6rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      padding: 0.2rem 0.55rem;
+      border: 1px solid var(--border2);
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+      border-radius: 20px;
+      transition: all 0.15s;
+    }
+    .chip:hover { border-color: var(--gold); color: var(--gold); }
+    .chip.active { background: var(--gold); border-color: var(--gold); color: #12082a; }
+
+    .venue-list { display: flex; flex-direction: column; gap: 0.45rem; }
+    .venue-row {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      font-size: 0.72rem;
+      color: var(--muted);
+    }
+    .venue-dot {
+      width: 7px; height: 7px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+
+    /* === Calendar === */
+    .calendar-area {
+      padding: 1.2rem;
+      background: var(--bg);
+    }
+
+    .fc {
+      --fc-border-color: var(--border);
+      --fc-button-bg-color: var(--surface2);
+      --fc-button-border-color: var(--border2);
+      --fc-button-hover-bg-color: var(--gold);
+      --fc-button-hover-border-color: var(--gold);
+      --fc-button-active-bg-color: var(--gold);
+      --fc-button-active-border-color: var(--gold);
+      --fc-today-bg-color: rgba(212,168,71,0.07);
+      --fc-page-bg-color: var(--surface);
+      --fc-list-event-hover-bg-color: var(--surface2);
+      font-family: 'Space Mono', monospace;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+    }
+
+    .fc .fc-toolbar-title {
+      font-family: 'Playfair Display', serif;
+      font-size: 1.2rem;
+      font-weight: 700;
+      font-style: italic;
+      color: var(--text);
+      letter-spacing: -0.01em;
+    }
+
+    .fc .fc-button {
+      font-family: 'Space Mono', monospace;
+      font-size: 0.62rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      border-radius: 3px;
+      color: var(--text);
+    }
+    .fc .fc-button:hover { color: #12082a; }
+    .fc .fc-button-active { color: #12082a !important; }
+
+    .fc .fc-col-header-cell-cushion {
+      font-size: 0.65rem;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: var(--gold);
+      text-decoration: none;
+      opacity: 0.7;
+    }
+
+    .fc .fc-daygrid-day-number {
+      font-size: 0.72rem;
+      color: var(--muted);
+      text-decoration: none;
+    }
+
+    .fc .fc-day-today .fc-daygrid-day-number {
+      color: var(--gold);
+      font-weight: 700;
+    }
+
+    .fc .fc-list-day-cushion {
+      background: var(--surface2) !important;
+    }
+    .fc .fc-list-day-text,
+    .fc .fc-list-day-side-text {
+      font-family: 'Playfair Display', serif;
+      font-style: italic;
+      color: var(--text);
+      text-decoration: none;
+    }
+
+    .ev {
+      display: flex;
+      flex-direction: column;
+      padding: 2px 5px;
+      overflow: hidden;
+    }
+    .ev-title {
+      font-size: 0.68rem;
+      font-weight: 700;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      color: #fff;
+    }
+    .ev-venue {
+      font-size: 0.56rem;
+      color: rgba(255,255,255,0.6);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    /* Decorative gold divider */
+    .gold-rule {
+      height: 1px;
+      background: linear-gradient(to right, transparent, var(--gold), transparent);
+      margin: 0.75rem 0;
+      opacity: 0.4;
+    }
+  </style>
+</head>
+<body>
+<div class="layout">
+  <header>
+    <div class="header-mark"><span>T</span></div>
+    <div class="header-text">
+      <h1>Triangle Shows</h1>
+      <div class="tagline">Live Music · Raleigh · Durham · Chapel Hill</div>
+    </div>
+    <div class="header-right">
+      <div class="event-count">631</div>
+      <div class="event-count-label">upcoming events</div>
+    </div>
+    <span style="margin-left:1.5rem;font-size:0.6rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.1em">Mockup 4 — Velvet</span>
+  </header>
+
+  <aside class="sidebar">
+    <div class="filter-section">
+      <input class="search-input" type="text" placeholder="Search artists & events...">
+    </div>
+
+    <div class="filter-section">
+      <div class="filter-label">City</div>
+      <div class="chip-group">
+        <button class="chip active">Raleigh</button>
+        <button class="chip">Durham</button>
+        <button class="chip active">Chapel Hill</button>
+        <button class="chip">Carrboro</button>
+        <button class="chip">Saxapahaw</button>
+      </div>
+    </div>
+
+    <div class="gold-rule"></div>
+
+    <div class="filter-section">
+      <div class="filter-label">Venue Size</div>
+      <div class="chip-group">
+        <button class="chip">Intimate</button>
+        <button class="chip active">Club</button>
+        <button class="chip">Theater</button>
+        <button class="chip">Amphitheater</button>
+      </div>
+    </div>
+
+    <div class="filter-section">
+      <div class="filter-label">Genre</div>
+      <div class="chip-group">
+        <button class="chip">Rock</button>
+        <button class="chip active">Indie</button>
+        <button class="chip">Country</button>
+        <button class="chip">Hip-Hop</button>
+        <button class="chip">Jazz</button>
+        <button class="chip">Electronic</button>
+      </div>
+    </div>
+
+    <div class="gold-rule"></div>
+
+    <div class="filter-section">
+      <div class="filter-label">Venues</div>
+      <div class="venue-list">
+        <div class="venue-row"><span class="venue-dot" style="background:#e85d04"></span>Red Hat Amphitheater</div>
+        <div class="venue-row"><span class="venue-dot" style="background:#7209b7"></span>DPAC</div>
+        <div class="venue-row"><span class="venue-dot" style="background:#2d6a4f"></span>Cat's Cradle</div>
+        <div class="venue-row"><span class="venue-dot" style="background:#e63946"></span>The Ritz</div>
+        <div class="venue-row"><span class="venue-dot" style="background:#457b9d"></span>Motorco Music Hall</div>
+        <div class="venue-row"><span class="venue-dot" style="background:#d946ef"></span>Haw River Ballroom</div>
+        <div class="venue-row"><span class="venue-dot" style="background:#f4a261"></span>Local 506</div>
+        <div class="venue-row"><span class="venue-dot" style="background:#06b6d4"></span>Lincoln Theatre</div>
+        <div class="venue-row"><span class="venue-dot" style="background:#84cc16"></span>The Pinhook</div>
+        <div class="venue-row"><span class="venue-dot" style="background:#f59e0b"></span>Koka Booth Amphitheatre</div>
+      </div>
+    </div>
+  </aside>
+
+  <main class="calendar-area">
+    <div id="calendar"></div>
+  </main>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.15/index.global.min.js"></script>
+<script>
+const VENUES = [
+  { name: "Red Hat Amphitheater", color: "#e85d04" },
+  { name: "DPAC", color: "#7209b7" },
+  { name: "Cat's Cradle", color: "#2d6a4f" },
+  { name: "The Ritz", color: "#e63946" },
+  { name: "Motorco Music Hall", color: "#457b9d" },
+  { name: "Haw River Ballroom", color: "#d946ef" },
+  { name: "Local 506", color: "#f4a261" },
+  { name: "Lincoln Theatre", color: "#06b6d4" },
+];
+const EVENTS = [
+  { title:"Hozier", date:"2026-02-27", venue:"Red Hat Amphitheater" },
+  { title:"boygenius", date:"2026-02-28", venue:"DPAC" },
+  { title:"Wednesday", date:"2026-03-01", venue:"Cat's Cradle" },
+  { title:"Waxahatchee", date:"2026-03-01", venue:"Motorco Music Hall" },
+  { title:"Indigo De Souza", date:"2026-03-03", venue:"The Ritz" },
+  { title:"Angel Olsen", date:"2026-03-05", venue:"Lincoln Theatre" },
+  { title:"Turnpike Troubadours", date:"2026-03-06", venue:"Red Hat Amphitheater" },
+  { title:"Mdou Moctar", date:"2026-03-07", venue:"Cat's Cradle" },
+  { title:"Amythyst Kiah", date:"2026-03-07", venue:"Haw River Ballroom" },
+  { title:"King Gizzard", date:"2026-03-08", venue:"The Ritz" },
+  { title:"Yaya Bey", date:"2026-03-10", venue:"Local 506" },
+  { title:"Trampled by Turtles", date:"2026-03-11", venue:"DPAC" },
+  { title:"Deerhoof", date:"2026-03-12", venue:"Motorco Music Hall" },
+  { title:"Caroline Polachek", date:"2026-03-13", venue:"Red Hat Amphitheater" },
+  { title:"MUNA", date:"2026-03-15", venue:"Lincoln Theatre" },
+  { title:"Samia", date:"2026-03-15", venue:"Local 506" },
+  { title:"Built to Spill", date:"2026-03-17", venue:"Cat's Cradle" },
+  { title:"Jeff Tweedy", date:"2026-03-20", venue:"DPAC" },
+  { title:"Weyes Blood", date:"2026-03-21", venue:"Lincoln Theatre" },
+  { title:"Soccer Mommy", date:"2026-03-25", venue:"The Ritz" },
+  { title:"Adrianne Lenker", date:"2026-03-26", venue:"Haw River Ballroom" },
+  { title:"Gillian Welch", date:"2026-03-29", venue:"Red Hat Amphitheater" },
+];
+function venueColor(n) { const v=VENUES.find(v=>v.name===n); return v?v.color:"#888"; }
+const fcEvents = EVENTS.map(e => ({
+  title:e.title, start:e.date, allDay:true,
+  backgroundColor:venueColor(e.venue), borderColor:venueColor(e.venue), textColor:"#fff",
+  extendedProps:{venue_name:e.venue},
+}));
+document.addEventListener("DOMContentLoaded", () => {
+  new FullCalendar.Calendar(document.getElementById("calendar"), {
+    initialView:"dayGridMonth", initialDate:"2026-02-26",
+    headerToolbar:{left:"prev,next today",center:"title",right:"dayGridMonth,listMonth"},
+    height:"auto", fixedWeekCount:false, events:fcEvents,
+    eventContent:function(arg){
+      const p=arg.event.extendedProps;
+      return{html:`<div class="ev"><span class="ev-title">${arg.event.title}</span><span class="ev-venue">${p.venue_name}</span></div>`};
+    },
+  }).render();
+});
+</script>
+</body>
+</html>

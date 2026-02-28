@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>triangle-shows.org</title>
+  <meta name="description" content="Live music events across Raleigh, Durham, Chapel Hill, Carrboro, and Cary">
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' fill='%23f0922e'/%3E%3C/svg%3E">
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@900&family=Space+Mono:ital,wght@0,400;0,700;1,400;1,700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.15/index.global.min.css">
+  <link rel="stylesheet" href="/css/styles.css">
+
+  <!-- Google Analytics -->
+  <script async src="https://www.googletagmanager.com/gtag/js?id=G-S37F3PHK0R"></script>
+  <script>
+    window.dataLayer = window.dataLayer || [];
+    function gtag(){dataLayer.push(arguments);}
+    gtag('js', new Date());
+    gtag('config', 'G-S37F3PHK0R');
+  </script>
+</head>
+<body>
+  <div class="layout">
+
+    <!-- Header -->
+    <header class="app-header">
+      <div class="ascii-title">   __       _                   __                __
+  / /______(_)___ _____  ____ _/ /__        _____/ /_  ____ _      _______ ____  _________ _
+ / __/ ___/ / __ `/ __ \/ __ `/ / _ \______/ ___/ __ \/ __ \ | /| / / ___// __ \/ ___/ __ `/
+/ /_/ /  / / /_/ / / / / /_/ / /  __/______\__ / / / / /_/ / |/ |/ /\_  // /_/ / /  / /_/ /
+\__/_/  /_/\__,_/_/ /_/\__, /_/\___/     /____/_/ /_/\____/|__/|__/____(_)____/_/   \__, /
+                      /____/                                                       /____/<span class="cursor"></span></div>
+      <span class="site-title">triangle-shows<span class="cursor"></span></span>
+      <p class="site-subtitle">live music across the triangle on one calendar</p>
+      <div class="header-right">
+        <div class="kofi-wrap">
+          <p class="kofi-pitch">help me pay for this domain</p>
+          <a href="https://ko-fi.com/ty_fi" target="_blank" rel="noopener" class="kofi-btn">☕ support this on ko-fi</a>
+        </div>
+        <button class="btn-filter-toggle" onclick="toggleSidebar()">☰ more</button>
+      </div>
+    </header>
+
+    <!-- Filter Sidebar -->
+    <aside class="sidebar" id="sidebar">
+
+      <!-- Search -->
+      <div class="filter-section search-wrapper">
+        <input type="text" id="search-input" placeholder="grep artists...">
+      </div>
+
+      <!-- City Filter -->
+      <div class="filter-section">
+        <div class="filter-label">City</div>
+        <div class="chip-group" id="city-filters"></div>
+      </div>
+
+      <!-- Venue Filter -->
+      <div class="filter-section">
+        <div class="filter-label">Venues</div>
+        <div class="venue-list" id="venue-filters"></div>
+      </div>
+
+      <!-- Friends & Feeds -->
+      <div class="filter-section">
+        <div class="filter-label">Friends &amp; Feeds</div>
+        <ul class="feeds-list">
+          <li><a href="https://www.instagram.com/naveypedia/" target="_blank" rel="noopener">Naveypedia</a></li>
+          <li><a href="https://www.instagram.com/fuzzy_needle/" target="_blank" rel="noopener">The Fuzzy Needle</a></li>
+          <li><a href="https://www.instagram.com/___perfectlovers___/" target="_blank" rel="noopener">Perfect Lovers Cafe</a></li>
+          <li><a href="https://www.instagram.com/weirs.ig/" target="_blank" rel="noopener">Weirs</a></li>
+          <li><a href="https://www.instagram.com/sluice.ig/" target="_blank" rel="noopener">Sluice</a></li>
+          <li><a href="https://www.instagram.com/for_fust/" target="_blank" rel="noopener">Fust</a></li>
+          <li><a href="https://www.instagram.com/alldayrecords/" target="_blank" rel="noopener">All Day Records</a></li>
+          <li><a href="https://indyweek.com/newsletters/choose-your-indy-newsletters/" target="_blank" rel="noopener">Field Guide · Indy Week</a></li>
+        </ul>
+      </div>
+
+      <!-- Palette Switcher + Mode Toggle -->
+      <div class="filter-section" style="margin-top: auto; padding-top: 1rem; border-top: 1px solid var(--border);">
+        <div class="filter-label">Theme</div>
+        <div class="chip-group palette-group">
+          <button class="palette-btn active" data-palette="amber"    onclick="applyPalette('amber')"    title="Amber"    style="background:#c87941"></button>
+          <button class="palette-btn"        data-palette="phosphor" onclick="applyPalette('phosphor')" title="Phosphor" style="background:#44c754"></button>
+          <button class="palette-btn"        data-palette="midnight" onclick="applyPalette('midnight')" title="Midnight" style="background:#4888e8"></button>
+          <button class="palette-btn"        data-palette="wisteria" onclick="applyPalette('wisteria')" title="Wisteria" style="background:#c060d0"></button>
+        </div>
+        <div class="mode-toggle-wrap">
+          <button class="mode-toggle" id="mode-toggle" onclick="toggleMode()">☀ light</button>
+        </div>
+      </div>
+
+      <!-- Ko-fi (mobile only — lives at bottom of sidebar) -->
+      <div class="kofi-sidebar">
+        <p class="kofi-pitch">help me pay for this domain</p>
+        <a href="https://ko-fi.com/ty_fi" target="_blank" rel="noopener" class="kofi-btn">☕ support this on ko-fi</a>
+      </div>
+
+    </aside>
+
+    <!-- Sidebar backdrop (mobile tap-to-close) -->
+    <div class="sidebar-backdrop" id="sidebar-backdrop" onclick="toggleSidebar()"></div>
+
+    <!-- Calendar -->
+    <main class="calendar-container">
+      <div id="calendar"></div>
+      <footer class="site-credit">mostly made by <a href="https://claude.ai/claude-code" target="_blank" rel="noopener">claude code</a>, with piloting from <a href="http://bsky.app/profile/tyfi.bsky.social" target="_blank" rel="noopener">@tyfi</a>. it's on <a href="https://github.com/ty-fi/triangle-shows" target="_blank" rel="noopener">github</a>.</footer>
+    </main>
+  </div>
+
+  <!-- Bottom-left utility bar: appears when shows are hearted or hidden -->
+  <div class="favorites-bar" id="favorites-bar">
+    <button class="btn-download-shows" onclick="downloadFavorites()">↓ download my shows</button>
+    <button class="btn-restore-hidden" id="btn-restore-hidden" onclick="restoreHidden()">↺ restore hidden</button>
+  </div>
+
+  <!-- Event Detail Modal -->
+  <div class="modal-overlay" id="modal-overlay"></div>
+  <div class="event-modal" id="event-modal">
+    <button class="modal-close" onclick="closeModal()">&times;</button>
+    <div id="modal-content"></div>
+  </div>
+
+  <!-- FullCalendar JS -->
+  <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.15/index.global.min.js"></script>
+
+  <!-- App JS -->
+  <script src="/js/config.js"></script>
+  <script src="/js/filters.js"></script>
+  <script src="/js/modal.js"></script>
+  <script src="/js/favorites.js"></script>
+  <script src="/js/app.js"></script>
+</body>
+</html>
