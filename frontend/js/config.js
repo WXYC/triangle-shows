@@ -1,6 +1,10 @@
 // API configuration
 const API_BASE = window.location.origin;
 
+// Spotify — paste your Client ID from https://developer.spotify.com/dashboard
+// Register redirect URIs: https://triangle-shows.org and http://localhost:8000
+const SPOTIFY_CLIENT_ID = "";
+
 // Color palettes — each entry maps CSS custom property names to values.
 // applyPalette() sets these on :root and persists the choice to localStorage.
 const PALETTES = {

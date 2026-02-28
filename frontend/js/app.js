@@ -90,6 +90,11 @@ document.addEventListener("DOMContentLoaded", function () {
       const props   = arg.event.extendedProps;
       const soldOut = props.status === "sold_out" ? " [sold out]" : "";
       const hearted = typeof isFavorited === "function" && isFavorited(arg.event.id);
+      const matched = typeof eventMatchesSpotify === "function" &&
+                      typeof isSpotifyConnected  === "function" &&
+                      isSpotifyConnected() &&
+                      eventMatchesSpotify(arg.event.title, props.artist);
+      const titleText = (matched ? "♫ " : "") + arg.event.title + soldOut;
 
       const html = `<div class="ev" style="--venue-color: ${props.venue_color || ''}">
         <button class="ev-heart${hearted ? " hearted" : ""}"
@@ -100,7 +105,7 @@ document.addEventListener("DOMContentLoaded", function () {
                 data-event-id="${arg.event.id}"
                 aria-label="Hide this show"
                 tabindex="-1">✕</button>
-        <span class="ev-title">${arg.event.title}${soldOut}</span>
+        <span class="ev-title">${titleText}</span>
         ${props.venue_name ? `<span class="ev-venue">${props.venue_name}</span>` : ""}
       </div>`;
 

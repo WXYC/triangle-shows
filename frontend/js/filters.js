@@ -5,6 +5,7 @@
 let venues = [];
 let activeFilters = {
   search: "",
+  forYou: false,
 };
 
 async function loadVenues(attempt = 0) {
@@ -101,10 +102,36 @@ function setupSearch() {
 
 // ── Core filter logic ─────────────────────────────────────────────────────
 
+// Toggle the "★ for you" Spotify filter on/off.
+function toggleForYou() {
+  activeFilters.forYou = !activeFilters.forYou;
+  const chip = document.getElementById("chip-for-you");
+  if (chip) chip.classList.toggle("active", activeFilters.forYou);
+  applyAllFilters();
+}
+
+// Generate a webcal:// subscription URL from the currently-checked venues
+// and redirect to it, triggering the native Add Subscription dialog.
+function subscribeToVenues() {
+  const allCbs  = [...document.querySelectorAll(".venue-checkbox input[type=checkbox]")];
+  const checked = allCbs.filter(cb => cb.checked);
+  let path = "/feeds/events.ics";
+  if (checked.length > 0 && checked.length < allCbs.length) {
+    path += "?venue=" + checked.map(cb => cb.dataset.venue).join(",");
+  }
+  window.location.href = `webcal://${window.location.host}${path}`;
+}
+
 // Returns true if an event should be visible given the current filter state.
 // venueMap is a pre-built {slug: boolean} lookup (passed in to avoid per-event DOM queries).
 function _checkEventVisible(ev, venueMap) {
   const props = ev.extendedProps;
+
+  // "For you" mode: show only Spotify-matched events, ignoring venue filters.
+  if (activeFilters.forYou) {
+    return typeof eventMatchesSpotify === "function" &&
+      eventMatchesSpotify(ev.title, props.artist);
+  }
 
   // Venue checkbox — if unchecked, hide
   if (venueMap && props.venue_slug in venueMap) {

@@ -976,6 +976,53 @@ html[data-mode="light"] .fc-daygrid-event .ev-venue { color: var(--muted); }
 html[data-mode="light"] .fc-daygrid-event .ev-heart { color: rgba(0,0,0,0.35); }
 html[data-mode="light"] .fc-daygrid-event .ev-hide  { color: rgba(0,0,0,0.3);  }
 
+/* === Spotify === */
+.spotify-connect-wrap { margin-top: 0.55rem; }
+
+.spotify-connect-link {
+  font-family: 'Space Mono', monospace;
+  font-size: 0.6rem;
+  color: var(--dim);
+  text-decoration: none;
+  letter-spacing: 0.05em;
+  transition: color 0.12s;
+}
+.spotify-connect-link:hover { color: var(--accent); text-decoration: none; }
+
+/* ★ for you chip — sits alongside city chips, uses accent color */
+.for-you-chip {
+  border-color: var(--accent);
+  color: var(--accent);
+  opacity: 0.7;
+}
+.for-you-chip:hover { opacity: 1; }
+.for-you-chip.active {
+  background: var(--accent-bg);
+  border-color: var(--accent);
+  color: var(--accent-hover);
+  opacity: 1;
+}
+
+/* === iCal subscribe button === */
+.btn-subscribe-venues {
+  display: block;
+  width: 100%;
+  margin-top: 0.6rem;
+  padding: 0.28rem 0.5rem;
+  font-family: 'Space Mono', monospace;
+  font-size: 0.6rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  background: transparent;
+  border: 1px solid var(--dim);
+  color: var(--muted);
+  cursor: pointer;
+  border-radius: 1px;
+  text-align: left;
+  transition: border-color 0.12s, color 0.12s;
+}
+.btn-subscribe-venues:hover { border-color: var(--accent); color: var(--accent); }
+
 /* === Attribution footer === */
 .site-credit {
   font-size: 0.65rem;

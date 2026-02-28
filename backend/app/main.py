@@ -12,7 +12,7 @@ from app.config import settings
 from app.database import init_db, async_session
 from app.seed import seed_venues
 from app.scheduler import scheduler, configure_scheduler
-from app.api import events, venues, health
+from app.api import events, venues, health, feeds
 
 logging.basicConfig(
     level=getattr(logging, settings.LOG_LEVEL),
@@ -102,6 +102,7 @@ app.add_middleware(
 app.include_router(events.router)
 app.include_router(venues.router)
 app.include_router(health.router)
+app.include_router(feeds.router)
 
 # Manual scrape trigger (dev only)
 @app.post("/api/scrape")
