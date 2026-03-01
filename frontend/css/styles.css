@@ -520,7 +520,7 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
    graphic cell shrink to its content and the hidden time cell take 0 space.
    eventDidMount in app.js also sets these via inline style as belt-and-suspenders. */
 .fc .fc-list-event-time { display: none !important; width: 0 !important; padding: 0 !important; }
-.fc .fc-list-event-graphic { width: 22px !important; max-width: 22px !important; padding: 2px 4px !important; }
+.fc .fc-list-event-graphic { width: 22px !important; max-width: 22px !important; padding: 2px 4px !important; vertical-align: middle !important; }
 .fc .fc-list-event-title { overflow: hidden; max-width: 0; }
 .fc .fc-list-event-title .ev { min-width: 0; overflow: hidden; }
 
