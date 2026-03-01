@@ -1,4 +1,5 @@
 """iCal subscription feed — live, filterable by venue."""
+import zoneinfo
 from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 
@@ -66,10 +67,8 @@ async def get_ical_feed(
 
         # All-day or timed event
         if event.show_time:
-            from datetime import datetime as dt
-            import zoneinfo
             tz = zoneinfo.ZoneInfo("America/New_York")
-            start = dt.combine(event.date, event.show_time, tzinfo=tz)
+            start = datetime.combine(event.date, event.show_time, tzinfo=tz)
             iev.add("dtstart", start)
             iev.add("dtend",   start + timedelta(hours=3))
         else:

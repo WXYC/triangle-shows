@@ -1,4 +1,10 @@
 // Event detail modal
+
+// Escape user-visible text before injecting into innerHTML.
+function _h(s) {
+  return (s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
 const modal = document.getElementById("event-modal");
 const modalOverlay = document.getElementById("modal-overlay");
 
@@ -8,7 +14,7 @@ function openModal(eventInfo) {
 
   // Image
   const imageHtml = props.image_url
-    ? `<img src="${props.image_url}" alt="${props.name}" class="modal-image">`
+    ? `<img src="${props.image_url}" alt="${_h(props.name)}" class="modal-image">`
     : "";
 
   // Status badge
@@ -25,29 +31,29 @@ function openModal(eventInfo) {
   let timeHtml = "";
   if (props.doors_time || props.show_time) {
     timeHtml = '<div class="modal-times">';
-    if (props.doors_time) timeHtml += `<span>Doors: ${props.doors_time}</span>`;
-    if (props.show_time) timeHtml += `<span>Show: ${props.show_time}</span>`;
+    if (props.doors_time) timeHtml += `<span>Doors: ${_h(props.doors_time)}</span>`;
+    if (props.show_time) timeHtml += `<span>Show: ${_h(props.show_time)}</span>`;
     timeHtml += "</div>";
   }
 
   // Price
   const priceHtml = props.price
-    ? `<div class="modal-price">${props.price}</div>`
+    ? `<div class="modal-price">${_h(props.price)}</div>`
     : "";
 
   // Genre
   const genreHtml = props.genre
-    ? `<div class="modal-genre">${props.genre}${props.subgenre ? " / " + props.subgenre : ""}</div>`
+    ? `<div class="modal-genre">${_h(props.genre)}${props.subgenre ? " / " + _h(props.subgenre) : ""}</div>`
     : "";
 
   // Age
   const ageHtml = props.age_restriction
-    ? `<div class="modal-age">${props.age_restriction}</div>`
+    ? `<div class="modal-age">${_h(props.age_restriction)}</div>`
     : "";
 
   // Support
   const supportHtml = props.support_artists
-    ? `<div class="modal-support">with ${props.support_artists}</div>`
+    ? `<div class="modal-support">with ${_h(props.support_artists)}</div>`
     : "";
 
   // Format date
@@ -59,29 +65,30 @@ function openModal(eventInfo) {
     day: "numeric",
   });
 
-  // Ticket button
-  const ticketBtn = props.ticket_url
-    ? `<a href="${props.ticket_url}" target="_blank" rel="noopener" class="btn-tickets">Get Tickets</a>`
+  // Ticket button — only allow http/https URLs
+  const safeUrl = props.ticket_url && /^https?:\/\//i.test(props.ticket_url) ? props.ticket_url : null;
+  const ticketBtn = safeUrl
+    ? `<a href="${safeUrl}" target="_blank" rel="noopener" class="btn-tickets">Get Tickets</a>`
     : "";
 
   el.innerHTML = `
     ${imageHtml}
     <div class="modal-body">
       <div class="modal-header-row">
-        <h2>${props.artist || props.name}</h2>
+        <h2>${_h(props.artist || props.name)}</h2>
         ${statusBadge}
       </div>
-      ${props.artist && props.artist !== props.name ? `<p class="modal-event-name">${props.name}</p>` : ""}
+      ${props.artist && props.artist !== props.name ? `<p class="modal-event-name">${_h(props.name)}</p>` : ""}
       ${supportHtml}
-      <div class="modal-venue" style="color: ${props.venue_color}">
-        ${props.venue_name} &mdash; ${props.venue_city}
+      <div class="modal-venue" style="color: ${_h(props.venue_color)}">
+        ${_h(props.venue_name)} &mdash; ${_h(props.venue_city)}
       </div>
       <div class="modal-date">${dateStr}</div>
       ${timeHtml}
       ${priceHtml}
       ${genreHtml}
       ${ageHtml}
-      ${props.description ? `<p class="modal-description">${props.description}</p>` : ""}
+      ${props.description ? `<p class="modal-description">${_h(props.description)}</p>` : ""}
       ${ticketBtn}
     </div>
   `;

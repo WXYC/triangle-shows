@@ -120,15 +120,21 @@ class ScrapeManager:
 
     async def _upsert_events(self, venue_id: int, scraped_events: list[ScrapedEvent]) -> tuple[int, int]:
         """Upsert events using hash-based dedup. Returns (created, updated) counts."""
+        if not scraped_events:
+            return 0, 0
+
+        # Fetch all matching existing events in one query instead of one per event.
+        hashes = [se.hash for se in scraped_events]
+        result = await self.session.execute(
+            select(Event).where(Event.hash.in_(hashes))
+        )
+        existing_by_hash = {e.hash: e for e in result.scalars().all()}
+
         created = 0
         updated = 0
 
         for se in scraped_events:
-            event_hash = se.hash
-            result = await self.session.execute(
-                select(Event).where(Event.hash == event_hash)
-            )
-            existing = result.scalar_one_or_none()
+            existing = existing_by_hash.get(se.hash)
 
             if existing:
                 # Update mutable fields
