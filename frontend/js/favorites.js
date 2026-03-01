@@ -95,7 +95,7 @@ function downloadFavorites() {
   const lines = [
     "BEGIN:VCALENDAR",
     "VERSION:2.0",
-    "PRODID:-//Triangle Shows//triangle-shows.org//EN",
+    "PRODID:-//Triangle Shows//triangle-shows.net//EN",
     "CALSCALE:GREGORIAN",
     "METHOD:PUBLISH",
     "X-WR-CALNAME:My Triangle Shows",

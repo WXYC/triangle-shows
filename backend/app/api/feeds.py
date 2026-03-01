@@ -40,12 +40,12 @@ async def get_ical_feed(
     events = result.unique().scalars().all()
 
     cal = Calendar()
-    cal.add("prodid", "-//triangle-shows.org//EN")
+    cal.add("prodid", "-//triangle-shows.net//EN")
     cal.add("version", "2.0")
     cal.add("calscale", "GREGORIAN")
     cal.add("method", "PUBLISH")
     cal.add("x-wr-calname", vText("Triangle Shows"))
-    cal.add("x-wr-caldesc", vText("Live music across the Triangle — triangle-shows.org"))
+    cal.add("x-wr-caldesc", vText("Live music across the Triangle — triangle-shows.net"))
     cal.add("x-wr-timezone", vText("America/New_York"))
     # Suggest clients refresh every 6 hours
     cal.add("refresh-interval;value=duration", "PT6H")

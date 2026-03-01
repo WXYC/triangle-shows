@@ -4,7 +4,7 @@
 // SETUP (one-time):
 //   1. Go to https://developer.spotify.com/dashboard and create an app.
 //   2. Under "Redirect URIs", add:
-//        https://triangle-shows.org
+//        https://triangle-shows.net
 //        http://localhost:8000
 //   3. Paste your Client ID into config.js as SPOTIFY_CLIENT_ID.
 
