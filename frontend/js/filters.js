@@ -169,6 +169,36 @@ function applyAllFilters() {
     const target = _checkEventVisible(ev, venueMap) ? "auto" : "none";
     if (ev.display !== target) ev.setProp("display", target);
   });
+
+  // After normal filters, collapse venues that have multiple events per day
+  // down to one visible chip (extras stay in the store for the modal).
+  _applyVenueDayGrouping();
+}
+
+// Venues where multiple same-day events should collapse to one chip.
+const GROUPED_VENUE_SLUGS = new Set(["dpac"]);
+
+function _applyVenueDayGrouping() {
+  if (!calendar) return;
+
+  // Group visible events by venue+date for grouped venues.
+  const groups = {};
+  calendar.getEvents().forEach((ev) => {
+    const slug = ev.extendedProps.venue_slug;
+    if (!GROUPED_VENUE_SLUGS.has(slug) || ev.display === "none") return;
+    const key = slug + "|" + ev.extendedProps.date;
+    if (!groups[key]) groups[key] = [];
+    groups[key].push(ev);
+  });
+
+  Object.values(groups).forEach((group) => {
+    if (group.length <= 1) return;
+    // Prefer on_sale as the visible chip; fall back to first.
+    const primary = group.find((ev) => ev.extendedProps.status === "on_sale") || group[0];
+    group.forEach((ev) => {
+      if (ev !== primary && ev.display !== "none") ev.setProp("display", "none");
+    });
+  });
 }
 
 // ── Filter toggles ────────────────────────────────────────────────────────

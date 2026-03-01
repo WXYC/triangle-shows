@@ -108,29 +108,6 @@ async def get_fullcalendar_events(
     kept = {ev.id for ev in _dedup_best.values()}
     events = [e for e in events if e.id in kept]
 
-    # DPAC: collapse to one chip per date. TM lists box seats, VIP packages, and
-    # matinee/evening variants as separate event IDs that survive the name-based
-    # dedup above. A single chip per day is cleaner on the calendar.
-    # Prefer on_sale events over sold_out ones so a Boxes (offsale) variant
-    # doesn't win when a regular on_sale listing exists for the same date.
-    dpac_best: dict = {}
-    for event in events:
-        if event.venue and event.venue.slug == "dpac":
-            d = event.date
-            if d not in dpac_best:
-                dpac_best[d] = event
-            elif dpac_best[d].status != "on_sale" and event.status == "on_sale":
-                dpac_best[d] = event
-    dpac_ids = {e.id for e in dpac_best.values()}
-    collapsed = []
-    for event in events:
-        if event.venue and event.venue.slug == "dpac":
-            if event.id in dpac_ids:
-                collapsed.append(event)
-        else:
-            collapsed.append(event)
-    events = collapsed
-
     fc_events = []
     for event in events:
         venue_obj = event.venue
