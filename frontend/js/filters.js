@@ -166,7 +166,8 @@ function applyAllFilters() {
   });
 
   calendar.getEvents().forEach((ev) => {
-    ev.setProp("display", _checkEventVisible(ev, venueMap) ? "auto" : "none");
+    const target = _checkEventVisible(ev, venueMap) ? "auto" : "none";
+    if (ev.display !== target) ev.setProp("display", target);
   });
 }
 

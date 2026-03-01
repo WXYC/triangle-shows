@@ -118,10 +118,13 @@ document.addEventListener("DOMContentLoaded", function () {
         calendar.changeView("dayGridMonth");
       }
     },
-    // After all events finish loading, apply filters in one pass instead of
-    // querying the DOM once per event inside eventDidMount.
+    // After all events finish loading, apply filters in one pass. Deferred via
+    // requestAnimationFrame so FullCalendar finishes its own render cycle first —
+    // calling setProp mid-render can cause list-view events to appear duplicated.
     loading: function (isLoading) {
-      if (!isLoading && typeof applyAllFilters === "function") applyAllFilters();
+      if (!isLoading && typeof applyAllFilters === "function") {
+        requestAnimationFrame(applyAllFilters);
+      }
     },
     eventDidMount: function (info) {
       // Persist-hidden: suppress events the user dismissed.
