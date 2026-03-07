@@ -27,18 +27,7 @@ function renderFilters() {
   renderVenueFilters();
   setupSearch();
 
-  if (window.innerWidth < 768) {
-    // Mobile startup: open sidebar and start with no venues checked,
-    // so the user intentionally picks what they want to see.
-    document.querySelectorAll(".venue-checkbox input[type=checkbox]").forEach((cb) => {
-      cb.checked = false;
-    });
-    applyAllFilters();
-    updateCityChipStates();
-    toggleSidebar();
-  } else {
-    updateCityChipStates(); // set initial active state (all cities on)
-  }
+  updateCityChipStates();
 }
 
 function renderCityFilters() {
