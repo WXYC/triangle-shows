@@ -138,6 +138,7 @@ function _updateAllHiddenChips() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 document.addEventListener("DOMContentLoaded", function () {
+  _startProgressBar();
   const calendarEl = document.getElementById("calendar");
 
   calendar = new FullCalendar.Calendar(calendarEl, {
@@ -215,10 +216,7 @@ document.addEventListener("DOMContentLoaded", function () {
     // requestAnimationFrame so FullCalendar finishes its own render cycle first —
     // calling setProp mid-render can cause list-view events to appear duplicated.
     loading: function (isLoading) {
-      if (isLoading) {
-        _startProgressBar();
-        return;
-      }
+      if (!isLoading) {
       const elapsed = Date.now() - _loadingScreenStart;
       const delay = Math.max(0, 1000 - elapsed);
       setTimeout(function () {
