@@ -208,7 +208,7 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: opacity 0.4s ease;
+  transition: opacity 1s ease;
 }
 #loading-screen.fade-out {
   opacity: 0;
