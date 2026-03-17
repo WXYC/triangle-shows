@@ -162,6 +162,8 @@ function applyAllFilters() {
   // After normal filters, collapse venues that have multiple events per day
   // down to one visible chip (extras stay in the store for the modal).
   _applyVenueDayGrouping();
+
+  if (typeof _updateAllHiddenChips === "function") _updateAllHiddenChips();
 }
 
 // Venues where multiple same-day events should collapse to one chip.

@@ -59,6 +59,26 @@ function restoreHidden() {
   }
 }
 
+function unhideForDate(date) {
+  const hidden = getHidden();
+  let changed = false;
+  if (typeof calendar !== "undefined" && calendar) {
+    calendar.getEvents().forEach((ev) => {
+      if (ev.extendedProps.date === date && hidden[ev.id]) {
+        delete hidden[ev.id];
+        ev.setProp("display", "auto");
+        changed = true;
+      }
+    });
+  }
+  if (changed) {
+    localStorage.setItem(HIDDEN_KEY, JSON.stringify(hidden));
+    updateBottomBar();
+    if (typeof _updateHiddenChip === "function") _updateHiddenChip(date);
+    if (typeof applyAllFilters === "function") requestAnimationFrame(applyAllFilters);
+  }
+}
+
 // ── Bottom bar (favorites download + restore hidden) ────────────────────────
 
 function updateBottomBar() {

@@ -45,6 +45,98 @@ document.addEventListener("DOMContentLoaded", function () {
 let calendar;
 const _loadingScreenStart = Date.now();
 
+// ── Loading screen progress bar ──────────────────────────────────────────────
+const _BAR_LEN = 20;
+let _barRaf = null;
+
+function _renderBar(pct) {
+  const track = document.getElementById("ls-bar-track");
+  const label = document.getElementById("ls-bar-pct");
+  if (!track || !label) return;
+  const filled = Math.round(pct / 100 * _BAR_LEN);
+  track.innerHTML =
+    '<span class="ls-bar-filled">' + "█".repeat(filled) + "</span>" +
+    "░".repeat(_BAR_LEN - filled);
+  label.textContent = "\u00a0".repeat(3 - String(Math.round(pct)).length) + Math.round(pct) + "%";
+}
+
+function _startProgressBar() {
+  _renderBar(0);
+  const start = performance.now();
+  const FILL_MS = 900;
+  function tick(now) {
+    const t = Math.min((now - start) / FILL_MS, 1);
+    _renderBar((1 - Math.pow(1 - t, 3)) * 85);
+    if (t < 1) _barRaf = requestAnimationFrame(tick);
+  }
+  _barRaf = requestAnimationFrame(tick);
+}
+
+function _finishProgressBar(cb) {
+  if (_barRaf) { cancelAnimationFrame(_barRaf); _barRaf = null; }
+  _renderBar(100);
+  setTimeout(cb, 200);
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ── Per-day hidden-shows chips ────────────────────────────────────────────────
+function _setHiddenChip(date, count) {
+  // Month view: bordered chip in the day cell bottom
+  const existing = document.querySelector(`.day-hidden-chip[data-date="${date}"]`);
+  if (existing) existing.remove();
+  const bottom = document.querySelector(`.fc-daygrid-day[data-date="${date}"] .fc-daygrid-day-bottom`);
+  if (count > 0 && bottom) {
+    const chip = document.createElement("a");
+    chip.className = "day-hidden-chip";
+    chip.dataset.date = date;
+    chip.textContent = `↺ ${count} hidden`;
+    chip.addEventListener("click", (e) => { e.stopPropagation(); unhideForDate(date); });
+    bottom.appendChild(chip);
+  }
+
+  // List view: restore row after the last event row for this day
+  const existingRow = document.querySelector(`.fc-list-hidden-row[data-date="${date}"]`);
+  if (existingRow) existingRow.remove();
+  if (count > 0) {
+    const dayRow = document.querySelector(`tr.fc-list-day[data-date="${date}"]`);
+    if (dayRow) {
+      let insertAfter = dayRow;
+      let sib = dayRow.nextElementSibling;
+      while (sib && !sib.classList.contains("fc-list-day")) {
+        if (sib.classList.contains("fc-list-event")) insertAfter = sib;
+        sib = sib.nextElementSibling;
+      }
+      const label = count === 1 ? "↺ 1 hidden show" : `↺ ${count} hidden shows`;
+      const tr = document.createElement("tr");
+      tr.className = "fc-list-hidden-row";
+      tr.dataset.date = date;
+      tr.innerHTML = `<td colspan="3" class="fc-list-hidden-cell"><button class="list-hidden-btn">${label}</button></td>`;
+      tr.querySelector(".list-hidden-btn").addEventListener("click", () => unhideForDate(date));
+      insertAfter.after(tr);
+    }
+  }
+}
+
+function _updateHiddenChip(date) {
+  const count = calendar.getEvents().filter(
+    (ev) => ev.extendedProps.date === date && isHidden(ev.id)
+  ).length;
+  _setHiddenChip(date, count);
+}
+
+function _updateAllHiddenChips() {
+  document.querySelectorAll(".day-hidden-chip, .fc-list-hidden-row").forEach((el) => el.remove());
+  const byDate = {};
+  calendar.getEvents().forEach((ev) => {
+    if (isHidden(ev.id)) {
+      const d = ev.extendedProps.date;
+      byDate[d] = (byDate[d] || 0) + 1;
+    }
+  });
+  Object.entries(byDate).forEach(([date, count]) => _setHiddenChip(date, count));
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
 document.addEventListener("DOMContentLoaded", function () {
   const calendarEl = document.getElementById("calendar");
 
@@ -123,16 +215,21 @@ document.addEventListener("DOMContentLoaded", function () {
     // requestAnimationFrame so FullCalendar finishes its own render cycle first —
     // calling setProp mid-render can cause list-view events to appear duplicated.
     loading: function (isLoading) {
-      if (!isLoading) {
-        const elapsed = Date.now() - _loadingScreenStart;
-        const delay = Math.max(0, 1000 - elapsed);
-        setTimeout(function () {
+      if (isLoading) {
+        _startProgressBar();
+        return;
+      }
+      const elapsed = Date.now() - _loadingScreenStart;
+      const delay = Math.max(0, 1000 - elapsed);
+      setTimeout(function () {
+        _finishProgressBar(function () {
           const screen = document.getElementById("loading-screen");
           if (screen) {
             screen.classList.add("fade-out");
             screen.addEventListener("transitionend", () => screen.remove(), { once: true });
           }
-        }, delay);
+        });
+      }, delay);
         if (typeof applyAllFilters === "function") requestAnimationFrame(applyAllFilters);
       }
     },
@@ -188,9 +285,22 @@ document.addEventListener("DOMContentLoaded", function () {
           ticket_url: p.ticket_url || "",
         });
       } else {
-        // Hide persistently (survives refresh until user restores)
-        hideEvent(eventId);
-        fcEvent.setProp("display", "none");
+        // For grouped venues (e.g. DPAC), hide all same-day events so a
+        // different sibling doesn't surface on the next filter pass.
+        const slug = fcEvent.extendedProps.venue_slug;
+        const date = fcEvent.extendedProps.date;
+        if (typeof GROUPED_VENUE_SLUGS !== "undefined" && GROUPED_VENUE_SLUGS.has(slug)) {
+          calendar.getEvents().forEach((ev) => {
+            if (ev.extendedProps.venue_slug === slug && ev.extendedProps.date === date) {
+              hideEvent(ev.id);
+              ev.setProp("display", "none");
+            }
+          });
+        } else {
+          hideEvent(eventId);
+          fcEvent.setProp("display", "none");
+        }
+        _updateHiddenChip(date);
       }
     },
     true // capture
