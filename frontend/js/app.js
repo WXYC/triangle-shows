@@ -43,6 +43,7 @@ document.addEventListener("DOMContentLoaded", function () {
 
 // FullCalendar initialization
 let calendar;
+const _loadingScreenStart = Date.now();
 
 document.addEventListener("DOMContentLoaded", function () {
   const calendarEl = document.getElementById("calendar");
@@ -123,11 +124,15 @@ document.addEventListener("DOMContentLoaded", function () {
     // calling setProp mid-render can cause list-view events to appear duplicated.
     loading: function (isLoading) {
       if (!isLoading) {
-        const screen = document.getElementById("loading-screen");
-        if (screen) {
-          screen.classList.add("fade-out");
-          screen.addEventListener("transitionend", () => screen.remove(), { once: true });
-        }
+        const elapsed = Date.now() - _loadingScreenStart;
+        const delay = Math.max(0, 1000 - elapsed);
+        setTimeout(function () {
+          const screen = document.getElementById("loading-screen");
+          if (screen) {
+            screen.classList.add("fade-out");
+            screen.addEventListener("transitionend", () => screen.remove(), { once: true });
+          }
+        }, delay);
         if (typeof applyAllFilters === "function") requestAnimationFrame(applyAllFilters);
       }
     },
