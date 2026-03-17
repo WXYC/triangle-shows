@@ -229,7 +229,7 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
   margin-right: 0.5em;
 }
 .ls-text {
-  color: var(--text);
+  color: var(--accent);
 }
 .ls-cursor {
   display: inline-block;
