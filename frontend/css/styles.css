@@ -204,7 +204,7 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
   position: fixed;
   inset: 0;
   z-index: 2000;
-  background: var(--bg);
+  background: color-mix(in srgb, var(--bg) 50%, transparent);
   display: flex;
   align-items: center;
   justify-content: center;
