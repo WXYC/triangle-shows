@@ -115,8 +115,8 @@ function fitAsciiTitle() {
   const rightW   = rightBar ? rightBar.getBoundingClientRect().width + 32 : 140;
   const available = headerW - rightW;
 
-  // Step down from 14 → 7px until the title fits
-  for (let size = 14; size >= 7; size -= 0.5) {
+  // Step down from 17 → 9px until the title fits
+  for (let size = 17; size >= 9; size -= 0.5) {
     title.style.fontSize = size + "px";
     if (title.scrollWidth <= available) return;
   }

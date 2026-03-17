@@ -122,8 +122,13 @@ document.addEventListener("DOMContentLoaded", function () {
     // requestAnimationFrame so FullCalendar finishes its own render cycle first —
     // calling setProp mid-render can cause list-view events to appear duplicated.
     loading: function (isLoading) {
-      if (!isLoading && typeof applyAllFilters === "function") {
-        requestAnimationFrame(applyAllFilters);
+      if (!isLoading) {
+        const screen = document.getElementById("loading-screen");
+        if (screen) {
+          screen.classList.add("fade-out");
+          screen.addEventListener("transitionend", () => screen.remove(), { once: true });
+        }
+        if (typeof applyAllFilters === "function") requestAnimationFrame(applyAllFilters);
       }
     },
     eventDidMount: function (info) {
