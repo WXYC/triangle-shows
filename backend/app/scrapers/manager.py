@@ -173,7 +173,7 @@ class ScrapeManager:
                     description=se.description,
                     source=se.source,
                     source_url=se.source_url,
-                    hash=event_hash,
+                    hash=se.hash,
                 )
                 self.session.add(event)
                 created += 1
