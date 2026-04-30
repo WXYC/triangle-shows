@@ -192,9 +192,9 @@ VENUES = [
         "city": "Durham",
         "capacity": 100,
         "size_category": "small",
-        "website": "https://www.stancyksdurham.com/",
+        "website": "https://www.stanczyksdurham.com/",
         "scraper_type": "squarespace",
-        "scraper_config": {"url": "https://www.stancyksdurham.com/events?format=json"},
+        "scraper_config": {"url": "https://www.stanczyksdurham.com/events?format=json"},
         "color": "#5a3a20",  # warm espresso (Durham)
     },
     {
