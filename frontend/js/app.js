@@ -1,18 +1,13 @@
 // Rotating ko-fi pitch
 const KOFI_PITCHES = [
   "help me pay for this domain",
-  "keeps the scraper alive",
+  "keep the scrapers alive",
   "offset my caffeine dependency",
-  "bribing the Ticketmaster API",
   "buy me a beer at Motorco",
-  "one less thing to cancel",
   "cheaper than a ticket stub",
   "fuel for the scraper",
   "better than a StubHub fee",
-  "my contribution to the Triangle",
   "helping you find your next show",
-  "Haw River or bust",
-  "keeps this free for everyone",
   "the server bill is real",
   "support local show-going",
 ];
