@@ -453,6 +453,38 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
 .venue-checkbox::before { content: "> "; color: var(--dim); font-family: 'Space Mono', monospace; }
 .venue-checkbox:hover .venue-label { color: var(--accent); }
 
+.venue-hide-btn {
+  margin-left: auto;
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 0.6rem;
+  line-height: 1;
+  color: var(--dim);
+  padding: 1px 3px;
+  opacity: 0;
+  transition: opacity 0.15s, color 0.12s;
+  user-select: none;
+}
+.venue-checkbox:hover .venue-hide-btn { opacity: 1; }
+.venue-hide-btn:hover { color: var(--accent); }
+
+.venue-restore-btn {
+  font-family: 'Space Mono', monospace;
+  font-size: 0.65rem;
+  color: var(--muted);
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0.35rem 0 0 0;
+  text-align: left;
+  opacity: 0.6;
+  transition: color 0.15s, opacity 0.15s;
+  width: 100%;
+}
+.venue-restore-btn:hover { color: var(--accent); opacity: 1; }
+
 .venue-checkbox input { display: none; }
 
 .venue-dot {
@@ -1041,6 +1073,7 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
   /* Heart + hide: always slightly visible on mobile (no real hover) */
   .ev-heart { opacity: 0.4; font-size: 0.84rem; }
   .ev-hide  { opacity: 0.3; }
+  .venue-hide-btn { opacity: 0.3; }
 
   /* Bottom bar: left edge on mobile (sidebar is hidden) */
   .favorites-bar { left: 0.75rem; }
@@ -1059,6 +1092,7 @@ html[data-mode="light"] .fc-list-event .ev-title { color: var(--text); }
 html[data-mode="light"] .fc-list-event .ev-venue { color: var(--muted); }
 html[data-mode="light"] .fc-list-event .ev-heart { color: rgba(0,0,0,0.35); }
 html[data-mode="light"] .fc-list-event .ev-hide  { color: rgba(0,0,0,0.25); }
+html[data-mode="light"] .venue-hide-btn          { color: rgba(0,0,0,0.35); }
 
 /* Light mode: daygrid event chips — light bg + accent text so venue colors aren't washed */
 html[data-mode="light"] .fc .fc-daygrid-event {

@@ -8,6 +8,46 @@ let activeFilters = {
   forYou: false,
 };
 
+// ── Hidden venues ─────────────────────────────────────────────────────────────
+const HIDDEN_VENUES_KEY = "triangle-shows-hidden-venues";
+
+function getHiddenVenues() {
+  try { return new Set(JSON.parse(localStorage.getItem(HIDDEN_VENUES_KEY) || "[]")); }
+  catch { return new Set(); }
+}
+
+function hideVenue(slug) {
+  const hidden = getHiddenVenues();
+  hidden.add(slug);
+  localStorage.setItem(HIDDEN_VENUES_KEY, JSON.stringify([...hidden]));
+  const label = document.querySelector(`.venue-checkbox input[data-venue="${slug}"]`)?.closest(".venue-checkbox");
+  if (label) label.remove();
+  _updateVenueRestoreBtn();
+  applyAllFilters();
+  updateCityChipStates();
+}
+
+function restoreHiddenVenues() {
+  localStorage.removeItem(HIDDEN_VENUES_KEY);
+  renderVenueFilters();
+  applyAllFilters();
+  updateCityChipStates();
+}
+
+function _updateVenueRestoreBtn() {
+  const existing = document.getElementById("venue-restore-btn");
+  if (existing) existing.remove();
+  const hidden = getHiddenVenues();
+  if (hidden.size === 0) return;
+  const container = document.getElementById("venue-filters");
+  const btn = document.createElement("button");
+  btn.id = "venue-restore-btn";
+  btn.className = "venue-restore-btn";
+  btn.textContent = `↺ restore hidden (${hidden.size})`;
+  btn.addEventListener("click", restoreHiddenVenues);
+  container.appendChild(btn);
+}
+
 async function loadVenues(attempt = 0) {
   try {
     const resp = await fetch(`${API_BASE}/api/venues`);
@@ -48,16 +88,25 @@ function renderCityFilters() {
 
 function renderVenueFilters() {
   const container = document.getElementById("venue-filters");
+  const hidden = getHiddenVenues();
   container.innerHTML = venues
-    .map(
-      (v) => `
+    .filter((v) => !hidden.has(v.slug))
+    .map((v) => `
       <label class="venue-checkbox" data-venue-city="${v.city}">
         <input type="checkbox" data-venue="${v.slug}" checked onchange="toggleVenue('${v.slug}')">
         <span class="venue-dot" style="background-color: ${v.color}"></span>
         <span class="venue-label">${v.name}</span>
-      </label>`
-    )
+        <button class="venue-hide-btn" data-slug="${v.slug}" tabindex="-1" aria-label="Hide ${v.name}">✕</button>
+      </label>`)
     .join("");
+  container.querySelectorAll(".venue-hide-btn").forEach((btn) => {
+    btn.addEventListener("click", function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      hideVenue(this.dataset.slug);
+    });
+  });
+  _updateVenueRestoreBtn();
 }
 
 function setupSearch() {
@@ -153,6 +202,8 @@ function applyAllFilters() {
   document.querySelectorAll(".venue-checkbox input[type=checkbox]").forEach((cb) => {
     venueMap[cb.dataset.venue] = cb.checked;
   });
+  // Hidden venues are always off regardless of checkbox state.
+  getHiddenVenues().forEach((slug) => { venueMap[slug] = false; });
 
   calendar.getEvents().forEach((ev) => {
     const target = _checkEventVisible(ev, venueMap) ? "auto" : "none";
