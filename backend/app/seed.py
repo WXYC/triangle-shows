@@ -175,6 +175,39 @@ VENUES = [
         "scraper_config": {"url": "https://shadowboxstudio.org/events/"},
         "color": "#2a4e88",  # denim sapphire (Durham)
     },
+    {
+        "name": "Rubies on Five Points",
+        "slug": "rubies",
+        "city": "Durham",
+        "capacity": 150,
+        "size_category": "small",
+        "website": "https://rubiesnc.com/",
+        "scraper_type": "venuepilot",
+        "scraper_config": {"account_id": 3095},
+        "color": "#7a1e3c",  # deep ruby (Durham)
+    },
+    {
+        "name": "Stancyk's",
+        "slug": "stancyks",
+        "city": "Durham",
+        "capacity": 100,
+        "size_category": "small",
+        "website": "https://www.stancyksdurham.com/",
+        "scraper_type": "squarespace",
+        "scraper_config": {"url": "https://www.stancyksdurham.com/events?format=json"},
+        "color": "#5a3a20",  # warm espresso (Durham)
+    },
+    {
+        "name": "Slim's",
+        "slug": "slims",
+        "city": "Raleigh",
+        "capacity": 200,
+        "size_category": "small",
+        "website": "https://slimsdivebar.com/",
+        "scraper_type": "mec",
+        "scraper_config": {"url": "https://slimsdivebar.com/music-and-events/"},
+        "color": "#4a3a6a",  # deep plum (Raleigh)
+    },
 ]
 
 

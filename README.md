@@ -2,7 +2,7 @@
 
 Live music calendar for the Triangle — Raleigh, Durham, Chapel Hill, Carrboro, and Saxapahaw — on one page.
 
-**[triangle-shows.org](https://triangle-shows.org)**
+**[triangle-shows.net](https://triangle-shows.net)**
 
 ---
 
@@ -29,6 +29,9 @@ Scrapes show listings from 15+ venues every 6 hours and serves them as a FullCal
 | Local 506 | Chapel Hill-Carrboro |
 | The Cave | Chapel Hill-Carrboro |
 | Haw River Ballroom | Saxapahaw |
+| Rubies on Five Points | Durham |
+| Stancyk's | Durham |
+| Slim's | Raleigh |
 
 ---
 
@@ -83,6 +86,23 @@ frontend/
     modal.js      # Event detail modal
     favorites.js  # Heart/hide/export
 ```
+
+---
+
+---
+
+## Developer tools
+
+Scripts in `tools/` for local development and debugging:
+
+| Script | Purpose |
+|---|---|
+| `import_submissions.py` | Import approved show submissions from Google Sheet into DB |
+| `check_roots.py` | Verify scraper URL roots resolve correctly |
+| `check_venue_urls.py` | Spot-check venue event page URLs |
+| `diagnose_scrapers.py` | Run scrapers individually and report output/errors |
+| `inspect_html.py` | Print raw HTML from a venue page for scraper debugging |
+| `inspect_js_venues.py` | Inspect JS-heavy venue pages for API/widget patterns |
 
 ---
 
