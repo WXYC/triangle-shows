@@ -187,7 +187,7 @@ VENUES = [
         "color": "#7a1e3c",  # deep ruby (Durham)
     },
     {
-        "name": "Stancyk's",
+        "name": "Stanczyks",
         "slug": "stancyks",
         "city": "Durham",
         "capacity": 100,
@@ -196,6 +196,31 @@ VENUES = [
         "scraper_type": "venuepilot",
         "scraper_config": {"account_id": 3433},
         "color": "#5a3a20",  # warm espresso (Durham)
+    },
+    {
+        "name": "Chapel of Bones",
+        "slug": "chapel-of-bones",
+        "city": "Raleigh",
+        "capacity": None,
+        "size_category": "small",
+        "website": "https://chapelofbones.com/",
+        "scraper_type": "tribe_events",
+        "scraper_config": {"url": "https://chapelofbones.com/events/"},
+        "color": "#2a2840",  # dark ash (Raleigh)
+    },
+    {
+        "name": "Pour House",
+        "slug": "pour-house",
+        "city": "Raleigh",
+        "capacity": None,
+        "size_category": "small",
+        "website": "https://www.pourhouseraleigh.com/",
+        "scraper_type": "webflow_cms",
+        "scraper_config": {
+            "url": "https://www.pourhouseraleigh.com/calendar",
+            "base_url": "https://www.pourhouseraleigh.com",
+        },
+        "color": "#6a3828",  # warm brick (Raleigh)
     },
     {
         "name": "Slim's",
