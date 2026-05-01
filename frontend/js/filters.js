@@ -226,8 +226,9 @@ function _applyAllFiltersNow() {
   allEvents.forEach((ev) => {
     const show = _checkEventVisible(ev, venueMap);
     if (show) visible.add(ev.id);
+    const current = ev.display || "auto";
     const target = show ? "auto" : "none";
-    if (ev.display !== target) ev.setProp("display", target);
+    if (current !== target) ev.setProp("display", target);
   });
 
   // Sub-task B: collapse grouped venues (e.g. DPAC) to one chip per day.
