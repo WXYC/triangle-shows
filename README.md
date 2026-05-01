@@ -1,6 +1,6 @@
-# triangle-shows
+# triangle-shows.net
 
-Live music calendar for the Triangle — Raleigh, Durham, Chapel Hill, Carrboro, and Saxapahaw — on one page.
+A semi-interactive shows calendar for venues across the triangle.
 
 **[triangle-shows.net](https://triangle-shows.net)**
 
@@ -8,34 +8,67 @@ Live music calendar for the Triangle — Raleigh, Durham, Chapel Hill, Carrboro,
 
 ## What it does
 
-Scrapes show listings from 15+ venues every 6 hours and serves them as a FullCalendar month/list view. Venue, city, and artist search filters all run client-side. Users can heart shows and export their picks as an `.ics` file.
+In the background, a script scrapes show listings from every venues every 6 hours. The site itself lets you search and view events and details (and in some cases click through to buy tickets!) and customize your view by selecting or hiding shows and venues. You can also favorite events and download them to wherever you keep your calendar!
 
 ### Venues covered
 
 | Venue | City |
 |---|---|
+| Boom Club | Durham |
 | DPAC | Durham |
 | Motorco Music Hall | Durham |
-| The Pinhook | Durham |
+| Rubies on Five Poitns | Durham |
 | Shadowbox Studio | Durham |
-| The Ritz | Raleigh |
-| Lincoln Theatre | Raleigh |
-| Red Hat Amphitheater | Raleigh |
-| Koka Booth Amphitheatre | Raleigh |
-| Kings | Raleigh |
-| Neptune's Parlour | Raleigh |
-| Cat's Cradle | Chapel Hill-Carrboro |
-| Cat's Cradle Back Room | Chapel Hill-Carrboro |
+| Stancyks | Durham |
+| The Pinhook | Durham |
+| Cat's Cradle and Back Room| Chapel Hill-Carrboro |
 | Local 506 | Chapel Hill-Carrboro |
 | The Cave | Chapel Hill-Carrboro |
 | Haw River Ballroom | Saxapahaw |
-| Rubies on Five Points | Durham |
-| Stancyk's | Durham |
+| Chapel of Bones | Raleigh |
+| Kings | Raleigh |
+| Koka Booth Amphitheatre | Raleigh |
+| Lincoln Theatre | Raleigh |
+| Neptune's Parlour | Raleigh |
+| Pour House | Raleigh |
+| Red Hat Amphitheater | Raleigh |
 | Slim's | Raleigh |
+| The Ritz | Raleigh |
 
 ---
 
-## Stack
+## Roadmap
+
+### What I'm working on now
+- Adding more venues
+- Tinkering with the UI
+- Hopefully making load times faster
+
+### What's next
+- Handling custom / one-off events somehow
+- Form submission for new events
+- Email inbox
+- Code hygiene
+
+### Later / eventually
+- Stickers?
+- Custom playlists?
+- Possible UI re-design
+
+### IDK how but thinking about it
+- Bringing in events from insta like Fuzzy Needle
+
+---
+
+## Help me!
+
+I'm looking for co-developers here -- this thing could be really cool and TBH I am not an experienced developer! Reach out to me if you want to help
+
+---
+
+## Technical Stuff
+
+### What does what
 
 - **Backend:** Python / FastAPI, SQLAlchemy (async), PostgreSQL
 - **Scrapers:** Ticketmaster Discovery API + custom scrapers for RHP Tickets, Tribe Events, Squarespace, EventPrime, VenuePilot, and venue-specific parsers
@@ -43,9 +76,7 @@ Scrapes show listings from 15+ venues every 6 hours and serves them as a FullCal
 - **Frontend:** Vanilla JS, [FullCalendar v6](https://fullcalendar.io/)
 - **Deployment:** Google Cloud Run + Neon PostgreSQL + Cloud Scheduler
 
----
-
-## Running locally
+### Running locally, if you want to
 
 Requires Docker.
 
@@ -64,9 +95,7 @@ To trigger a manual scrape:
 curl -X POST http://localhost:8000/api/scrape
 ```
 
----
-
-## Project structure
+### Project structure
 
 ```
 backend/
@@ -87,13 +116,9 @@ frontend/
     favorites.js  # Heart/hide/export
 ```
 
----
+### Developer tools
 
----
-
-## Developer tools
-
-Scripts in `tools/` for local development and debugging:
+Scripts in `tools/` for local development and debugging. Note these are really only tested on my machine. Some may also be outdated.
 
 | Script | Purpose |
 |---|---|
@@ -103,7 +128,10 @@ Scripts in `tools/` for local development and debugging:
 | `diagnose_scrapers.py` | Run scrapers individually and report output/errors |
 | `inspect_html.py` | Print raw HTML from a venue page for scraper debugging |
 | `inspect_js_venues.py` | Inspect JS-heavy venue pages for API/widget patterns |
+| `wait_for_deploy.py` | If you're deploying with Google Cloud Build this will let you know when the new build is live |
+| `run_scrape.py` | Runs the scrape API and provides a summary of what happened. Prints results to `tools/scrape_results.log`. |
 
 ---
 
-mostly made by [claude code](https://claude.ai/claude-code), with piloting from [@tyfi](https://bsky.app/profile/tyfi.bsky.social).
+## Contact me: 
+[@tyfi](https://bsky.app/profile/tyfi.bsky.social).
