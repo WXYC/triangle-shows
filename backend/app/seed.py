@@ -218,8 +218,8 @@ VENUES = [
         "capacity": None,
         "size_category": "small",
         "website": "https://chapelofbones.com/",
-        "scraper_type": "tribe_events",
-        "scraper_config": {"url": "https://chapelofbones.com/events/"},
+        "scraper_type": "tickpick_organizer",
+        "scraper_config": {"organizer_id": "chapel-of-bones"},
         "color": "#2a2840",  # dark ash (Raleigh)
     },
     {

@@ -63,6 +63,9 @@ class ScrapeManager:
         elif venue.scraper_type == "webflow_cms":
             from app.scrapers.webflow_cms import WebflowCMSScraper
             return WebflowCMSScraper(venue.slug, venue.scraper_config)
+        elif venue.scraper_type == "tickpick_organizer":
+            from app.scrapers.tickpick_organizer import TickPickOrganizerScraper
+            return TickPickOrganizerScraper(venue.slug, venue.scraper_config)
         else:
             logger.warning(f"Unknown scraper type: {venue.scraper_type}")
             return None
