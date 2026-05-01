@@ -51,6 +51,7 @@ steps:
     id: build
     args:
       - build
+      - --build-arg=GIT_COMMIT=$COMMIT_SHA
       - -t
       - $_REGION-docker.pkg.dev/$PROJECT_ID/$_REPO/api:$COMMIT_SHA
       - -t
