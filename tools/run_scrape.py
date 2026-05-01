@@ -86,7 +86,7 @@ def main():
             lines.append("  OK venues:")
             for r in successes:
                 lines.append(
-                    f"    ✓ {r['venue']:<30}  "
+                    f"    OK  {r['venue']:<30}  "
                     f"found={r.get('found',0):>3}  "
                     f"created={r.get('created',0):>3}  "
                     f"updated={r.get('updated',0):>3}"
@@ -97,7 +97,7 @@ def main():
             lines.append("")
             lines.append("  FAILED venues:")
             for r in failures:
-                lines.append(f"    ✗ {r['venue']:<30}  {r.get('error', 'unknown error')}")
+                lines.append(f"    ERR {r['venue']:<30}  {r.get('error', 'unknown error')}")
     else:
         lines.append(json.dumps(data, indent=2))
 
