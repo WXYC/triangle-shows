@@ -69,15 +69,22 @@ class ScrapeManager:
 
     async def scrape_venue(self, venue: Venue) -> dict:
         """Scrape a single venue and upsert events."""
+        # Ensure the session is clean before starting — a previous venue's failed
+        # error-log commit could leave the connection in an aborted state.
+        try:
+            await self.session.rollback()
+        except Exception:
+            pass
+
         log = ScrapeLog(
             venue_id=venue.id,
             scraper_type=venue.scraper_type,
             started_at=datetime.utcnow(),
         )
-        self.session.add(log)
-        await self.session.flush()
-
         try:
+            self.session.add(log)
+            await self.session.flush()
+
             scraper = self._get_scraper(venue)
             if not scraper:
                 raise ValueError(f"No scraper available for {venue.slug}")
@@ -108,8 +115,6 @@ class ScrapeManager:
         except Exception as e:
             logger.error(f"[{venue.slug}] Scrape failed: {e}")
             try:
-                # Rollback the failed transaction before attempting any new writes.
-                # Without this, Postgres rejects all further commands on the connection.
                 await self.session.rollback()
                 log.status = "failed"
                 log.error_message = str(e)[:2000]
