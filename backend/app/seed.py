@@ -198,6 +198,20 @@ VENUES = [
         "color": "#5a3a20",  # warm espresso (Durham)
     },
     {
+        "name": "Boom Club",
+        "slug": "boom-club",
+        "city": "Durham",
+        "capacity": None,
+        "size_category": "small",
+        "website": "https://www.boom-club.org/",
+        "scraper_type": "squarespace",
+        "scraper_config": {
+            "url": "https://www.boom-club.org/events?format=json",
+            "exclude_titles": ["Synth Library open", "Synth Library closed"],
+        },
+        "color": "#3a1e6e",  # deep violet (Durham)
+    },
+    {
         "name": "Chapel of Bones",
         "slug": "chapel-of-bones",
         "city": "Raleigh",
