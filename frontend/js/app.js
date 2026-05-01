@@ -120,10 +120,26 @@ function _updateHiddenChip(date) {
 }
 
 function _updateAllHiddenChips() {
+  const hiddenObj = getHidden();
   document.querySelectorAll(".day-hidden-chip, .fc-list-hidden-row").forEach((el) => el.remove());
+  if (Object.keys(hiddenObj).length === 0) return;
   const byDate = {};
   calendar.getEvents().forEach((ev) => {
-    if (isHidden(ev.id)) {
+    if (hiddenObj[ev.id]) {
+      const d = ev.extendedProps.date;
+      byDate[d] = (byDate[d] || 0) + 1;
+    }
+  });
+  Object.entries(byDate).forEach(([date, count]) => _setHiddenChip(date, count));
+}
+
+function _updateAllHiddenChipsFromSnapshot(allEvents) {
+  const hiddenObj = getHidden();
+  document.querySelectorAll(".day-hidden-chip, .fc-list-hidden-row").forEach((el) => el.remove());
+  if (Object.keys(hiddenObj).length === 0) return;
+  const byDate = {};
+  allEvents.forEach((ev) => {
+    if (hiddenObj[ev.id]) {
       const d = ev.extendedProps.date;
       byDate[d] = (byDate[d] || 0) + 1;
     }

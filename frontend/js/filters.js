@@ -193,8 +193,21 @@ function _checkEventVisible(ev, venueMap) {
   return true;
 }
 
-// Apply all active filters to every event currently in the calendar.
+// Venues where multiple same-day events should collapse to one chip.
+const GROUPED_VENUE_SLUGS = new Set(["dpac"]);
+
+// rAF gate: absorbs rapid-fire calls so only one filter pass runs per animation frame.
+let _filterRafId = null;
 function applyAllFilters() {
+  if (_filterRafId !== null) return;
+  _filterRafId = requestAnimationFrame(() => {
+    _filterRafId = null;
+    _applyAllFiltersNow();
+  });
+}
+
+// Core filter pass — single snapshot of calendar.getEvents() shared across all sub-tasks.
+function _applyAllFiltersNow() {
   if (!calendar) return;
 
   // Build a slug→checked map once so _checkEventVisible never touches the DOM per event.
@@ -205,42 +218,40 @@ function applyAllFilters() {
   // Hidden venues are always off regardless of checkbox state.
   getHiddenVenues().forEach((slug) => { venueMap[slug] = false; });
 
-  calendar.getEvents().forEach((ev) => {
-    const target = _checkEventVisible(ev, venueMap) ? "auto" : "none";
+  // Single snapshot shared by all three sub-tasks below.
+  const allEvents = calendar.getEvents();
+
+  // Sub-task A: visibility — track which events are visible for sub-task B.
+  const visible = new Set();
+  allEvents.forEach((ev) => {
+    const show = _checkEventVisible(ev, venueMap);
+    if (show) visible.add(ev.id);
+    const target = show ? "auto" : "none";
     if (ev.display !== target) ev.setProp("display", target);
   });
 
-  // After normal filters, collapse venues that have multiple events per day
-  // down to one visible chip (extras stay in the store for the modal).
-  _applyVenueDayGrouping();
-
-  if (typeof _updateAllHiddenChips === "function") _updateAllHiddenChips();
-}
-
-// Venues where multiple same-day events should collapse to one chip.
-const GROUPED_VENUE_SLUGS = new Set(["dpac"]);
-
-function _applyVenueDayGrouping() {
-  if (!calendar) return;
-
-  // Group visible events by venue+date for grouped venues.
-  const groups = {};
-  calendar.getEvents().forEach((ev) => {
+  // Sub-task B: collapse grouped venues (e.g. DPAC) to one chip per day.
+  const dpacGroups = {};
+  allEvents.forEach((ev) => {
     const slug = ev.extendedProps.venue_slug;
-    if (!GROUPED_VENUE_SLUGS.has(slug) || ev.display === "none") return;
+    if (!GROUPED_VENUE_SLUGS.has(slug) || !visible.has(ev.id)) return;
     const key = slug + "|" + ev.extendedProps.date;
-    if (!groups[key]) groups[key] = [];
-    groups[key].push(ev);
+    (dpacGroups[key] = dpacGroups[key] || []).push(ev);
   });
-
-  Object.values(groups).forEach((group) => {
+  Object.values(dpacGroups).forEach((group) => {
     if (group.length <= 1) return;
-    // Prefer on_sale as the visible chip; fall back to first.
     const primary = group.find((ev) => ev.extendedProps.status === "on_sale") || group[0];
     group.forEach((ev) => {
       if (ev !== primary && ev.display !== "none") ev.setProp("display", "none");
     });
   });
+
+  // Sub-task C: hidden-show chips — reuse snapshot to avoid a third getEvents() call.
+  if (typeof _updateAllHiddenChipsFromSnapshot === "function") {
+    _updateAllHiddenChipsFromSnapshot(allEvents);
+  } else if (typeof _updateAllHiddenChips === "function") {
+    _updateAllHiddenChips();
+  }
 }
 
 // ── Filter toggles ────────────────────────────────────────────────────────
