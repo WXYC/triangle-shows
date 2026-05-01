@@ -40,7 +40,7 @@ In the background, a script scrapes show listings from every venues every 6 hour
 ## Roadmap
 
 ### What I'm working on now
-- Adding more venues
+- Adding more venues (Sharp 9 Gallery, the Fruit, others???)
 - Tinkering with the UI
 - Hopefully making load times faster
 
