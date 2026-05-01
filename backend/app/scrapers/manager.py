@@ -69,13 +69,6 @@ class ScrapeManager:
 
     async def scrape_venue(self, venue: Venue) -> dict:
         """Scrape a single venue and upsert events."""
-        # Ensure the session is clean before starting — a previous venue's failed
-        # error-log commit could leave the connection in an aborted state.
-        try:
-            await self.session.rollback()
-        except Exception:
-            pass
-
         log = ScrapeLog(
             venue_id=venue.id,
             scraper_type=venue.scraper_type,
