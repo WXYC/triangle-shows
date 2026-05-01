@@ -124,6 +124,14 @@ class ScrapeManager:
         if not scraped_events:
             return 0, 0
 
+        # Deduplicate scraped events by hash (sites sometimes list the same event
+        # twice — e.g. a featured section + main listing — which would cause a
+        # UniqueViolationError when both end up in the same INSERT flush batch.
+        seen: dict[str, ScrapedEvent] = {}
+        for se in scraped_events:
+            seen.setdefault(se.hash, se)
+        scraped_events = list(seen.values())
+
         # Fetch all matching existing events in one query instead of one per event.
         hashes = [se.hash for se in scraped_events]
         result = await self.session.execute(
