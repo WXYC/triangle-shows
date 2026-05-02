@@ -72,9 +72,17 @@ class ScrapeManager:
 
     async def scrape_venue(self, venue: Venue) -> dict:
         """Scrape a single venue and upsert events."""
+        # Refresh venue before accessing any attributes. If a previous scrape_venue call
+        # ended in a rollback, all ORM objects in the session are expired; accessing an
+        # expired attribute on an AsyncSession triggers a sync lazy-load → greenlet error.
+        await self.session.refresh(venue)
+        venue_slug = venue.slug
+        venue_id = venue.id
+        scraper_type = venue.scraper_type
+
         log = ScrapeLog(
-            venue_id=venue.id,
-            scraper_type=venue.scraper_type,
+            venue_id=venue_id,
+            scraper_type=scraper_type,
             started_at=datetime.utcnow(),
         )
         try:
@@ -83,10 +91,10 @@ class ScrapeManager:
 
             scraper = self._get_scraper(venue)
             if not scraper:
-                raise ValueError(f"No scraper available for {venue.slug}")
+                raise ValueError(f"No scraper available for {venue_slug}")
 
             scraped_events = await scraper.scrape()
-            created, updated = await self._upsert_events(venue.id, scraped_events)
+            created, updated = await self._upsert_events(venue_id, scraped_events)
 
             log.status = "success"
             log.events_found = len(scraped_events)
@@ -97,11 +105,11 @@ class ScrapeManager:
             await self.session.commit()
 
             logger.info(
-                f"[{venue.slug}] Scrape complete: {len(scraped_events)} found, "
+                f"[{venue_slug}] Scrape complete: {len(scraped_events)} found, "
                 f"{created} created, {updated} updated"
             )
             return {
-                "venue": venue.slug,
+                "venue": venue_slug,
                 "status": "success",
                 "found": len(scraped_events),
                 "created": created,
@@ -109,7 +117,7 @@ class ScrapeManager:
             }
 
         except Exception as e:
-            logger.error(f"[{venue.slug}] Scrape failed: {e}")
+            logger.error(f"[{venue_slug}] Scrape failed: {e}")
             try:
                 await self.session.rollback()
                 log.status = "failed"
@@ -119,8 +127,8 @@ class ScrapeManager:
                 self.session.add(log)
                 await self.session.commit()
             except Exception as log_err:
-                logger.warning(f"[{venue.slug}] Could not write error log: {log_err}")
-            return {"venue": venue.slug, "status": "failed", "error": str(e)}
+                logger.warning(f"[{venue_slug}] Could not write error log: {log_err}")
+            return {"venue": venue_slug, "status": "failed", "error": str(e)}
 
     async def _upsert_events(self, venue_id: int, scraped_events: list[ScrapedEvent]) -> tuple[int, int]:
         """Upsert events using hash-based dedup. Returns (created, updated) counts."""

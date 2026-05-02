@@ -39,6 +39,8 @@ document.addEventListener("DOMContentLoaded", function () {
 // FullCalendar initialization
 let calendar;
 const _loadingScreenStart = Date.now();
+let _initialLoadComplete = false;  // guards the function-source fetch against re-fetching from API
+let _loadingScreenDismissed = false;
 
 // ── Loading screen progress bar ──────────────────────────────────────────────
 const _BAR_LEN = 20;
@@ -113,8 +115,9 @@ function _setHiddenChip(date, count) {
 }
 
 function _updateHiddenChip(date) {
-  const count = calendar.getEvents().filter(
-    (ev) => ev.extendedProps.date === date && isHidden(ev.id)
+  const hiddenObj = typeof getHidden === "function" ? getHidden() : {};
+  const count = _allEventsCache.filter(
+    (ev) => ev.extendedProps?.date === date && hiddenObj[ev.id]
   ).length;
   _setHiddenChip(date, count);
 }
@@ -170,13 +173,25 @@ document.addEventListener("DOMContentLoaded", function () {
     fixedWeekCount: false,
     displayEventTime: false,
     eventSources: [
-      {
-        url: `${API_BASE}/api/events/fullcalendar`,
-        method: "GET",
-        // No server-side filter params — all filtering is client-side.
-        failure: function () {
-          console.error("Failed to fetch events");
-        },
+      function (info, successCallback, failureCallback) {
+        if (!_initialLoadComplete) {
+          fetch(`${API_BASE}/api/events/fullcalendar`)
+            .then(function (r) {
+              if (!r.ok) throw new Error("HTTP " + r.status);
+              return r.json();
+            })
+            .then(function (data) {
+              _allEventsCache = data;
+              _initialLoadComplete = true;
+              successCallback(_getFilteredEvents());
+            })
+            .catch(function (err) {
+              console.error("Failed to fetch events:", err);
+              failureCallback(err);
+            });
+        } else {
+          successCallback(_getFilteredEvents());
+        }
       },
     ],
     eventClassNames: function (arg) {
@@ -217,37 +232,40 @@ document.addEventListener("DOMContentLoaded", function () {
       return { html };
     },
     windowResize: function (view) {
-      if (window.innerWidth < 768) {
-        calendar.changeView("listUpcoming");
-      } else {
-        calendar.changeView("dayGridMonth");
+      const target = window.innerWidth < 768 ? "listUpcoming" : "dayGridMonth";
+      if (calendar.view.type !== target) {
+        calendar.changeView(target);
       }
     },
-    // After all events finish loading, apply filters in one pass. Deferred via
-    // requestAnimationFrame so FullCalendar finishes its own render cycle first —
-    // calling setProp mid-render can cause list-view events to appear duplicated.
     loading: function (isLoading) {
       if (!isLoading) {
-      const elapsed = Date.now() - _loadingScreenStart;
-      const delay = Math.max(0, 1000 - elapsed);
-      setTimeout(function () {
-        _finishProgressBar(function () {
-          const screen = document.getElementById("loading-screen");
-          if (screen) {
-            screen.classList.add("fade-out");
-            screen.addEventListener("transitionend", () => screen.remove(), { once: true });
-          }
-        });
-      }, delay);
-        if (typeof applyAllFilters === "function") requestAnimationFrame(applyAllFilters);
+        if (!_loadingScreenDismissed) {
+          _loadingScreenDismissed = true;
+          const elapsed = Date.now() - _loadingScreenStart;
+          const delay = Math.max(0, 1000 - elapsed);
+          setTimeout(function () {
+            _finishProgressBar(function () {
+              const screen = document.getElementById("loading-screen");
+              if (screen) {
+                screen.classList.add("fade-out");
+                screen.addEventListener("transitionend", () => {
+                  screen.remove();
+                }, { once: true });
+              } else {
+                _filtersEnabled = true;
+              }
+            });
+          }, delay);
+        }
+        // Update hidden-show chips after every load (initial + refetch).
+        if (_allEventsCache.length > 0) {
+          requestAnimationFrame(function () {
+            _updateAllHiddenChipsFromSnapshot(_allEventsCache);
+          });
+        }
       }
     },
     eventDidMount: function (info) {
-      // Persist-hidden: suppress events the user dismissed.
-      if (typeof isHidden === "function" && isHidden(info.event.id)) {
-        info.event.setProp("display", "none");
-        return;
-      }
       // Restore heart state for events loaded after page init.
       if (typeof isFavorited === "function" && isFavorited(info.event.id)) {
         const btn = info.el.querySelector(".ev-heart");
@@ -277,6 +295,7 @@ document.addEventListener("DOMContentLoaded", function () {
       const hideBtn  = e.target.closest(".ev-hide");
       if (!heartBtn && !hideBtn) return;
       e.stopPropagation(); // prevent modal from opening
+      e.preventDefault();  // prevent <a href="#"> in FC list view from scrolling to top
 
       const eventId = (heartBtn || hideBtn).dataset.eventId;
       const fcEvent = calendar.getEventById(eventId);
@@ -299,16 +318,15 @@ document.addEventListener("DOMContentLoaded", function () {
         const slug = fcEvent.extendedProps.venue_slug;
         const date = fcEvent.extendedProps.date;
         if (typeof GROUPED_VENUE_SLUGS !== "undefined" && GROUPED_VENUE_SLUGS.has(slug)) {
-          calendar.getEvents().forEach((ev) => {
-            if (ev.extendedProps.venue_slug === slug && ev.extendedProps.date === date) {
+          _allEventsCache.forEach((ev) => {
+            if (ev.extendedProps?.venue_slug === slug && ev.extendedProps?.date === date) {
               hideEvent(ev.id);
-              ev.setProp("display", "none");
             }
           });
         } else {
           hideEvent(eventId);
-          fcEvent.setProp("display", "none");
         }
+        applyAllFilters();
         _updateHiddenChip(date);
       }
     },
