@@ -133,5 +133,8 @@ Scripts in `tools/` for local development and debugging. Note these are really o
 
 ---
 
-## Contact me: 
-[@tyfi](https://bsky.app/profile/tyfi.bsky.social).
+## Licensing / Contact me:
+
+This project is licensed under the GNU General Public License Version 3.
+
+Contact me at [@tyfi](https://bsky.app/profile/tyfi.bsky.social).
