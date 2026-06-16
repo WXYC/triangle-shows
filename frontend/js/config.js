@@ -146,7 +146,7 @@ window.addEventListener("resize", fitAsciiTitle);
 // Per-subdomain site configuration. Detected once at load time from hostname.
 const SITE_CONFIG = (function () {
   const host = window.location.hostname;
-  if (host.startsWith("durm.") || host === "localhost") {
+  if (host.startsWith("durm.")) {
     return {
       city:      "Durham",
       title:     "durm-shows",
