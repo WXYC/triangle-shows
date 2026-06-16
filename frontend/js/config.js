@@ -85,7 +85,7 @@ const PALETTES = {
       "--surface":      "#081a30",
       "--surface2":     "#0e2340",
       "--border":       "#1c3a6a",
-      "--text":         "#d8e4f4",
+      "--text":         "#ffffff",
       "--muted":        "#4878b8",
       "--dim":          "#1c3868",
       "--accent":       "#bf6a28",
@@ -182,10 +182,9 @@ function applySiteConfig() {
   const paletteGroup = document.querySelector(".palette-group");
   if (paletteGroup) paletteGroup.style.display = "none";
 
-  // Default to site palette only if user has no saved preference
-  if (!localStorage.getItem("triangle-shows-palette")) {
-    applyPalette(SITE_CONFIG.palette);
-  }
+  // Always apply the site palette — picker is hidden on subdomain sites so
+  // there's no UI to change it, and the saved preference may be from the main domain.
+  applyPalette(SITE_CONFIG.palette);
 }
 
 document.addEventListener("DOMContentLoaded", applySiteConfig);
