@@ -150,7 +150,7 @@ const SITE_CONFIG = (function () {
     return {
       city:      "Durham",
       title:     "durm-shows",
-      subtitle:  `live music <s>across the triangle</s> in durham on one calendar. see the rest of the triangle <a href="https://triangle-shows.net">here</a>.`,
+      subtitle:  `live music <s>across the triangle</s> in durham on one calendar. see the rest of the triangle <a href="https://triangle-shows.net" style="color: var(--accent-hover)">here</a>.`,
       palette:   "durham",
       ascii: `      __                               __                                    __ \n  ___/ /_  ___________ ___       _____/ /_  ____ _      _______  ____  ___  / /_\n / _  / / / / ___/ __ '__ \\_____/ ___/ __ \\/ __ \\ | /| / / ___/ / __ \\/ _ \\/ __/\n/ // / /_/ / /  / / / / / /_____\\__ / / / / /_/ / |/ |/ /\\__ / / / / /  __/ /_  \n\\___/\\____/_/  /_/ /_/ /_/    /____/_/ /_/\\____/|__/|__/____(_)_/ /_/\\___/\\__/   `,
     };
