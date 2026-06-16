@@ -76,6 +76,24 @@ const PALETTES = {
       "--today-bg":     "rgba(192,96,208,0.05)",
     },
   },
+  // Durham Bulls: navy background, red accent
+  durham: {
+    label: "Durham",
+    accent: "#cc2020",
+    vars: {
+      "--bg":           "#04060f",
+      "--surface":      "#080d1c",
+      "--surface2":     "#0d1428",
+      "--border":       "#1a2448",
+      "--text":         "#dce4f0",
+      "--muted":        "#4868a0",
+      "--dim":          "#1a2848",
+      "--accent":       "#cc2020",
+      "--accent-hover": "#e03030",
+      "--accent-bg":    "rgba(204,32,32,0.12)",
+      "--today-bg":     "rgba(204,32,32,0.05)",
+    },
+  },
 };
 
 function applyPalette(key) {
@@ -124,6 +142,44 @@ function fitAsciiTitle() {
 
 document.addEventListener("DOMContentLoaded", fitAsciiTitle);
 window.addEventListener("resize", fitAsciiTitle);
+
+// Per-subdomain site configuration. Detected once at load time from hostname.
+const SITE_CONFIG = (function () {
+  const host = window.location.hostname;
+  if (host.startsWith("durm.")) {
+    return {
+      city:      "Durham",
+      title:     "durm-shows",
+      subtitle:  "live music in durham on one calendar",
+      palette:   "durham",
+    };
+  }
+  return { city: null };
+})();
+
+// Apply subdomain-specific title, subtitle, and default palette.
+// Runs after DOM is ready; palette is only defaulted if the user has no saved preference.
+function applySiteConfig() {
+  if (!SITE_CONFIG.city) return;
+
+  document.title = SITE_CONFIG.title + ".net";
+
+  const asciiTitle = document.querySelector(".ascii-title");
+  const siteTitle  = document.querySelector(".site-title");
+  const subtitle   = document.querySelector(".site-subtitle");
+
+  // Hide the ASCII art and use the text title on all screen sizes
+  if (asciiTitle) asciiTitle.style.display = "none";
+  if (siteTitle)  { siteTitle.textContent = SITE_CONFIG.title; siteTitle.style.display = "block"; }
+  if (subtitle)   subtitle.textContent = SITE_CONFIG.subtitle;
+
+  // Default to site palette only if user has no saved preference
+  if (!localStorage.getItem("triangle-shows-palette")) {
+    applyPalette(SITE_CONFIG.palette);
+  }
+}
+
+document.addEventListener("DOMContentLoaded", applySiteConfig);
 
 // City color mappings — jewel-tone palette, matches venue color families
 // border = chip border/text color; activeBg = subtle tint for active state

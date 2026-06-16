@@ -57,7 +57,10 @@ async function loadVenues(attempt = 0) {
   try {
     const resp = await fetch(`${API_BASE}/api/venues`);
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-    venues = await resp.json();
+    const allVenues = await resp.json();
+    venues = SITE_CONFIG.city
+      ? allVenues.filter((v) => v.city === SITE_CONFIG.city)
+      : allVenues;
     renderFilters();
   } catch (err) {
     console.error("Failed to load venues:", err);
@@ -78,6 +81,12 @@ function renderFilters() {
 function renderCityFilters() {
   const container = document.getElementById("city-filters");
   const cities = [...new Set(venues.map((v) => v.city))].sort();
+
+  // Single-city subdomain: city chip row is redundant
+  if (cities.length <= 1) {
+    container.style.display = "none";
+    return;
+  }
 
   container.innerHTML = cities
     .map((city) => {
