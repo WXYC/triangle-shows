@@ -82,12 +82,6 @@ function renderCityFilters() {
   const container = document.getElementById("city-filters");
   const cities = [...new Set(venues.map((v) => v.city))].sort();
 
-  // Single-city subdomain: city chip row is redundant
-  if (cities.length <= 1) {
-    container.style.display = "none";
-    return;
-  }
-
   container.innerHTML = cities
     .map((city) => {
       const colors = CITY_COLORS[city] || {};

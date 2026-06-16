@@ -150,7 +150,7 @@ const SITE_CONFIG = (function () {
     return {
       city:      "Durham",
       title:     "durm-shows",
-      subtitle:  "live music in durham on one calendar",
+      subtitle:  `live music <s>across the triangle</s> in durham on one calendar. see the rest of the triangle <a href="https://triangle-shows.net">here</a>.`,
       palette:   "durham",
       ascii: `      __                               __                                    __ \n  ___/ /_  ___________ ___       _____/ /_  ____ _      _______  ____  ___  / /_\n / _  / / / / ___/ __ '__ \\_____/ ___/ __ \\/ __ \\ | /| / / ___/ / __ \\/ _ \\/ __/\n/ // / /_/ / /  / / / / / /_____\\__ / / / / /_/ / |/ |/ /\\__ / / / / /  __/ /_  \n\\___/\\____/_/  /_/ /_/ /_/    /____/_/ /_/\\____/|__/|__/____(_)_/ /_/\\___/\\__/   `,
     };
@@ -175,8 +175,12 @@ function applySiteConfig() {
     asciiTitle.textContent = SITE_CONFIG.ascii;
     if (cursor) asciiTitle.appendChild(cursor);
   }
-  if (siteTitle)  siteTitle.textContent = SITE_CONFIG.title;
-  if (subtitle)   subtitle.textContent = SITE_CONFIG.subtitle;
+  if (siteTitle) siteTitle.textContent = SITE_CONFIG.title;
+  if (subtitle)  subtitle.innerHTML = SITE_CONFIG.subtitle;
+
+  // Hide palette swatches — durham palette is fixed; only dark/light toggle remains
+  const paletteGroup = document.querySelector(".palette-group");
+  if (paletteGroup) paletteGroup.style.display = "none";
 
   // Default to site palette only if user has no saved preference
   if (!localStorage.getItem("triangle-shows-palette")) {
