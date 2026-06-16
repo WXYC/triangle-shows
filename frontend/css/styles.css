@@ -64,19 +64,19 @@ html[data-palette="wisteria"] {
   --today-bg:     rgba(192,96,208,0.05);
 }
 
-/* Durham Bulls: navy background, red accent */
+/* Durham Bulls: #003E7A navy bg, #B15E27-derived desaturated brown accent */
 html[data-palette="durham"] {
-  --bg:           #04060f;
-  --surface:      #080d1c;
-  --surface2:     #0d1428;
-  --border:       #1a2448;
-  --text:         #dce4f0;
+  --bg:           #020810;
+  --surface:      #061020;
+  --surface2:     #0a1830;
+  --border:       #153060;
+  --text:         #d8e4f4;
   --muted:        #4868a0;
-  --dim:          #1a2848;
-  --accent:       #cc2020;
-  --accent-hover: #e03030;
-  --accent-bg:    rgba(204,32,32,0.12);
-  --today-bg:     rgba(204,32,32,0.05);
+  --dim:          #1a3060;
+  --accent:       #c8906a;
+  --accent-hover: #daa882;
+  --accent-bg:    rgba(200,144,106,0.12);
+  --today-bg:     rgba(200,144,106,0.05);
 }
 
 /* === Light mode palette overrides ===
@@ -138,6 +138,21 @@ html[data-mode="light"][data-palette="wisteria"] {
   --accent-hover: #6a1888;
   --accent-bg:    rgba(136,40,168,0.10);
   --today-bg:     rgba(136,40,168,0.06);
+}
+
+/* Durham Bulls light: warm desaturated brown bg, navy text */
+html[data-mode="light"][data-palette="durham"] {
+  --bg:           #f5ece0;
+  --surface:      #eee0d0;
+  --surface2:     #e4d0bc;
+  --border:       #cdb898;
+  --text:         #002858;
+  --muted:        #2a4e82;
+  --dim:          #b89e80;
+  --accent:       #003E7A;
+  --accent-hover: #00306a;
+  --accent-bg:    rgba(0,62,122,0.10);
+  --today-bg:     rgba(0,62,122,0.06);
 }
 
 /* === Base === */

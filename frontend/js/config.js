@@ -76,22 +76,22 @@ const PALETTES = {
       "--today-bg":     "rgba(192,96,208,0.05)",
     },
   },
-  // Durham Bulls: navy background, red accent
+  // Durham Bulls: #003E7A navy + #B15E27 burnt orange
   durham: {
     label: "Durham",
-    accent: "#cc2020",
+    accent: "#c8906a",
     vars: {
-      "--bg":           "#04060f",
-      "--surface":      "#080d1c",
-      "--surface2":     "#0d1428",
-      "--border":       "#1a2448",
-      "--text":         "#dce4f0",
+      "--bg":           "#020810",
+      "--surface":      "#061020",
+      "--surface2":     "#0a1830",
+      "--border":       "#153060",
+      "--text":         "#d8e4f4",
       "--muted":        "#4868a0",
-      "--dim":          "#1a2848",
-      "--accent":       "#cc2020",
-      "--accent-hover": "#e03030",
-      "--accent-bg":    "rgba(204,32,32,0.12)",
-      "--today-bg":     "rgba(204,32,32,0.05)",
+      "--dim":          "#1a3060",
+      "--accent":       "#c8906a",
+      "--accent-hover": "#daa882",
+      "--accent-bg":    "rgba(200,144,106,0.12)",
+      "--today-bg":     "rgba(200,144,106,0.05)",
     },
   },
 };
@@ -146,12 +146,13 @@ window.addEventListener("resize", fitAsciiTitle);
 // Per-subdomain site configuration. Detected once at load time from hostname.
 const SITE_CONFIG = (function () {
   const host = window.location.hostname;
-  if (host.startsWith("durm.")) {
+  if (host.startsWith("durm.") || host === "localhost") {
     return {
       city:      "Durham",
       title:     "durm-shows",
       subtitle:  "live music in durham on one calendar",
       palette:   "durham",
+      ascii: `      __                               __                                    __ \n  ___/ /_  ___________ ___       _____/ /_  ____ _      _______  ____  ___  / /_\n / _  / / / / ___/ __ '__ \\_____/ ___/ __ \\/ __ \\ | /| / / ___/ / __ \\/ _ \\/ __/\n/ // / /_/ / /  / / / / / /_____\\__ / / / / /_/ / |/ |/ /\\__ / / / / /  __/ /_  \n\\___/\\____/_/  /_/ /_/ /_/    /____/_/ /_/\\____/|__/|__/____(_)_/ /_/\\___/\\__/   `,
     };
   }
   return { city: null };
@@ -168,9 +169,13 @@ function applySiteConfig() {
   const siteTitle  = document.querySelector(".site-title");
   const subtitle   = document.querySelector(".site-subtitle");
 
-  // Hide the ASCII art and use the text title on all screen sizes
-  if (asciiTitle) asciiTitle.style.display = "none";
-  if (siteTitle)  { siteTitle.textContent = SITE_CONFIG.title; siteTitle.style.display = "block"; }
+  // Swap ASCII art text while preserving the cursor span
+  if (asciiTitle && SITE_CONFIG.ascii) {
+    const cursor = asciiTitle.querySelector(".cursor");
+    asciiTitle.textContent = SITE_CONFIG.ascii;
+    if (cursor) asciiTitle.appendChild(cursor);
+  }
+  if (siteTitle)  siteTitle.textContent = SITE_CONFIG.title;
   if (subtitle)   subtitle.textContent = SITE_CONFIG.subtitle;
 
   // Default to site palette only if user has no saved preference
