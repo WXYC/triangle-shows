@@ -89,7 +89,7 @@ const PALETTES = {
       "--muted":        "#4878b8",
       "--dim":          "#1c3868",
       "--accent":       "#bf6a28",
-      "--accent-hover": "#d47e38",
+      "--accent-hover": "#f0a050",
       "--accent-bg":    "rgba(191,106,40,0.14)",
       "--today-bg":     "rgba(191,106,40,0.06)",
     },

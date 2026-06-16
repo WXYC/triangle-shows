@@ -74,7 +74,7 @@ html[data-palette="durham"] {
   --muted:        #4878b8;
   --dim:          #1c3868;
   --accent:       #bf6a28;
-  --accent-hover: #d47e38;
+  --accent-hover: #f0a050;
   --accent-bg:    rgba(191,106,40,0.14);
   --today-bg:     rgba(191,106,40,0.06);
 }
@@ -150,7 +150,7 @@ html[data-mode="light"][data-palette="durham"] {
   --muted:        #2a4e82;
   --dim:          #b89e80;
   --accent:       #003E7A;
-  --accent-hover: #00306a;
+  --accent-hover: #0060c0;
   --accent-bg:    rgba(0,62,122,0.10);
   --today-bg:     rgba(0,62,122,0.06);
 }
