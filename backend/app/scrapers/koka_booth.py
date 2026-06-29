@@ -1,17 +1,30 @@
-"""Koka Booth Amphitheatre supplementary scraper — Carbonhouse CMS / ETIX."""
+"""Koka Booth Amphitheatre supplementary scraper — Carbonhouse CMS / ETIX.
+
+Role: Runs as part of the scrape pipeline triggered by POST /api/scrape every 6 hours.
+      Supplements the Ticketmaster scraper by fetching events posted directly on the
+      venue's own Carbonhouse CMS site (boothamphitheatre.com) that may not appear on TM.
+Requires: BaseScraper (app.scrapers.base), httpx, BeautifulSoup (lxml parser).
+          Venue config dict must supply a "url" key (defaults to boothamphitheatre.com/events).
+"""
+
+# --- Standard Library Imports ---
 import json
 import logging
 import re
 from datetime import datetime, date, time
 from typing import Optional
 
+# --- Third-Party Imports ---
 import httpx
 from bs4 import BeautifulSoup
 
+# --- Internal Imports ---
 from app.scrapers.base import BaseScraper, ScrapedEvent
 
 logger = logging.getLogger(__name__)
 
+
+# --- Scraper Class ---
 
 class KokaBoothScraper(BaseScraper):
     """Supplementary scraper for Koka Booth to catch ETIX-only shows.
@@ -21,6 +34,7 @@ class KokaBoothScraper(BaseScraper):
     """
 
     async def scrape(self) -> list[ScrapedEvent]:
+        """Fetch and parse all events from boothamphitheatre.com."""
         url = self.config.get("url", "https://www.boothamphitheatre.com/events")
         events = []
 
@@ -29,10 +43,11 @@ class KokaBoothScraper(BaseScraper):
             resp.raise_for_status()
             soup = BeautifulSoup(resp.text, "lxml")
 
-            # Try JSON-LD first
+            # Try JSON-LD first — most reliable if the CMS emits structured data
             events.extend(self._extract_jsonld(soup, url))
 
             # Parse event cards from Carbonhouse layout
+            # Selector covers multiple Carbonhouse/Drupal card class variants
             cards = soup.select(
                 ".event-card, .event-item, .event-listing, "
                 ".views-row, article.event, .list-item"
@@ -43,15 +58,18 @@ class KokaBoothScraper(BaseScraper):
                 if parsed:
                     events.append(parsed)
 
-            # Follow detail links if we found none
+            # Follow detail links if we found none — some CMS configs require
+            # visiting individual event pages to get structured data
             if not events:
                 links = soup.select("a[href*='event'], a[href*='show']")
                 seen = set()
                 for link in links:
                     href = link.get("href", "")
+                    # Only follow links that stay on the venue's own domain
                     if href and href not in seen and "boothamphitheatre" in href:
                         seen.add(href)
 
+                # Cap at 20 detail pages to avoid unbounded fetches
                 for detail_url in list(seen)[:20]:
                     try:
                         d_resp = await client.get(detail_url)
@@ -62,7 +80,8 @@ class KokaBoothScraper(BaseScraper):
                     except Exception as e:
                         logger.warning(f"[KokaBooth] Detail fetch failed: {e}")
 
-        # Deduplicate
+        # Deduplicate by hash before returning (manager also deduplicates, but
+        # this avoids inserting duplicate upserts within a single scrape run)
         seen_hashes = set()
         unique = []
         for ev in events:
@@ -73,12 +92,16 @@ class KokaBoothScraper(BaseScraper):
         logger.info(f"[KokaBooth] Found {len(unique)} events for {self.venue_slug}")
         return unique
 
+    # --- JSON-LD Extraction ---
+
     def _extract_jsonld(self, soup: BeautifulSoup, page_url: str) -> list[ScrapedEvent]:
+        """Find and parse all JSON-LD Event/MusicEvent blocks on a page."""
         events = []
         scripts = soup.find_all("script", type="application/ld+json")
         for script in scripts:
             try:
                 data = json.loads(script.string)
+                # JSON-LD can be a single object or an array of objects
                 items = data if isinstance(data, list) else [data]
                 for item in items:
                     if item.get("@type") in ("Event", "MusicEvent"):
@@ -90,24 +113,30 @@ class KokaBoothScraper(BaseScraper):
         return events
 
     def _parse_jsonld(self, item: dict, page_url: str) -> Optional[ScrapedEvent]:
+        """Convert a single JSON-LD Event dict into a ScrapedEvent."""
         try:
             name = item.get("name", "").strip()
             start = item.get("startDate", "")
             if not name or not start:
                 return None
 
+            # startDate may be a full ISO datetime ("2024-06-01T19:30:00") or
+            # just a date ("2024-06-01") — handle both forms
             if "T" in start:
                 dt = datetime.fromisoformat(start.replace("Z", "+00:00"))
                 event_date = dt.date()
+                # Treat midnight as "no time specified" to avoid misleading 12:00am display
                 show_time = dt.time().replace(tzinfo=None) if dt.time() != time(0, 0) else None
             else:
                 event_date = date.fromisoformat(start[:10])
                 show_time = None
 
+            # image can be a URL string, a list of URLs, or an ImageObject dict
             image = item.get("image", "")
             if isinstance(image, (list, dict)):
                 image = image[0] if isinstance(image, list) else image.get("url", "")
 
+            # offers can be a single Offer dict or a list; grab the first ticket URL
             offers = item.get("offers", {})
             if isinstance(offers, list):
                 offers = offers[0] if offers else {}
@@ -129,8 +158,12 @@ class KokaBoothScraper(BaseScraper):
             logger.warning(f"[KokaBooth] JSON-LD parse error: {e}")
             return None
 
+    # --- HTML Card Parsing ---
+
     def _parse_card(self, card) -> Optional[ScrapedEvent]:
+        """Extract event data from a Carbonhouse HTML event card element."""
         try:
+            # Try linked heading first so we also capture the detail URL
             title_el = card.select_one("h2 a, h3 a, .event-title a, .title a")
             if not title_el:
                 title_el = card.select_one("h2, h3, .event-title")
@@ -141,11 +174,13 @@ class KokaBoothScraper(BaseScraper):
             if not name:
                 return None
 
+            # Only grab href if the title element is actually an anchor
             link = title_el.get("href") if title_el.name == "a" else None
 
             date_el = card.select_one("time, .date, .event-date")
             event_date = None
             if date_el:
+                # Prefer the machine-readable datetime attribute over display text
                 dt_attr = date_el.get("datetime")
                 if dt_attr:
                     try:
@@ -153,6 +188,7 @@ class KokaBoothScraper(BaseScraper):
                     except ValueError:
                         pass
                 if not event_date:
+                    # Strip leading weekday names ("Saturday, June 1, 2024" -> "June 1, 2024")
                     text = re.sub(r'^(Mon|Tue|Wed|Thu|Fri|Sat|Sun)\w*,?\s*', '', date_el.get_text(strip=True))
                     for fmt in ["%B %d, %Y", "%b %d, %Y", "%m/%d/%Y"]:
                         try:
@@ -161,6 +197,7 @@ class KokaBoothScraper(BaseScraper):
                         except ValueError:
                             continue
 
+            # Skip cards where we couldn't determine a date
             if not event_date:
                 return None
 

@@ -1,4 +1,13 @@
-"""Seed venue data into the database."""
+"""
+Idempotently inserts or updates all 21 Triangle-area venues into the database.
+
+Role: Called once at application startup (from main.py) before the scheduler
+begins. Runs after init_db() so the schema is guaranteed to exist. Also
+removable discontinued venues so stale data doesn't accumulate.
+Requires: DATABASE_URL env var (via config.py), app.database, app.models.
+"""
+
+# --- Imports ---
 import asyncio
 import logging
 from sqlalchemy import select
@@ -7,6 +16,23 @@ from app.models import Venue
 
 logger = logging.getLogger(__name__)
 
+# --- Venue Definitions ---
+# Each dict maps directly to Venue model columns.
+# scraper_type determines which scraper class handles the venue.
+# scraper_config passes venue-specific options (URL, filters, account IDs) to that scraper.
+# color is the hex used by the FullCalendar frontend to distinguish venues by city.
+#
+# Scraper → venue mapping (as of 2026-06-29 — update when venues are added/changed):
+#   ticketmaster      Koka Booth Amphitheatre, Red Hat Amphitheater, DPAC, The Ritz
+#   rhp_events        Lincoln Theatre, Cat's Cradle, Cat's Cradle Back Room, Local 506, The Pinhook
+#   motorco           Motorco Music Hall
+#   eventprime        Kings
+#   tribe_events      The Cave
+#   venuepilot        Haw River Ballroom, Rubies on Five Points, Stanczyks
+#   squarespace       Neptune's Parlour, Boom Club
+#   mec               Shadowbox Studio, Slim's
+#   tickpick_organizer Chapel of Bones
+#   webflow_cms       Pour House
 VENUES = [
     # Phase 1: Ticketmaster venues
     {
@@ -73,6 +99,7 @@ VENUES = [
         "size_category": "medium",
         "website": "https://catscradle.com/",
         "scraper_type": "rhp_events",
+        # venue_filter/venue_filter_not split the shared events page into main room vs. back room
         "scraper_config": {"url": "https://catscradle.com/events/", "venue_filter": "Cat's Cradle", "venue_filter_not": "Back Room"},
         "color": "#1e5c3c",  # emerald (Carrboro)
     },
@@ -128,6 +155,7 @@ VENUES = [
         "size_category": "small",
         "website": "https://catscradle.com/",
         "scraper_type": "rhp_events",
+        # Shares a page with the main Cat's Cradle; venue_filter isolates back-room shows
         "scraper_config": {"url": "https://catscradle.com/events/", "venue_filter": "Back Room"},
         "color": "#1f6b47",  # lighter emerald (Carrboro)
     },
@@ -207,6 +235,7 @@ VENUES = [
         "scraper_type": "squarespace",
         "scraper_config": {
             "url": "https://www.boom-club.org/events?format=json",
+            # Exclude recurring non-concert events that would clutter the calendar
             "exclude_titles": ["Synth Library open", "Synth Library closed"],
         },
         "color": "#3a1e6e",  # deep violet (Durham)
@@ -250,6 +279,8 @@ VENUES = [
 ]
 
 
+# --- Seed Function ---
+
 async def seed_venues():
     """Insert or update all venues."""
     await init_db()
@@ -272,6 +303,7 @@ async def seed_venues():
             )
             existing = result.scalar_one_or_none()
             if existing:
+                # Overwrite all fields so changes to VENUES propagate on next startup
                 for key, value in venue_data.items():
                     setattr(existing, key, value)
                 count_updated += 1
@@ -283,6 +315,8 @@ async def seed_venues():
         print(f"Seed complete: {count_new} new, {count_updated} updated venues")
 
 
+# --- CLI Entry Point ---
+# Allows running `python -m app.seed` directly for manual re-seeding during development
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
     asyncio.run(seed_venues())

@@ -1,8 +1,20 @@
-"""Inspect HTML structure and JS for Motorco, Kings, Carolina Theatre."""
+"""
+Inspects JS-heavy venue pages to understand their event data structure.
+
+Role: Developer utility — run manually when building or debugging scrapers for
+venues that use JavaScript to render events (FullCalendar inline data, event
+card HTML, or admin-ajax endpoints). Not part of the runtime scrape pipeline.
+Requires: No env vars. Fetches live pages via urllib; run from any Python env.
+"""
+
+# --- Imports ---
 import urllib.request
 import re
 import json
 
+# --- Constants ---
+
+# Browser-like headers to avoid being blocked by venue sites
 HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -13,13 +25,19 @@ HEADERS = {
 }
 
 
+# --- Helpers ---
+
 def fetch(url):
+    """Fetch a URL and return the response body as a UTF-8 string."""
     req = urllib.request.Request(url, headers=HEADERS)
     with urllib.request.urlopen(req, timeout=20) as r:
         return r.read().decode("utf-8", errors="ignore")
 
 
 # ─── Motorco: extract inline FullCalendar events using regex per-field ────────
+# Motorco embeds FullCalendar event objects directly in the page HTML as a JS
+# array with single-quoted strings and unquoted keys — not valid JSON, so we
+# use per-field regex rather than json.loads.
 print("=" * 60)
 print("MOTORCO: Extracting inline FullCalendar events")
 print("=" * 60)
@@ -40,6 +58,9 @@ for i, (title, start, end, url) in enumerate(event_blocks[:5]):
     print(f"       url={url!r}")
 
 # ─── Carolina Theatre: inspect event card HTML ────────────────────────────────
+# Carolina Theatre renders events as repeated "eventCard" div blocks in static
+# HTML. This section reveals the card structure so the scraper knows which
+# selectors to use for title, date, and URL.
 print("\n" + "=" * 60)
 print("CAROLINA THEATRE: Inspecting eventCard HTML structure")
 print("=" * 60)
@@ -63,6 +84,9 @@ if m2:
     print(m2.group(0))
 
 # ─── Kings: find event-related URLs and action names ─────────────────────────
+# Kings uses the EventPrime WordPress plugin, which loads events via admin-ajax
+# POST requests authenticated by a nonce. This section sniffs for the nonce
+# value and the specific `ep_*` action name needed to replicate those calls.
 print("\n" + "=" * 60)
 print("KINGS: Scraping event URLs and admin-ajax action names")
 print("=" * 60)
@@ -93,7 +117,8 @@ print(f"\nEvent-related URLs on Kings page ({len(ep_urls)} found):")
 for u in ep_urls[:20]:
     print(" ", u)
 
-# Show portion of eventprime JS config
+# Show portion of eventprime JS config — useful for discovering the ajax_url
+# and other parameters EventPrime injects as a global JS object
 m3 = re.search(r'eventprime\s*=\s*(\{.{0,3000})', page_html, re.S)
 if m3:
     print("\nEventprime config (first 1500 chars):")

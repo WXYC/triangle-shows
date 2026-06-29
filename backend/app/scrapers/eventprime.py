@@ -1,4 +1,15 @@
-"""Kings scraper — custom WordPress theme with server-rendered show table."""
+"""
+Scraper for Kings Raleigh using their custom WordPress theme with a server-rendered show table.
+
+Role: Instantiated and called by scrapers/manager.py during each scrape cycle (triggered every
+      6 hours via POST /api/scrape). The class name reflects an earlier EventPrime implementation
+      that was replaced; the actual target is Kings Raleigh's hand-rolled WordPress theme.
+Requires: app.scrapers.base (BaseScraper, ScrapedEvent, BROWSER_HEADERS); httpx and
+          beautifulsoup4/lxml must be installed; no venue-specific env vars needed beyond
+          the optional "url" key in the venue's scraper config.
+"""
+
+# --- Imports ---
 import logging
 import re
 from datetime import datetime, date
@@ -9,8 +20,11 @@ from bs4 import BeautifulSoup
 
 from app.scrapers.base import BaseScraper, ScrapedEvent, BROWSER_HEADERS
 
+# --- Module-level setup ---
 logger = logging.getLogger(__name__)
 
+
+# --- Scraper class ---
 
 class EventPrimeScraper(BaseScraper):
     """Scrape events from Kings Raleigh's website.
@@ -28,6 +42,7 @@ class EventPrimeScraper(BaseScraper):
     """
 
     async def scrape(self) -> list[ScrapedEvent]:
+        """Fetch the Kings homepage, parse the Shows table, and return deduplicated events."""
         url = self.config.get("url", "https://www.kingsraleigh.com/")
         events = []
 
@@ -46,7 +61,7 @@ class EventPrimeScraper(BaseScraper):
             if parsed:
                 events.append(parsed)
 
-        # Deduplicate
+        # Deduplicate by hash in case the same event appears more than once on the page
         seen = set()
         unique = []
         for ev in events:
@@ -58,8 +73,9 @@ class EventPrimeScraper(BaseScraper):
         return unique
 
     def _parse_row(self, row) -> Optional[ScrapedEvent]:
+        """Extract a single ScrapedEvent from one <tr> in the Shows table, or None if invalid."""
         try:
-            # Date
+            # --- Date ---
             date_el = row.select_one("p.date")
             if not date_el:
                 return None
@@ -67,7 +83,7 @@ class EventPrimeScraper(BaseScraper):
             if not event_date:
                 return None
 
-            # Title — strip presenter <strong> and support <em>
+            # --- Title — strip presenter <strong> and support <em> ---
             title_el = row.select_one("td.body h3")
             if not title_el:
                 return None
@@ -78,16 +94,16 @@ class EventPrimeScraper(BaseScraper):
             if not name:
                 return None
 
-            # Ticket link
+            # --- Links ---
             ticket_el = row.select_one("a.tickets")
             ticket_url = ticket_el.get("href") if ticket_el else None
 
-            # Event detail page link
+            # Fall back to the first anchor in the body cell as the canonical event URL
             body_td = row.select_one("td.body")
             detail_link = body_td.select_one("a[href]") if body_td else None
             source_url = detail_link.get("href") if detail_link else None
 
-            # Show time — look for "Time: 8:00PM" paragraph
+            # --- Times and admission — scan all <p> tags in the body cell ---
             show_time = None
             doors_time = None
             price_min = None
@@ -102,7 +118,7 @@ class EventPrimeScraper(BaseScraper):
                 elif text.startswith("Admission:"):
                     price_min, price_max = self.parse_price_range(text[10:].strip())
 
-            # Image
+            # --- Image ---
             img_el = row.select_one("td.img img")
             image_url = img_el.get("src") if img_el else None
 

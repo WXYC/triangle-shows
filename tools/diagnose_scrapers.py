@@ -1,9 +1,23 @@
-"""Diagnose why HTML scrapers are returning 0 events."""
+"""
+Fetches each venue's event page and reports HTML structure, JS framework usage,
+JSON-LD event data, and event-related CSS classes to help debug why a scraper
+returns 0 events.
+
+Role: Standalone developer utility — not part of the runtime system. Run manually
+from the command line when a scraper stops returning events and you need to
+inspect the raw HTML response to understand the page structure.
+Requires: No env vars or project imports. Uses only the Python standard library.
+"""
+
+# --- Imports ---
 import urllib.request
 import urllib.error
 import re
 import json
 
+# --- Configuration ---
+
+# Mimic a real browser to avoid getting blocked or receiving bot-detection pages.
 HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -14,6 +28,7 @@ HEADERS = {
     "Accept-Language": "en-US,en;q=0.5",
 }
 
+# Venue slugs and their event-listing URLs — mirrors the venues seeded in the DB.
 venues = [
     ("lincoln-theatre",      "https://www.lincolntheatre.com/events/"),
     ("cats-cradle",          "https://catscradle.com/events/"),
@@ -25,7 +40,11 @@ venues = [
     ("the-cave",             "https://caverntavern.com/"),
 ]
 
+# Signals that the page shell is rendered by a JS framework (events won't appear
+# in the initial HTML response and the scraper will need Playwright or an API).
 JS_FRAMEWORKS = ["react", "vue", "angular", "__next", "gatsby", "nuxt", "svelte", "ember"]
+
+# --- Per-venue diagnostics ---
 
 for name, url in venues:
     print(f"\n{'='*60}")
@@ -48,6 +67,7 @@ for name, url in venues:
             print(f"  JS frameworks detected: {detected}")
 
         # JSON-LD events
+        # Some venues embed structured event data that scrapers can parse directly.
         jsonld_scripts = re.findall(r'<script[^>]+type="application/ld\+json"[^>]*>(.*?)</script>', html, re.S | re.I)
         event_jsonld = []
         for s in jsonld_scripts:
@@ -56,6 +76,7 @@ for name, url in venues:
                 items = data if isinstance(data, list) else [data]
                 for item in items:
                     t = item.get("@type", "")
+                    # @type can be a list (e.g. ["Event", "MusicEvent"]) — flatten it.
                     if isinstance(t, list):
                         t = " ".join(t)
                     if "event" in t.lower():
@@ -70,6 +91,7 @@ for name, url in venues:
             print(f"  JSON-LD events: none")
 
         # CSS classes that look event-related
+        # Useful for identifying the selector to target in the HTML scraper.
         all_classes = re.findall(r'class="([^"]+)"', html)
         event_classes = set()
         for cls_str in all_classes:
@@ -82,6 +104,8 @@ for name, url in venues:
             print(f"  Event-related CSS classes: none found")
 
         # Body content size (small = JS-rendered shell)
+        # A very short body strongly suggests the page is a client-side JS app —
+        # the actual event content is loaded after the initial HTML response.
         body_m = re.search(r"<body[^>]*>(.*?)</body>", html, re.S | re.I)
         body_text = re.sub(r"<[^>]+>", " ", body_m.group(1)) if body_m else ""
         body_text = re.sub(r"\s+", " ", body_text).strip()

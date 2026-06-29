@@ -187,6 +187,11 @@ function subscribeToVenues() {
 function _checkEventVisible(ev, venueMap) {
   const props = ev.extendedProps;
 
+  // On subdomain sites (e.g. durm.triangle-shows.net), only show events from
+  // the locked city. Non-locked-city venues have no sidebar checkbox, so they
+  // wouldn't be in venueMap and would otherwise pass through unchecked.
+  if (SITE_CONFIG.city && props.venue_city !== SITE_CONFIG.city) return false;
+
   // "For you" mode: show only Spotify-matched events, ignoring venue filters.
   if (activeFilters.forYou) {
     return typeof eventMatchesSpotify === "function" &&

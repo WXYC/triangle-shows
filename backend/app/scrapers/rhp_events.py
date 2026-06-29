@@ -1,4 +1,14 @@
-"""RHP Events WordPress plugin scraper — covers 5 venues."""
+"""
+Scraper for venues using the RHP Events WordPress plugin (rhptickets.com).
+
+Role: One of several venue scrapers called by scrapers/manager.py during a scrape cycle,
+which is triggered every 6 hours via POST /api/scrape (scheduler or Cloud Scheduler).
+Covers Lincoln Theatre, Cat's Cradle, Cat's Cradle Back Room, Local 506, and The Pinhook
+— all of which share the same RHP Events plugin frontend but may be filtered by venue name.
+Requires: httpx, beautifulsoup4 (lxml parser), app.scrapers.base.
+"""
+
+# --- Imports ---
 import logging
 import re
 from datetime import datetime, date, time
@@ -9,8 +19,11 @@ from bs4 import BeautifulSoup
 
 from app.scrapers.base import BaseScraper, ScrapedEvent, BROWSER_HEADERS
 
+# --- Module-level setup ---
 logger = logging.getLogger(__name__)
 
+
+# --- Scraper class ---
 
 class RHPEventsScraper(BaseScraper):
     """Scrape events from RHP Events WordPress plugin.
@@ -24,25 +37,29 @@ class RHPEventsScraper(BaseScraper):
         if not url:
             raise ValueError(f"No URL configured for {self.venue_slug}")
 
+        # venue_filter narrows results to a specific venue on shared RHP listing pages
         venue_filter = self.config.get("venue_filter")
         events = []
         page = 1
-        max_pages = 10
+        max_pages = 10  # Safety cap to avoid infinite pagination loops
 
         async with httpx.AsyncClient(timeout=30, follow_redirects=True, headers=BROWSER_HEADERS) as client:
             while page <= max_pages:
+                # RHP pagination follows /page/N/ URL convention
                 page_url = url if page == 1 else f"{url.rstrip('/')}/page/{page}/"
                 logger.info(f"[RHP] Fetching {page_url}")
 
                 try:
                     resp = await client.get(page_url)
                     if resp.status_code == 404:
+                        # 404 means we've gone past the last page
                         break
                     resp.raise_for_status()
                 except httpx.HTTPStatusError:
                     break
 
                 soup = BeautifulSoup(resp.text, "lxml")
+                # Primary selectors cover the most common RHP Events plugin markup variants
                 wrappers = soup.select(".eventWrapper, .rhp-event, .event-listing, article.event")
 
                 if not wrappers:
@@ -50,6 +67,7 @@ class RHPEventsScraper(BaseScraper):
                     wrappers = soup.select(".type-rhp_event, .rhp-events-list > div, .event-item")
 
                 if not wrappers:
+                    # No event elements found — either last page or unexpected markup
                     break
 
                 for wrapper in wrappers:
@@ -67,12 +85,16 @@ class RHPEventsScraper(BaseScraper):
         return events
 
     def _parse_event(self, wrapper, venue_filter: Optional[str]) -> Optional[ScrapedEvent]:
+        """Parse a single event wrapper element into a ScrapedEvent, or return None if it should be skipped."""
         try:
-            # Venue filter (for Cat's Cradle vs Back Room vs Haw River)
+            # --- Venue filtering ---
+            # venue_filter_not excludes events at a specific sub-venue (e.g., Haw River Ballroom
+            # shares a listing page with Cat's Cradle but should not appear in Cat's Cradle results)
             venue_filter_not = self.config.get("venue_filter_not")
             if venue_filter or venue_filter_not:
                 venue_el = wrapper.select_one(".rhpVenueContent, .eventVenue, .event-venue, .venue-name")
                 def _norm(s):
+                    # Normalize curly/special apostrophes to straight apostrophe for reliable matching
                     return re.sub(r"['\u2018\u2019\u02bc\ufffd]", "'", s).lower()
                 if not venue_el:
                     # Can't identify venue — skip rather than risk cross-venue duplicates
@@ -83,7 +105,7 @@ class RHPEventsScraper(BaseScraper):
                 if venue_filter_not and venue_filter_not.lower() in _norm(venue_text):
                     return None
 
-            # Event name / headliner
+            # --- Event name / headliner ---
             title_el = wrapper.select_one(
                 ".rhp-event__title--list, .eventTitle, .event-title, .headliner"
             )
@@ -102,13 +124,13 @@ class RHPEventsScraper(BaseScraper):
             if link_el:
                 link = link_el.get("href")
 
-            # Date
+            # --- Date ---
             date_el = wrapper.select_one(
                 ".singleEventDate, .eventDate, .event-date, .date, time, .rhp-event-date"
             )
             event_date = None
             if date_el:
-                # Try datetime attribute first
+                # Try datetime attribute first — machine-readable and more reliable than display text
                 dt_attr = date_el.get("datetime") or date_el.get("content")
                 if dt_attr:
                     try:
@@ -121,15 +143,16 @@ class RHPEventsScraper(BaseScraper):
                     event_date = self._parse_date_text(date_text)
 
             if not event_date:
+                # Without a date the event is unusable — skip it
                 return None
 
-            # Support artists
+            # --- Support artists ---
             support_el = wrapper.select_one(
                 ".eventSupport, .support, .event-support, .opener, .supporting"
             )
             support = support_el.get_text(strip=True) if support_el else None
 
-            # Doors / Show time
+            # --- Doors / Show time ---
             doors_time = None
             show_time = None
             time_el = wrapper.select_one(
@@ -145,10 +168,10 @@ class RHPEventsScraper(BaseScraper):
                 if show_match:
                     show_time = self.parse_time(show_match.group(1))
                 elif not doors_match:
-                    # Just a single time
+                    # Just a single time — treat it as show time
                     show_time = self.parse_time(time_text)
 
-            # Also check for separate door/show elements
+            # Also check for separate door/show elements (some RHP themes split them)
             if not doors_time:
                 d_el = wrapper.select_one(".eventDoorTime, .doors-time")
                 if d_el:
@@ -158,7 +181,7 @@ class RHPEventsScraper(BaseScraper):
                 if s_el:
                     show_time = self.parse_time(s_el.get_text(strip=True))
 
-            # Price
+            # --- Price ---
             price_min = None
             price_max = None
             price_el = wrapper.select_one(
@@ -168,7 +191,7 @@ class RHPEventsScraper(BaseScraper):
                 price_text = price_el.get_text(strip=True)
                 price_min, price_max = self.parse_price_range(price_text)
 
-            # Status
+            # --- Status ---
             status = "on_sale"
             cta_el = wrapper.select_one(
                 ".eventCTA, .event-cta, .ticket-link, .btn, a.tickets"
@@ -180,17 +203,19 @@ class RHPEventsScraper(BaseScraper):
                 elif "free" in cta_text:
                     status = "free"
 
+            # Also infer free status from parsed price (overrides CTA check)
             if price_min == 0 and (price_max is None or price_max == 0):
                 status = "free"
 
-            # Ticket URL
+            # --- Ticket URL ---
             ticket_url = None
             if cta_el and cta_el.name == "a":
                 ticket_url = cta_el.get("href")
             if not ticket_url and link:
+                # Fall back to the event detail page if no direct ticket link is found
                 ticket_url = link
 
-            # Image
+            # --- Image ---
             image_url = None
             img_el = wrapper.select_one("img.eventImage, img.event-image, .event-image img, img")
             if img_el:
@@ -215,6 +240,8 @@ class RHPEventsScraper(BaseScraper):
         except Exception as e:
             logger.warning(f"[RHP] Failed to parse event: {e}")
             return None
+
+    # --- Date parsing helper ---
 
     @staticmethod
     def _parse_date_text(text: str) -> Optional[date]:

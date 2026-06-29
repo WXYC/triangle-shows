@@ -1,4 +1,12 @@
-"""Event API endpoints."""
+"""
+Event API endpoints for the Triangle Shows calendar.
+
+Role: Serves GET /api/events/fullcalendar (the primary frontend feed), GET /api/events/{id},
+and GET /api/events (paginated list). These endpoints are called by the Vanilla JS +
+FullCalendar v6 frontend on page load and whenever the user navigates the calendar.
+Requires: async PostgreSQL session (app.database), Event/Venue ORM models (app.models),
+response schemas (app.schemas).
+"""
 import re
 from datetime import date, datetime, time
 from typing import Optional
@@ -12,10 +20,15 @@ from app.database import get_session
 from app.models import Event, Venue
 from app.schemas import EventResponse, FullCalendarEvent, EventListResponse
 
+# --- Router setup ---
+
 router = APIRouter(prefix="/api/events", tags=["events"])
 
 
+# --- Helpers ---
+
 def _event_to_response(event: Event) -> EventResponse:
+    """Map an ORM Event (with venue eagerly loaded) to the EventResponse schema."""
     return EventResponse(
         id=event.id,
         venue_id=event.venue_id,
@@ -42,6 +55,8 @@ def _event_to_response(event: Event) -> EventResponse:
     )
 
 
+# --- Endpoints ---
+
 @router.get("/fullcalendar")
 async def get_fullcalendar_events(
     start: Optional[str] = Query(None, description="ISO date start"),
@@ -52,12 +67,15 @@ async def get_fullcalendar_events(
     session: AsyncSession = Depends(get_session),
 ) -> list[dict]:
     """FullCalendar JSON feed endpoint."""
+    # Only join the Venue table when a venue-level filter is actually present;
+    # skipping the join avoids unnecessary overhead for unfiltered calendar loads.
     needs_venue_join = bool(city or size or venue)
 
     conditions = []
 
     if start:
         try:
+            # Truncate to date portion in case FullCalendar sends a full ISO datetime string.
             start_date = date.fromisoformat(start[:10])
             conditions.append(Event.date >= start_date)
         except ValueError:
@@ -71,6 +89,7 @@ async def get_fullcalendar_events(
             pass
 
     if city:
+        # Accept comma-separated city names so the frontend can filter multiple cities at once.
         conditions.append(Venue.city.in_([c.strip() for c in city.split(",")]))
 
     if size:
@@ -79,6 +98,7 @@ async def get_fullcalendar_events(
     if venue:
         conditions.append(Venue.slug.in_([s.strip() for s in venue.split(",")]))
 
+    # Eagerly load venue so we can read venue fields without additional queries.
     query = select(Event).options(joinedload(Event.venue))
     if needs_venue_join:
         query = query.join(Event.venue)
@@ -87,8 +107,10 @@ async def get_fullcalendar_events(
     query = query.order_by(Event.date)
 
     result = await session.execute(query)
+    # unique() is required when using joinedload to collapse duplicate rows from the JOIN.
     events = result.unique().scalars().all()
 
+    # --- Cross-venue deduplication ---
     # Cross-venue dedup: if the same artist performs on the same date at two
     # different venues (e.g. listed on both a venue's own site and Ticketmaster),
     # keep only the entry with the most complete metadata.
@@ -96,17 +118,22 @@ async def get_fullcalendar_events(
     _dedup_score: dict[tuple, int] = {}
     for event in events:
         label = event.artist or event.name
+        # Normalize to lowercase alphanumeric so minor name differences don't prevent matching.
         norm = re.sub(r"[^a-z0-9]", "", label.lower())
         key = (event.date, norm)
+        # Score based on how many key fields are populated; prefer richer records.
         score = bool(event.image_url) + bool(event.ticket_url) + (event.price_min is not None)
         if key not in _dedup_best:
             _dedup_best[key] = event
             _dedup_score[key] = score
         elif event.venue_id != _dedup_best[key].venue_id and score > _dedup_score[key]:
+            # Different venue but same artist/date — keep the more complete record.
             _dedup_best[key] = event
             _dedup_score[key] = score
     kept = {ev.id for ev in _dedup_best.values()}
     events = [e for e in events if e.id in kept]
+
+    # --- Build FullCalendar event objects ---
 
     fc_events = []
     for event in events:
@@ -118,7 +145,7 @@ async def get_fullcalendar_events(
         # The actual show time is still available in extendedProps.show_time.
         start_str = event.date.isoformat()
 
-        # Format price
+        # --- Price formatting ---
         price_str = None
         if event.price_min is not None:
             if event.price_min == 0 and (event.price_max is None or event.price_max == 0):
@@ -136,6 +163,8 @@ async def get_fullcalendar_events(
             "backgroundColor": color,
             "borderColor": color,
             "textColor": "#ffffff",
+            # extendedProps are passed through to the FullCalendar eventDidMount / click
+            # handlers in the frontend so the detail popover can display full event info.
             "extendedProps": {
                 "event_id": event.id,
                 "name": event.name,
@@ -146,6 +175,7 @@ async def get_fullcalendar_events(
                 "venue_city": venue_obj.city if venue_obj else None,
                 "venue_color": color,
                 "date": event.date.isoformat(),
+                # Strip leading zero from hour for display (e.g. "9:00 PM" not "09:00 PM").
                 "doors_time": event.doors_time.strftime("%I:%M %p").lstrip("0") if event.doors_time else None,
                 "show_time": event.show_time.strftime("%I:%M %p").lstrip("0") if event.show_time else None,
                 "ticket_url": event.ticket_url,
@@ -208,6 +238,7 @@ async def list_events(
             pass
     if search:
         search_term = f"%{search}%"
+        # Match against both the event name and artist fields.
         conditions.append(
             Event.name.ilike(search_term) | Event.artist.ilike(search_term)
         )
@@ -220,6 +251,7 @@ async def list_events(
         query = query.where(and_(*conditions))
         count_query = count_query.where(and_(*conditions))
 
+    # Run the count query before pagination so we can return the total for the UI.
     total_result = await session.execute(count_query)
     total = total_result.scalar()
 
@@ -234,5 +266,6 @@ async def list_events(
         total=total,
         page=page,
         per_page=per_page,
+        # Integer ceiling division to get total page count.
         pages=(total + per_page - 1) // per_page if total else 0,
     )

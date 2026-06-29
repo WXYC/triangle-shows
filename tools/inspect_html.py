@@ -1,7 +1,18 @@
-"""Fetch raw HTML snippets to understand event structure."""
+"""
+Fetches raw HTML from venue calendar pages and highlights event-related patterns.
+
+Role: Developer utility — run manually to reverse-engineer a venue's HTML structure
+before writing or debugging a scraper. Not part of the runtime scrape pipeline.
+Requires: Internet access and the target venue URLs to be reachable. No env vars needed.
+"""
+
+# --- Imports ---
 import urllib.request
 import re
 
+# --- Constants ---
+
+# Mimic a real browser so venue sites don't block the request
 HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -11,19 +22,26 @@ HEADERS = {
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
 }
 
+# --- Helpers ---
+
 def fetch(url):
+    """Download and return the full HTML of a URL as a UTF-8 string."""
     req = urllib.request.Request(url, headers=HEADERS)
     with urllib.request.urlopen(req, timeout=15) as r:
         return r.read().decode("utf-8", errors="ignore")
 
 def show_around(html, pattern, chars=800, label=""):
+    """Search for a regex pattern and print the surrounding HTML context."""
     m = re.search(pattern, html, re.I)
     if m:
+        # Back up 100 chars before the match so we see the opening tag
         start = max(0, m.start() - 100)
         print(f"\n  [{label or pattern}] found at pos {m.start()}:")
         print(html[start:start+chars])
     else:
         print(f"\n  [{label or pattern}] NOT FOUND")
+
+# --- Main: per-venue inspection ---
 
 print("\n" + "="*60)
 print("MOTORCO — looking for tc-responsive-event")
