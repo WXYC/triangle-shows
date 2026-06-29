@@ -20,7 +20,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from app.config import settings
-from app.database import init_db, async_session
+from app.database import async_session
 from app.seed import seed_venues
 from app.scheduler import scheduler, configure_scheduler
 from app.api import events, venues, health, feeds
@@ -69,11 +69,7 @@ async def lifespan(app: FastAPI):
     """Startup and shutdown logic."""
     logger.info("Starting Triangle Shows API...")
 
-    # Initialize database tables
-    await init_db()
-    logger.info("Database initialized")
-
-    # Apply any pending Alembic migrations (e.g. new columns)
+    # Apply any pending Alembic migrations — creates tables on fresh DBs, updates schema on existing ones
     await asyncio.to_thread(_run_migrations)
     logger.info("Migrations applied")
 

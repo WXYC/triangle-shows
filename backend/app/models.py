@@ -10,7 +10,7 @@ Requires: app.database (Base), PostgreSQL via asyncpg/SQLAlchemy async.
 
 from datetime import datetime, date, time
 from typing import Optional
-from sqlalchemy import String, Integer, Float, Text, Date, Time, DateTime, ForeignKey, JSON, Enum as SAEnum
+from sqlalchemy import String, Integer, Float, Text, Date, Time, DateTime, ForeignKey, JSON
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 import enum
 
