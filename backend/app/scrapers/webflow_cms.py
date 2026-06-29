@@ -1,4 +1,12 @@
-"""Webflow CMS scraper for venues that embed events in a CMS collection list."""
+"""Webflow CMS scraper for venues that embed events in a CMS collection list.
+
+Role: One of several venue-specific scraper implementations; instantiated and run
+by scrapers/manager.py when the scheduler triggers POST /api/scrape every 6 hours.
+Requires: httpx, beautifulsoup4/lxml, and a venue config dict with at least a 'url' key.
+Currently used by: Pour House.
+"""
+
+# --- Imports ---
 import logging
 import re
 from datetime import datetime
@@ -8,8 +16,11 @@ from bs4 import BeautifulSoup
 
 from app.scrapers.base import BaseScraper, ScrapedEvent, BROWSER_HEADERS
 
+# --- Module Setup ---
 logger = logging.getLogger(__name__)
 
+
+# --- Scraper Class ---
 
 class WebflowCMSScraper(BaseScraper):
     """Scrape events from a Webflow CMS collection list embedded in the page HTML.
@@ -28,10 +39,12 @@ class WebflowCMSScraper(BaseScraper):
     """
 
     async def scrape(self) -> list[ScrapedEvent]:
+        """Fetch the venue's Webflow page and extract events from the CMS collection markup."""
         url = self.config.get("url", "")
         if not url:
             raise ValueError(f"No URL configured for {self.venue_slug}")
 
+        # Pull selector/format overrides from config, falling back to Pour House defaults
         base_url = self.config.get("base_url", "").rstrip("/")
         item_sel = self.config.get("item_selector", ".show-collection-item")
         name_sel = self.config.get("name_selector", ".show-name")
@@ -47,16 +60,19 @@ class WebflowCMSScraper(BaseScraper):
             resp.raise_for_status()
             soup = BeautifulSoup(resp.text, "lxml")
 
+            # --- Parse Each Event Item ---
             for item in soup.select(item_sel):
                 name_el = item.select_one(name_sel)
                 date_el = item.select_one(date_sel)
                 slug_el = item.select_one(slug_sel)
 
+                # Skip items missing required fields
                 if not name_el or not date_el:
                     continue
 
                 name = name_el.get_text(strip=True)
                 date_str = date_el.get_text(strip=True)
+                # Slug is optional — used only for constructing the ticket URL
                 slug = slug_el.get_text(strip=True) if slug_el else None
 
                 if not name or not date_str:
@@ -68,6 +84,7 @@ class WebflowCMSScraper(BaseScraper):
                     logger.warning(f"[WebflowCMS] Cannot parse date '{date_str}' for {self.venue_slug}")
                     continue
 
+                # Build the event detail URL only when both base URL and slug are available
                 ticket_url = f"{base_url}{shows_path}{slug}" if (base_url and slug) else None
 
                 # Extract age restriction from name prefix like "(18+) Artist Name"
@@ -75,6 +92,7 @@ class WebflowCMSScraper(BaseScraper):
                 age_match = re.match(r'^\((\d+\+)\)\s*', name)
                 if age_match:
                     age_restriction = age_match.group(1)
+                    # Strip the age prefix so the stored name is just the artist/show title
                     name = name[age_match.end():]
 
                 events.append(ScrapedEvent(

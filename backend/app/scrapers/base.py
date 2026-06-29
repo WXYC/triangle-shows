@@ -1,4 +1,12 @@
-"""Base scraper class and ScrapedEvent dataclass."""
+"""
+Abstract base class and shared data structures for all venue scrapers.
+
+Role: Defines the ScrapedEvent dataclass (the unit of data each scraper returns)
+and BaseScraper ABC (the interface every venue scraper must implement). The scrape
+manager (scrapers/manager.py) imports BaseScraper subclasses, calls their scrape()
+method, and uses ScrapedEvent.hash for deduplication before upserting to PostgreSQL.
+Requires: No env vars or external services — pure Python stdlib only.
+"""
 import hashlib
 import re
 from abc import ABC, abstractmethod
@@ -7,12 +15,16 @@ from datetime import date, time, datetime
 from typing import Optional
 
 
+# --- ScrapedEvent Dataclass ---
+
 @dataclass
 class ScrapedEvent:
+    # Required fields — every scraper must supply these
     name: str
     date: date
     venue_slug: str
     source: str
+    # Optional fields — scrapers fill in what their venue page exposes
     external_id: Optional[str] = None
     artist: Optional[str] = None
     support_artists: Optional[str] = None
@@ -42,6 +54,9 @@ class ScrapedEvent:
         return hashlib.sha256(raw.encode()).hexdigest()
 
 
+# --- Shared HTTP Headers ---
+
+# Mimic a real browser so venue sites don't block the scraper as a bot
 BROWSER_HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -53,17 +68,23 @@ BROWSER_HEADERS = {
 }
 
 
+# --- BaseScraper ABC ---
+
 class BaseScraper(ABC):
     """Abstract base class for all venue scrapers."""
 
     def __init__(self, venue_slug: str, config: Optional[dict] = None):
         self.venue_slug = venue_slug
+        # config allows per-venue overrides (e.g. custom URLs, feature flags)
         self.config = config or {}
 
     @abstractmethod
     async def scrape(self) -> list[ScrapedEvent]:
         """Scrape events and return a list of ScrapedEvent objects."""
         ...
+
+    # --- Parsing Helpers ---
+    # Shared utility methods so individual scrapers don't duplicate price/time logic
 
     @staticmethod
     def parse_price(text: str) -> Optional[float]:
@@ -90,6 +111,7 @@ class BaseScraper(ABC):
         if len(prices) >= 2:
             return float(prices[0]), float(prices[1])
         elif len(prices) == 1:
+            # Single price — treat it as both min and max
             p = float(prices[0])
             return p, p
         return None, None

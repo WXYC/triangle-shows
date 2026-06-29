@@ -1,4 +1,12 @@
-"""Squarespace JSON API scraper for Neptune's Parlour and Moon Room."""
+"""
+Scrapes concert events from Squarespace-hosted venue sites using their internal JSON API.
+
+Role: One of several concrete scraper implementations; instantiated and called by
+scrapers/manager.py during each scrape cycle (triggered via POST /api/scrape every 6 hours).
+Requires: Venue config with a "url" key pointing to a Squarespace /events?format=json endpoint.
+"""
+
+# --- Imports ---
 import logging
 from datetime import datetime, date, time
 from typing import Optional
@@ -7,8 +15,12 @@ import httpx
 
 from app.scrapers.base import BaseScraper, ScrapedEvent, BROWSER_HEADERS
 
+# --- Module-level setup ---
+
 logger = logging.getLogger(__name__)
 
+
+# --- Scraper class ---
 
 class SquarespaceScraper(BaseScraper):
     """Scrape events from Squarespace's JSON events endpoint.
@@ -18,6 +30,7 @@ class SquarespaceScraper(BaseScraper):
     """
 
     async def scrape(self) -> list[ScrapedEvent]:
+        """Fetch all upcoming events from the configured Squarespace events feed."""
         url = self.config.get("url", "")
         if not url:
             raise ValueError(f"No URL configured for {self.venue_slug}")
@@ -47,11 +60,13 @@ class SquarespaceScraper(BaseScraper):
         return events
 
     def _parse_event(self, item: dict) -> Optional[ScrapedEvent]:
+        """Parse a single Squarespace event dict into a ScrapedEvent, returning None on failure."""
         try:
             title = item.get("title", "").strip()
             if not title:
                 return None
 
+            # Skip events whose titles are in the venue-level exclusion list
             exclude = self.config.get("exclude_titles", [])
             if any(title.lower() == ex.lower() for ex in exclude):
                 return None
@@ -68,12 +83,13 @@ class SquarespaceScraper(BaseScraper):
                 dt = datetime.fromisoformat(str(start_ts).replace("Z", "+00:00"))
 
             event_date = dt.date()
+            # Treat midnight as "no time set" — store None so the UI doesn't show 12:00 AM
             show_time = dt.time().replace(tzinfo=None) if dt.time() != time(0, 0) else None
 
             # End date (usually same day)
             end_ts = item.get("endDate")
 
-            # Extract body/description
+            # Extract body/description — fall back to raw body if no excerpt
             excerpt = item.get("excerpt", "") or item.get("body", "")
             if isinstance(excerpt, str):
                 description = excerpt[:500].strip() or None
@@ -101,9 +117,10 @@ class SquarespaceScraper(BaseScraper):
             if description:
                 price_min, price_max = self.parse_price_range(description)
             if price_min is None:
+                # Fall back to scanning the title if description had no price
                 price_min, price_max = self.parse_price_range(title)
 
-            # Status
+            # Status — inferred from keywords in the title
             status = "on_sale"
             title_lower = title.lower()
             if "sold out" in title_lower:

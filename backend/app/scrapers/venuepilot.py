@@ -1,4 +1,12 @@
-"""VenuePilot scraper — GraphQL API at venuepilot.co."""
+"""
+Scraper for venues that use the VenuePilot ticketing platform, fetching events via GraphQL API.
+
+Role: One of many venue scrapers invoked by scrapers/manager.py during each scrape cycle
+      (triggered every 6 hours via POST /api/scrape). Returns a list of ScrapedEvent objects
+      that the manager deduplicates and upserts into PostgreSQL.
+Requires: Venue config must include an `account_id` (VenuePilot account integer ID);
+          no API key needed — the GraphQL endpoint is public.
+"""
 import logging
 from datetime import date, datetime, time
 from typing import Optional
@@ -7,10 +15,16 @@ import httpx
 
 from app.scrapers.base import BaseScraper, ScrapedEvent, BROWSER_HEADERS
 
+# --- Module Setup ---
+
 logger = logging.getLogger(__name__)
+
+# --- Constants ---
 
 GQL_URL = "https://www.venuepilot.co/graphql"
 
+# GraphQL query that fetches all public events for a given account starting from a date.
+# VenuePilot exposes a single `publicEvents` resolver — no pagination needed.
 EVENTS_QUERY = """
 query GetEvents($accountId: Int!, $startDate: String!) {
   publicEvents(accountId: $accountId, startDate: $startDate) {
@@ -28,6 +42,7 @@ query GetEvents($accountId: Int!, $startDate: String!) {
 }
 """
 
+# --- Scraper Class ---
 
 class VenuePilotScraper(BaseScraper):
     """Scrape events from VenuePilot ticketing platform via GraphQL API.
@@ -36,6 +51,7 @@ class VenuePilotScraper(BaseScraper):
     """
 
     async def scrape(self) -> list[ScrapedEvent]:
+        """Fetch all upcoming events for this venue from the VenuePilot GraphQL API."""
         account_id = self.config.get("account_id")
         if not account_id:
             raise ValueError(f"No account_id configured for {self.venue_slug}")
@@ -52,6 +68,7 @@ class VenuePilotScraper(BaseScraper):
             resp.raise_for_status()
             data = resp.json()
 
+        # GraphQL always returns HTTP 200; errors are surfaced in the response body
         if "errors" in data:
             raise RuntimeError(f"GraphQL errors: {data['errors']}")
 
@@ -64,6 +81,7 @@ class VenuePilotScraper(BaseScraper):
         return events
 
     def _parse_event(self, item: dict) -> Optional[ScrapedEvent]:
+        """Convert a single raw GraphQL event dict into a ScrapedEvent, or None if invalid."""
         try:
             name = (item.get("name") or "").strip()
             if not name:
@@ -72,6 +90,7 @@ class VenuePilotScraper(BaseScraper):
             date_str = item.get("date", "")
             if not date_str:
                 return None
+            # VenuePilot may return a full ISO datetime string; slice to just the date portion
             event_date = date.fromisoformat(date_str[:10])
 
             # Prefer startTime over doorTime for show_time
@@ -86,6 +105,7 @@ class VenuePilotScraper(BaseScraper):
             ticket_url = item.get("ticketsUrl") or None
 
             age = item.get("minimumAge") or 0
+            # Convert numeric age to a display string (e.g., 18 → "18+"); None means all ages
             age_restriction = f"{age}+" if age > 0 else None
 
             return ScrapedEvent(

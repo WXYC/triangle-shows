@@ -1,4 +1,14 @@
-"""Carolina Theatre scraper — custom WordPress theme with server-rendered event cards."""
+"""
+Scraper for Carolina Theatre Durham, which uses a custom WordPress theme with
+server-rendered event cards (no JS required).
+
+Role: Instantiated and called by scrapers/manager.py during each scrape cycle,
+triggered every 6 hours via POST /api/scrape (Cloud Scheduler or internal APScheduler).
+Requires: The venue row for 'carolina-theatre' must exist in the DB (seeded on startup).
+          No API key needed — fetches the public events page directly.
+"""
+
+# --- Imports ---
 import logging
 import re
 from datetime import datetime, date
@@ -9,6 +19,8 @@ from bs4 import BeautifulSoup
 
 from app.scrapers.base import BaseScraper, ScrapedEvent, BROWSER_HEADERS
 
+# --- Module-level setup ---
+
 logger = logging.getLogger(__name__)
 
 # Month abbreviations as used by the site
@@ -17,6 +29,8 @@ MONTHS = {
     "jul": 7, "aug": 8, "sep": 9, "oct": 10, "nov": 11, "dec": 12,
 }
 
+
+# --- Scraper class ---
 
 class CarolinaTheatreScraper(BaseScraper):
     """Scrape events from Carolina Theatre Durham's website.
@@ -33,6 +47,7 @@ class CarolinaTheatreScraper(BaseScraper):
     """
 
     async def scrape(self) -> list[ScrapedEvent]:
+        """Fetch the events listing page and return deduplicated ScrapedEvent objects."""
         url = self.config.get("url", "https://carolinatheatre.org/events/")
         events = []
 
@@ -41,12 +56,13 @@ class CarolinaTheatreScraper(BaseScraper):
             resp.raise_for_status()
             soup = BeautifulSoup(resp.text, "lxml")
 
+        # Each event on the listing page is wrapped in a div.eventCard
         for card in soup.select("div.eventCard"):
             parsed = self._parse_card(card)
             if parsed:
                 events.append(parsed)
 
-        # Deduplicate
+        # Deduplicate by hash in case the same event appears more than once on the page
         seen = set()
         unique = []
         for ev in events:
@@ -58,6 +74,7 @@ class CarolinaTheatreScraper(BaseScraper):
         return unique
 
     def _parse_card(self, card) -> Optional[ScrapedEvent]:
+        """Extract event fields from a single eventCard element; returns None on any failure."""
         try:
             # URL — the wrapping <a> inside the card
             a = card.select_one("a[href]")
@@ -110,6 +127,8 @@ class CarolinaTheatreScraper(BaseScraper):
         except Exception as e:
             logger.warning(f"[CarolinaTheatre] Card parse error: {e}")
             return None
+
+    # --- Helpers ---
 
     @staticmethod
     def _parse_day_month(day_str: str, month_str: str) -> Optional[date]:

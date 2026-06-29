@@ -1,4 +1,15 @@
-"""FastAPI application entry point."""
+"""
+FastAPI application entry point — initializes the database, applies migrations,
+seeds venues, optionally starts a background scheduler, and mounts all routes.
+
+Role: First code executed at server startup. The lifespan context manager runs
+before any requests are served; Cloud Scheduler later hits POST /api/scrape to
+trigger periodic re-scrapes every 6 hours.
+
+Requires: DATABASE_URL, LOG_LEVEL, ENABLE_SCHEDULER env vars (via app.config);
+asyncpg-compatible PostgreSQL; Alembic migrations in backend/alembic/.
+"""
+# --- Imports ---
 import asyncio
 import logging
 from contextlib import asynccontextmanager
@@ -9,17 +20,20 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from app.config import settings
-from app.database import init_db, async_session
+from app.database import async_session
 from app.seed import seed_venues
 from app.scheduler import scheduler, configure_scheduler
 from app.api import events, venues, health, feeds
 
+# --- Logging setup ---
 logging.basicConfig(
     level=getattr(logging, settings.LOG_LEVEL),
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
 logger = logging.getLogger(__name__)
 
+
+# --- Startup helpers ---
 
 def _run_migrations():
     """Run alembic upgrade head synchronously (called via asyncio.to_thread)."""
@@ -44,19 +58,18 @@ async def _startup_scrape():
                 logger.info(f"  [startup] {r}")
         logger.info("Startup scrape: complete")
     except Exception as e:
+        # Non-fatal: the API should still serve cached data even if the scrape fails
         logger.warning(f"Startup scrape failed: {e}")
 
+
+# --- Lifespan (startup / shutdown) ---
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup and shutdown logic."""
     logger.info("Starting Triangle Shows API...")
 
-    # Initialize database tables
-    await init_db()
-    logger.info("Database initialized")
-
-    # Apply any pending Alembic migrations (e.g. new columns)
+    # Apply any pending Alembic migrations — creates tables on fresh DBs, updates schema on existing ones
     await asyncio.to_thread(_run_migrations)
     logger.info("Migrations applied")
 
@@ -82,6 +95,8 @@ async def lifespan(app: FastAPI):
         logger.info("Scheduler shut down")
 
 
+# --- App instantiation ---
+
 app = FastAPI(
     title="Triangle Shows",
     description="Concert calendar for the Raleigh-Durham-Chapel Hill area",
@@ -97,6 +112,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# --- Route registration ---
 
 # API routes
 app.include_router(events.router)
@@ -125,6 +142,8 @@ async def trigger_scrape(scraper_type: str = None):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# --- Static file serving ---
+
 # Serve frontend static files
 # Check multiple possible locations (local dev vs Docker)
 frontend_candidates = [
@@ -133,5 +152,6 @@ frontend_candidates = [
 ]
 for frontend_dir in frontend_candidates:
     if frontend_dir.exists():
+        # Mounted last so API routes take priority over the catch-all html=True handler
         app.mount("/", StaticFiles(directory=str(frontend_dir), html=True), name="frontend")
         break

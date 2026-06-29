@@ -1,4 +1,15 @@
-"""Ticketmaster Discovery API scraper for major venues."""
+"""
+Ticketmaster Discovery API scraper — fetches events for configured venues by
+attraction/venue ID and returns normalized ScrapedEvent objects.
+
+Role: One of several venue scrapers invoked by scrapers/manager.py during each
+scheduled scrape cycle (POST /api/scrape). Unlike HTML scrapers, this one hits
+the Ticketmaster REST API rather than parsing web pages, so it handles
+pagination and API-specific quirks (duplicate package listings, upsell items).
+
+Requires: TICKETMASTER_API_KEY env var (loaded via config.py); httpx for async
+HTTP; app.scrapers.base.BaseScraper and ScrapedEvent for the shared interface.
+"""
 import logging
 import re
 from datetime import datetime, timedelta, date, time as dt_time
@@ -8,10 +19,15 @@ import httpx
 
 from app.scrapers.base import BaseScraper, ScrapedEvent
 
+# --- Module-level setup ---
+
 logger = logging.getLogger(__name__)
 
+# Base URL for Ticketmaster Discovery API v2
 TM_BASE_URL = "https://app.ticketmaster.com/discovery/v2"
 
+
+# --- Scraper class ---
 
 class TicketmasterScraper(BaseScraper):
     """Scrape events from Ticketmaster Discovery API v2."""
@@ -21,9 +37,12 @@ class TicketmasterScraper(BaseScraper):
         self.venue_tm_id = venue_tm_id
         self.api_key = api_key
 
+    # --- Main scrape logic ---
+
     async def scrape(self) -> list[ScrapedEvent]:
         events = []
         now = datetime.utcnow()
+        # Fetch events starting now through the next 6 months
         start_dt = now.strftime("%Y-%m-%dT%H:%M:%SZ")
         end_dt = (now + timedelta(days=180)).strftime("%Y-%m-%dT%H:%M:%SZ")
 
@@ -32,7 +51,7 @@ class TicketmasterScraper(BaseScraper):
             "venueId": self.venue_tm_id,
             "startDateTime": start_dt,
             "endDateTime": end_dt,
-            "size": 200,
+            "size": 200,  # max results per page
             "page": 0,
             "sort": "date,asc",
         }
@@ -44,12 +63,14 @@ class TicketmasterScraper(BaseScraper):
                 resp.raise_for_status()
                 data = resp.json()
 
+                # TM wraps results in an _embedded envelope; absent when no events found
                 embedded = data.get("_embedded", {})
                 raw_events = embedded.get("events", [])
 
                 if not raw_events:
                     break
 
+                # Deduplicate package/tier variants before parsing to avoid storing duplicates
                 for ev in self._dedup_raw_events(raw_events):
                     parsed = self._parse_event(ev)
                     if parsed:
@@ -67,6 +88,8 @@ class TicketmasterScraper(BaseScraper):
         logger.info(f"[TM] Found {len(events)} events for {self.venue_slug}")
         return events
 
+    # --- Name normalization patterns (used for deduplication) ---
+
     # Suffixes like "Boxes 3/17 at 7:30pm" or bare "Boxes" appended by DPAC box-office listings
     _BOXES_RE = re.compile(r'\s+Boxes?(?:\s.*)?$', re.IGNORECASE)
     # "Add-Ons: " prefix on upsell items
@@ -83,6 +106,7 @@ class TicketmasterScraper(BaseScraper):
         """Strip packaging suffixes/prefixes and return a lowercased base name."""
         name = cls._ADDONS_RE.sub('', name)
         name = cls._BOXES_RE.sub('', name)
+        # Drop dash-separated package tiers (e.g. "Hamilton - VIP" -> "hamilton")
         return name.split(' - ')[0].strip().lower()
 
     @classmethod
@@ -107,6 +131,7 @@ class TicketmasterScraper(BaseScraper):
             if norm in cls._SKIP_NAMES:
                 continue
 
+            # Key on (normalized name, date) so the same show on different dates is kept separate
             date_str = ev.get("dates", {}).get("start", {}).get("localDate", "")
             key = (norm, date_str)
 
@@ -126,13 +151,17 @@ class TicketmasterScraper(BaseScraper):
             name = ev.get("name", "")
             clean = cls._ADDONS_RE.sub("", name)
             clean = cls._BOXES_RE.sub("", clean).split(" - ")[0].strip()
+            # Only mutate a copy to avoid modifying the original shared dict
             if clean and clean != name:
                 ev = dict(ev)
                 ev["name"] = clean
             result.append(ev)
         return result
 
+    # --- Event parsing ---
+
     def _parse_event(self, ev: dict) -> Optional[ScrapedEvent]:
+        """Parse a single raw TM event dict into a ScrapedEvent, returning None on failure."""
         try:
             name = ev.get("name", "").strip()
             if not name:
@@ -154,7 +183,7 @@ class TicketmasterScraper(BaseScraper):
                 except ValueError:
                     pass
 
-            # Artists
+            # Artists — TM lists headliner first, support acts after
             artist = None
             support = []
             attractions = ev.get("_embedded", {}).get("attractions", [])
@@ -177,6 +206,7 @@ class TicketmasterScraper(BaseScraper):
             if classifications:
                 cls = classifications[0]
                 genre_obj = cls.get("genre", {})
+                # TM uses "Undefined" as a placeholder when genre is unknown
                 if genre_obj and genre_obj.get("name") != "Undefined":
                     genre = genre_obj.get("name")
                 sub_obj = cls.get("subGenre", {})
@@ -194,7 +224,7 @@ class TicketmasterScraper(BaseScraper):
             elif images:
                 image_url = images[0].get("url")
 
-            # Status
+            # Status — map TM status codes to our internal values
             status_code = dates.get("status", {}).get("code", "")
             if status_code == "offsale":
                 status = "sold_out"

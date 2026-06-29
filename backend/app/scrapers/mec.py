@@ -1,4 +1,13 @@
-"""Modern Events Calendar (MEC) WordPress plugin scraper."""
+"""Scraper for venues running the Modern Events Calendar (MEC) WordPress plugin.
+
+Role: Instantiated and called by the scrape manager (scrapers/manager.py) when
+POST /api/scrape is triggered. Fetches an MEC-powered events listing page,
+extracts structured JSON-LD schema.org Event data, and falls back to HTML
+parsing if JSON-LD is absent.
+Requires: httpx, beautifulsoup4/lxml; venue config must supply a "url" key.
+"""
+
+# --- Imports ---
 import json
 import logging
 from datetime import datetime, date, time
@@ -9,8 +18,11 @@ from bs4 import BeautifulSoup
 
 from app.scrapers.base import BaseScraper, ScrapedEvent, BROWSER_HEADERS
 
+# --- Module-level setup ---
 logger = logging.getLogger(__name__)
 
+
+# --- Scraper class ---
 
 class MECScraper(BaseScraper):
     """Scrape events from the Modern Events Calendar WordPress plugin.
@@ -25,7 +37,8 @@ class MECScraper(BaseScraper):
     Used by: Shadowbox Studio
     """
 
-    # CSS selectors for event links on MEC listing pages
+    # CSS selectors for event links on MEC listing pages.
+    # Listed from most specific to least; we stop at the first one that matches.
     LINK_SELECTORS = [
         ".mec-event-title a",
         ".mec-event-article a.mec-event-title",
@@ -38,12 +51,13 @@ class MECScraper(BaseScraper):
     ]
 
     async def scrape(self) -> list[ScrapedEvent]:
+        """Fetch events from an MEC listing page and its linked detail pages."""
         url = self.config.get("url", "")
         if not url:
             raise ValueError(f"No URL configured for {self.venue_slug}")
 
         events: list[ScrapedEvent] = []
-        seen_hashes: set[str] = set()
+        seen_hashes: set[str] = set()  # Deduplicate across listing + detail pages
 
         async with httpx.AsyncClient(timeout=30, follow_redirects=True, headers=BROWSER_HEADERS) as client:
             # --- Step 1: listing page ---
@@ -62,6 +76,7 @@ class MECScraper(BaseScraper):
             for selector in self.LINK_SELECTORS:
                 for tag in soup.select(selector):
                     href = tag.get("href", "")
+                    # Skip anchor-only links and duplicates
                     if href and "#" not in href and href not in detail_links:
                         detail_links.append(href)
                 if detail_links:
@@ -96,6 +111,7 @@ class MECScraper(BaseScraper):
     # ------------------------------------------------------------------
 
     def _extract_jsonld_events(self, soup: BeautifulSoup, source_url: str = "") -> list[ScrapedEvent]:
+        """Find all <script type='application/ld+json'> blocks and parse any Event items."""
         events = []
         for script in soup.find_all("script", type="application/ld+json"):
             try:
@@ -103,9 +119,11 @@ class MECScraper(BaseScraper):
             except (json.JSONDecodeError, TypeError):
                 continue
 
+            # JSON-LD may be a single object or an array of objects
             items = data if isinstance(data, list) else [data]
             for item in items:
                 item_type = item.get("@type", "")
+                # @type can be a list (e.g. ["Event", "MusicEvent"]) or a plain string
                 if isinstance(item_type, list):
                     if "Event" not in item_type and "MusicEvent" not in item_type:
                         continue
@@ -117,6 +135,7 @@ class MECScraper(BaseScraper):
         return events
 
     def _parse_jsonld_event(self, data: dict, source_url: str = "") -> Optional[ScrapedEvent]:
+        """Convert a single schema.org Event dict into a ScrapedEvent; returns None on failure."""
         try:
             name = data.get("name", "").strip()
             if not name:
@@ -127,10 +146,12 @@ class MECScraper(BaseScraper):
                 return None
             try:
                 if "T" in start:
+                    # Full ISO datetime — extract date and time separately
                     dt = datetime.fromisoformat(start.replace("Z", "+00:00"))
                     event_date = dt.date()
                     show_time = dt.time().replace(tzinfo=None)
                     if show_time == time(0, 0):
+                        # Midnight usually means no specific time was set
                         show_time = None
                 else:
                     event_date = date.fromisoformat(start[:10])
@@ -153,6 +174,7 @@ class MECScraper(BaseScraper):
                 else:
                     support.append(p_name)
             if not artist:
+                # Fall back to event title when no explicit performer is listed
                 artist = name
 
             # Offers / price
@@ -160,6 +182,7 @@ class MECScraper(BaseScraper):
             price_max = None
             ticket_url = None
             offers = data.get("offers", {})
+            # Normalize to a single offer dict if a list is provided
             if isinstance(offers, list) and offers:
                 offers = offers[0]
             if isinstance(offers, dict):
@@ -186,9 +209,9 @@ class MECScraper(BaseScraper):
             # Description
             description = data.get("description", "") or None
             if description:
-                description = description[:500]
+                description = description[:500]  # Truncate to avoid oversized records
 
-            # Status
+            # Status — derive from schema eventStatus or price
             event_status = data.get("eventStatus", "")
             if "Cancelled" in event_status:
                 status = "cancelled"

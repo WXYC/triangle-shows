@@ -1,4 +1,15 @@
-"""ScrapeManager: orchestrates all scrapers, upserts events, logs results."""
+"""
+Scrape orchestrator: runs all venue scrapers, deduplicates results by hash, and
+upserts events + scrape logs into the database.
+
+Role: Triggered by POST /api/scrape (called by the scheduler every 6 hours or
+by Cloud Scheduler). Sits between the individual scrapers and the database —
+it owns the fan-out, error isolation, and upsert logic.
+Requires: TICKETMASTER_API_KEY (via app.config.settings), async PostgreSQL
+session, and all scraper modules in app.scrapers/.
+"""
+
+# --- Imports ---
 import logging
 from datetime import datetime
 from typing import Optional
@@ -14,6 +25,8 @@ from app.scrapers.ticketmaster import TicketmasterScraper
 
 logger = logging.getLogger(__name__)
 
+
+# --- ScrapeManager ---
 
 class ScrapeManager:
     """Orchestrates scraping for all venues."""
@@ -33,6 +46,8 @@ class ScrapeManager:
                 api_key=settings.TICKETMASTER_API_KEY,
                 config=venue.scraper_config,
             )
+        # Remaining scraper types are imported lazily to avoid circular imports
+        # and to keep startup time fast when only a subset of scrapers are used.
         elif venue.scraper_type == "rhp_events":
             from app.scrapers.rhp_events import RHPEventsScraper
             return RHPEventsScraper(venue.slug, venue.scraper_config)
@@ -70,6 +85,8 @@ class ScrapeManager:
             logger.warning(f"Unknown scraper type: {venue.scraper_type}")
             return None
 
+    # --- Per-venue scrape logic ---
+
     async def scrape_venue(self, venue: Venue) -> dict:
         """Scrape a single venue and upsert events."""
         # Refresh venue before accessing any attributes. If a previous scrape_venue call
@@ -80,6 +97,7 @@ class ScrapeManager:
         venue_id = venue.id
         scraper_type = venue.scraper_type
 
+        # Create a ScrapeLog row up front so we have a record even if the scrape crashes.
         log = ScrapeLog(
             venue_id=venue_id,
             scraper_type=scraper_type,
@@ -119,9 +137,11 @@ class ScrapeManager:
         except Exception as e:
             logger.error(f"[{venue_slug}] Scrape failed: {e}")
             try:
+                # Roll back the failed transaction before writing the error log,
+                # otherwise the commit below will also fail.
                 await self.session.rollback()
                 log.status = "failed"
-                log.error_message = str(e)[:2000]
+                log.error_message = str(e)[:2000]  # cap length to fit DB column
                 log.finished_at = datetime.utcnow()
                 log.duration_seconds = (log.finished_at - log.started_at).total_seconds()
                 self.session.add(log)
@@ -129,6 +149,8 @@ class ScrapeManager:
             except Exception as log_err:
                 logger.warning(f"[{venue_slug}] Could not write error log: {log_err}")
             return {"venue": venue_slug, "status": "failed", "error": str(e)}
+
+    # --- Upsert helpers ---
 
     async def _upsert_events(self, venue_id: int, scraped_events: list[ScrapedEvent]) -> tuple[int, int]:
         """Upsert events using hash-based dedup. Returns (created, updated) counts."""
@@ -157,10 +179,13 @@ class ScrapeManager:
             existing = existing_by_hash.get(se.hash)
 
             if existing:
-                # Update mutable fields
+                # Update mutable fields — identity fields (name, date, venue) are
+                # baked into the hash so they never change for a given event row.
                 existing.price_min = se.price_min
                 existing.price_max = se.price_max
                 existing.status = se.status
+                # Prefer the freshly scraped value but fall back to whatever we already
+                # have stored so we don't accidentally blank out previously-good data.
                 existing.image_url = se.image_url or existing.image_url
                 existing.ticket_url = se.ticket_url or existing.ticket_url
                 existing.doors_time = se.doors_time or existing.doors_time
@@ -201,6 +226,8 @@ class ScrapeManager:
         await self.session.flush()
         return created, updated
 
+    # --- Bulk scrape entry points ---
+
     async def scrape_all(self, scraper_types: Optional[list[str]] = None) -> list[dict]:
         """Scrape all venues (or those matching given scraper_types)."""
         query = select(Venue)
@@ -210,6 +237,8 @@ class ScrapeManager:
         venues = result.scalars().all()
 
         results = []
+        # Venues are scraped sequentially to keep the session state simple and avoid
+        # concurrent writes on the same async session (AsyncSession is not thread-safe).
         for venue in venues:
             r = await self.scrape_venue(venue)
             results.append(r)

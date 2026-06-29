@@ -1,4 +1,11 @@
-"""TickPick organizer page scraper — parses events from JSON-LD on organizer pages."""
+"""TickPick organizer page scraper — parses events from JSON-LD on organizer pages.
+
+Role: Venue scraper invoked by the scrape manager (scrapers/manager.py) during a
+POST /api/scrape cycle. This scraper handles venues that sell tickets through TickPick
+and expose event data as schema.org JSON-LD on their organizer profile page.
+Requires: httpx, beautifulsoup4/lxml; venue config must include an "organizer_id" key.
+"""
+# --- Imports ---
 import json
 import logging
 from datetime import datetime, date
@@ -9,8 +16,11 @@ from bs4 import BeautifulSoup
 
 from app.scrapers.base import BaseScraper, ScrapedEvent, BROWSER_HEADERS
 
+# --- Module-level setup ---
 logger = logging.getLogger(__name__)
 
+
+# --- Scraper class ---
 
 class TickPickOrganizerScraper(BaseScraper):
     """Scrape events from a TickPick organizer page via JSON-LD schema.org markup.
@@ -20,6 +30,7 @@ class TickPickOrganizerScraper(BaseScraper):
     """
 
     async def scrape(self) -> list[ScrapedEvent]:
+        """Fetch the TickPick organizer page and extract all upcoming events."""
         organizer_id = self.config.get("organizer_id", "")
         if not organizer_id:
             raise ValueError(f"No organizer_id configured for {self.venue_slug}")
@@ -32,12 +43,14 @@ class TickPickOrganizerScraper(BaseScraper):
             soup = BeautifulSoup(resp.text, "lxml")
 
         events = []
+        # TickPick embeds event data as one or more <script type="application/ld+json"> blocks
         for script in soup.find_all("script", type="application/ld+json"):
             try:
                 data = json.loads(script.get_text())
             except (json.JSONDecodeError, TypeError):
                 continue
 
+            # A single JSON-LD block may be a dict or a list of objects
             items = data if isinstance(data, list) else [data]
             for item in items:
                 if not isinstance(item, dict):
@@ -47,6 +60,7 @@ class TickPickOrganizerScraper(BaseScraper):
 
                 # Organization with nested event array
                 if item_type == "Organization" and "event" in item:
+                    # Events can be a single dict or a list; normalise to list
                     nested = item["event"]
                     if isinstance(nested, dict):
                         nested = [nested]
@@ -65,6 +79,7 @@ class TickPickOrganizerScraper(BaseScraper):
         return events
 
     def _parse_event(self, data: dict) -> Optional[ScrapedEvent]:
+        """Parse a single schema.org Event dict into a ScrapedEvent, or return None if invalid."""
         try:
             name = data.get("name", "").strip()
             if not name:
@@ -81,6 +96,7 @@ class TickPickOrganizerScraper(BaseScraper):
                     event_date = dt.date()
                     show_time = dt.time()
                 else:
+                    # Date-only string (no time component)
                     event_date = date.fromisoformat(start[:10])
                     show_time = None
             except ValueError:

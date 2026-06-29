@@ -1,10 +1,11 @@
-"""drop event_type column from events
+"""Alembic migration 0002: no-op squash marker.
 
-Revision ID: 0002
-Revises: 0001
-Create Date: 2026-02-26
-
+Role: Preserves the revision '0002' head so that existing deployed databases
+(which already ran the original add/drop event_type pair) stay at a valid head
+and don't re-run any DDL. The original 0001+0002 pair cancelled each other out
+and has been consolidated into 0001_initial_schema.
 """
+
 from alembic import op
 
 revision = '0002'
@@ -14,9 +15,8 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.drop_column('events', 'event_type')
+    pass
 
 
 def downgrade() -> None:
-    import sqlalchemy as sa
-    op.add_column('events', sa.Column('event_type', sa.String(100), nullable=True))
+    pass
