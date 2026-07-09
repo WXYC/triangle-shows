@@ -6,6 +6,13 @@ FastAPI service that scrapes Triangle-area venue listings into PostgreSQL and se
 
 The versioned `/api/v1` endpoints (`/api/v1/events`, `/api/v1/events/{id}`, `/api/v1/venues`, `/api/v1/health`) are the canonical, client-agnostic contract. The unversioned `/api/events`, `/api/venues`, and `/api/health` routes are deprecated aliases kept for the current web client; `/feeds/events.ics` is the iCal subscription feed. Shared fetch/filter/de-duplication logic lives in `app/services/events_query.py` and shared route helpers in `app/api/common.py`, so every surface serves the same data.
 
+## API contracts
+
+Two deliberate contract choices, called out so they aren't mistaken for bugs:
+
+- **Presentation is the client's job.** `/api/v1/events` returns neutral event resources — no `title`, `backgroundColor`, or `extendedProps`, and no formatted price or 12-hour time strings. The web client builds the FullCalendar shape from those resources in `frontend/js/fullcalendar-adapter.js`. The old server-shaped `GET /api/events/fullcalendar` feed was removed once that logic moved client-side; any non-web consumer (e.g. iOS via the WXYC Backend-Service) builds its own presentation the same way.
+- **Calendar de-duplicates; the iCal feed does not.** The `/api/v1/events` and `/api/events` JSON surfaces cross-venue de-duplicate — when the same artist plays the same date at two venues, the record with the most complete metadata wins, so the calendar grid shows one tile per artist/date. `/feeds/events.ics` intentionally keeps every listing (it queries with `dedup=False`): a calendar *subscriber* should see each venue's offering rather than a collapsed view. This asymmetry is by design — don't "fix" one surface to match the other.
+
 ## Running locally
 
 ```bash

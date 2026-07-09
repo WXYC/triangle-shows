@@ -2,16 +2,15 @@
 Version 1 of the surface-neutral Triangle Shows API.
 
 Role: The canonical, client-agnostic contract — plain event and venue resources with no
-presentation baked in (unlike the deprecated /api/events/fullcalendar feed, which returns
-FullCalendar-library-shaped objects with server-formatted price/time strings). The web
-calendar builds its own presentation from these resources, and the same endpoints are what
-a non-web client (e.g. an iOS app via the WXYC Backend-Service) would consume. The
-unversioned /api/events, /api/venues, and /api/health routers remain as deprecated
-aliases: venues, health, and the event-detail route register the same shared handlers
-(app.api.common), so those surfaces cannot drift, while the events list/fullcalendar
-routes keep intentionally different shapes (EventListResponse wrapper, lenient dates)
-on top of the same query service. Deleting a deprecated module cannot break v1 —
-nothing here imports from them.
+presentation baked in: no titles, per-venue colors, or server-formatted price/time
+strings. The web calendar builds the FullCalendar shape itself from these resources
+(frontend/js/fullcalendar-adapter.js), and the same endpoints are what a non-web client
+(e.g. an iOS app via the WXYC Backend-Service) would consume. The unversioned /api/events,
+/api/venues, and /api/health routers remain as deprecated aliases: venues, health, and the
+event-detail route register the same shared handlers (app.api.common), so those surfaces
+cannot drift, while the events list route keeps an intentionally different shape
+(EventListResponse wrapper, lenient dates) on top of the same query service. Deleting a
+deprecated module cannot break v1 — nothing here imports from them.
 
 Requires: async PostgreSQL session (app.database), EventStatus enum (app.models), response
 schemas (app.schemas), shared route helpers/handlers (app.api.common), the shared events

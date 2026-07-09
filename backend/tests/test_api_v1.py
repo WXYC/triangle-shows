@@ -85,6 +85,15 @@ async def test_v1_events_filters(client, make_venue, make_event):
     assert [e["artist"] for e in (await client.get("/api/v1/events?search=pratt")).json()] == ["Jessica Pratt"]
 
 
+async def test_v1_empty_filter_value_matches_nothing(client, make_event):
+    # A filter that is present but contains no usable segments (e.g. "?venue=,,") selects
+    # nothing, rather than being silently dropped so every event is returned.
+    await make_event(artist="Juana Molina", date=D)
+    assert len((await client.get("/api/v1/events")).json()) == 1  # baseline: event is in-window
+    assert (await client.get("/api/v1/events?venue=,,")).json() == []
+    assert (await client.get("/api/v1/events?city=,")).json() == []
+
+
 async def test_v1_event_detail_and_404(client, make_event):
     e = await make_event(artist="Cat Power", date=D)
     ok = await client.get(f"/api/v1/events/{e.id}")
