@@ -26,3 +26,18 @@ async def test_factories_persist_rows_visible_to_the_api(client, make_event):
     body = resp.json()
     assert body["event_count"] == 1
     assert body["venue_count"] == 1
+
+
+async def test_health_last_scrape_carries_utc_offset(client, session, make_venue):
+    """last_scrape is stored as naive UTC; the API must serialize it with an explicit offset."""
+    from datetime import datetime
+
+    from app.models import ScrapeLog
+
+    venue = await make_venue()
+    session.add(ScrapeLog(venue_id=venue.id, scraper_type="manual", status="success", finished_at=datetime.utcnow()))
+    await session.commit()
+
+    body = (await client.get("/api/v1/health")).json()
+    assert body["last_scrape"] is not None
+    assert body["last_scrape"].endswith(("Z", "+00:00"))

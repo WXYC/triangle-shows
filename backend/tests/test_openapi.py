@@ -1,12 +1,15 @@
 """Contract guard: the generated OpenAPI schema exposes the v1 surface and neutral schemas.
 
 Locks the published contract so an accidental route/schema rename is caught in CI rather
-than by a downstream client.
+than by a downstream client. Asserts against app.openapi() directly — the schema is a
+pure in-memory document, so no HTTP client or database is needed.
 """
 
+from app.main import app
 
-async def test_openapi_exposes_v1_paths_and_neutral_schemas(client):
-    spec = (await client.get("/openapi.json")).json()
+
+def test_openapi_exposes_v1_paths_and_neutral_schemas():
+    spec = app.openapi()
 
     paths = spec["paths"]
     for expected in ("/api/v1/events", "/api/v1/events/{event_id}", "/api/v1/venues", "/api/v1/health"):
@@ -23,8 +26,8 @@ async def test_openapi_exposes_v1_paths_and_neutral_schemas(client):
     assert "scraper_type" not in schemas["VenueResponse"]["properties"]
 
 
-async def test_openapi_marks_legacy_aliases_deprecated(client):
-    spec = (await client.get("/openapi.json")).json()
+def test_openapi_marks_legacy_aliases_deprecated():
+    spec = app.openapi()
     paths = spec["paths"]
     # The unversioned events + venues + health routes are deprecated aliases...
     assert paths["/api/events"]["get"]["deprecated"] is True

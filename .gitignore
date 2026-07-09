@@ -13,4 +13,4 @@ venv/
 _*.md
 .claude/
 .claude*
-CLAUDE.md
+CLAUDE.md.DS_Store

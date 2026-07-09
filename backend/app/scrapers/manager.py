@@ -197,7 +197,10 @@ class ScrapeManager:
                 # updated_at is NOT stamped here: the column's onupdate fires only when
                 # an assignment above actually changed a value, which keeps updated_at
                 # meaningful as a "this row's data changed" signal for API clients.
-                updated += 1
+                # Count as updated only when a value really changed, so ScrapeLog's
+                # events_updated matches the rows that will receive an UPDATE.
+                if self.session.is_modified(existing):
+                    updated += 1
             else:
                 event = Event(
                     external_id=se.external_id,

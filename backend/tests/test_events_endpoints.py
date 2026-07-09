@@ -4,9 +4,9 @@ Guards that the (deprecated) FullCalendar feed keeps its exact shape and de-dup
 behavior, and that the paginated list now de-duplicates via the same service.
 """
 
-from datetime import date, time, timedelta
+from datetime import time
 
-D = date.today() + timedelta(days=30)
+from conftest import DEFAULT_EVENT_DATE as D  # shared with the make_event factory default
 
 
 async def test_fullcalendar_shape_and_cross_venue_dedup(client, make_venue, make_event):
@@ -44,6 +44,15 @@ async def test_fullcalendar_tolerates_malformed_dates(client, make_event):
     resp = await client.get("/api/events/fullcalendar?start=not-a-date&end=07/31/2026")
     assert resp.status_code == 200
     assert len(resp.json()) == 1
+
+
+async def test_fullcalendar_empty_filter_value_matches_nothing(client, make_event):
+    # A filter that is present but selects nothing (e.g. "?venue=,,") must return an
+    # empty set — the historical behavior — not silently drop the filter and return
+    # every event.
+    await make_event(artist="Juana Molina", date=D)
+    assert (await client.get("/api/events/fullcalendar?venue=,,")).json() == []
+    assert (await client.get("/api/events/fullcalendar?city=,")).json() == []
 
 
 async def test_list_events_dedups_and_reports_deduped_total(client, make_venue, make_event):
