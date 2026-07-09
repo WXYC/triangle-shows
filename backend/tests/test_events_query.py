@@ -4,12 +4,10 @@ These lock in the de-duplication behavior that previously lived inline in the
 FullCalendar feed handler, so it can be relied on from every consumer.
 """
 
-from datetime import date, timedelta
+from datetime import timedelta
 
 from app.services.events_query import query_events
-
-# A fixed anchor a month out keeps assertions stable as the wall clock advances.
-D = date.today() + timedelta(days=30)
+from conftest import DEFAULT_EVENT_DATE as D  # shared with the make_event factory default
 
 
 async def test_dedup_prefers_richer_record_across_venues(session, make_venue, make_event):
@@ -41,6 +39,33 @@ async def test_dedup_collapses_same_venue_same_key(session, make_venue, make_eve
     # Richer, but same venue — the score-based replacement only applies across venues,
     # so the same-venue duplicate collapses to the first record regardless.
     await make_event(venue=v, artist="Chuquimamani-Condori", date=D, ticket_url="https://tix")
+    result = await query_events(session, start=D, end=D)
+    assert [e.id for e in result] == [first.id]
+
+
+async def test_dedup_richer_same_venue_record_never_displaces_cross_venue_winner(session, make_venue, make_event):
+    v1 = await make_venue(slug="cats-cradle")
+    v2 = await make_venue(slug="local-506")
+    # First venue's sparse record, then a richer cross-venue record wins the key...
+    await make_event(venue=v1, artist="Juana Molina", date=D)
+    winner = await make_event(venue=v2, artist="Juana Molina", date=D, ticket_url="https://tix")
+    # ...and an even richer record from the FIRST venue must not chain-replace it:
+    # replacement compares against the first-seen venue, so first-venue rows can
+    # never displace a cross-venue winner.
+    await make_event(
+        venue=v1, artist="Juana Molina", date=D,
+        ticket_url="https://tix2", image_url="https://img", price_min=12.0,
+    )
+    result = await query_events(session, start=D, end=D)
+    assert [e.id for e in result] == [winner.id]
+
+
+async def test_dedup_matches_apostrophe_variants_across_venues(session, make_venue, make_event):
+    v1 = await make_venue(slug="cats-cradle")
+    v2 = await make_venue(slug="local-506")
+    # U+02BC modifier apostrophe vs ASCII apostrophe — same act, two sources.
+    first = await make_event(venue=v1, artist="Sinead OʼConnor", date=D)
+    await make_event(venue=v2, artist="Sinead O'Connor", date=D)
     result = await query_events(session, start=D, end=D)
     assert [e.id for e in result] == [first.id]
 

@@ -10,7 +10,7 @@ Requires: PostgreSQL (via app.database), the shared events query service
 
 # --- Standard library imports ---
 import zoneinfo
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 # --- Third-party imports ---
@@ -20,7 +20,7 @@ from icalendar import Calendar, Event as ICalEvent, vText
 from sqlalchemy.ext.asyncio import AsyncSession
 
 # --- Internal imports ---
-from app.api.common import split_csv
+from app.api.common import split_csv, today_in_triangle
 from app.database import get_session
 from app.services.events_query import query_events
 
@@ -40,10 +40,11 @@ async def get_ical_feed(
 
     # Only upcoming events (no historical clutter in subscribers' calendars), via the
     # shared query service. dedup=False: the feed lists every venue's own offering,
-    # including cross-venue duplicate listings the calendar collapses.
+    # including cross-venue duplicate listings the calendar collapses. "Today" is the
+    # Triangle's calendar date, not the (UTC) server's.
     events = await query_events(
         session,
-        start=date.today(),
+        start=today_in_triangle(),
         venue_slugs=split_csv(venue),
         dedup=False,
     )

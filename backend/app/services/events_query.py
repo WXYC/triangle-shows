@@ -24,35 +24,34 @@ from app.models import Event, Venue
 
 
 def _normalize_label(label: str) -> str:
-    """Case-fold, strip diacritics, and keep only letters/digits (any script).
+    """Case-fold, strip diacritics/punctuation, and keep letters/digits of any script.
 
-    NFKD decomposition splits accented characters into base + combining mark, and
-    the isalnum() filter then drops the marks (and all punctuation/whitespace), so
-    "Hermanos Gutiérrez" and "Hermanos Gutierrez" normalize identically while
-    non-Latin names ("Молчат Дома", "坂本龍一") keep their characters instead of
-    collapsing to an empty string.
+    NFKD decomposition splits accented characters into base + combining mark and the
+    category filter drops the marks, so "Hermanos Gutiérrez" and "Hermanos Gutierrez"
+    normalize identically, while non-Latin names ("Молчат Дома", "坂本龍一") keep their
+    characters instead of collapsing to an empty string. Modifier letters (category Lm,
+    e.g. the U+02BC apostrophe in "OʼConnor") are excluded so apostrophe-style variants
+    of the same name still match.
     """
     decomposed = unicodedata.normalize("NFKD", label.casefold())
-    return "".join(ch for ch in decomposed if ch.isalnum())
-
-
-def _escape_like(term: str) -> str:
-    """Escape LIKE/ILIKE wildcards so user-supplied text matches literally."""
-    return term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    return "".join(
+        ch for ch in decomposed
+        if (category := unicodedata.category(ch))[0] in "LN" and category != "Lm"
+    )
 
 
 def _dedupe_key(event: Event) -> tuple:
     """(date, normalized artist-or-name) — the identity used to detect duplicates.
 
-    Normalizing means minor punctuation/spacing/diacritic differences between
-    sources don't defeat the match. A label with no letters or digits at all
-    (e.g. the band "!!!") yields a per-event key, so symbol-only names on the
-    same date are never treated as duplicates of each other.
+    Normalizing means minor punctuation/spacing/diacritic differences between sources
+    don't defeat the match. A label with no letters or digits at all (e.g. the band
+    "!!!") has no comparable identity, so those events are keyed by id — i.e. exempt
+    from de-duplication entirely; showing a duplicate beats hiding a real show.
     """
     label = event.artist or event.name
     norm = _normalize_label(label)
     if not norm:
-        return (event.date, f"\x00id:{event.id}")
+        return (event.date, event.id)  # int key can never equal a normalized str key
     return (event.date, norm)
 
 
@@ -64,21 +63,25 @@ def _completeness_score(event: Event) -> int:
 def dedupe_cross_venue(events: Sequence[Event]) -> list[Event]:
     """Collapse events sharing a (date, artist/name) key, keeping the best record.
 
-    The first record for a key wins by default; a record from a *different* venue
-    replaces it only when it is strictly more complete. Same-key records from the
-    *same* venue therefore collapse to the first one seen. Pass events in a stable
-    order (``query_events`` orders by date then id) so the tiebreak is deterministic.
-    Input order is otherwise preserved in the output.
+    The first record for a key wins by default; a record from a venue *other than the
+    first-seen venue* replaces it when strictly more complete. Comparing against the
+    first-seen venue (not the current winner) keeps the invariant that records from
+    the first venue can only ever contribute their first-seen row — later, richer
+    rows from that same venue never displace a cross-venue winner. Pass events in a
+    stable order (``query_events`` orders by date then id) so the outcome is
+    deterministic. Input order is otherwise preserved in the output.
     """
     best: dict[tuple, Event] = {}
     best_score: dict[tuple, int] = {}
+    first_venue: dict[tuple, int] = {}
     for event in events:
         key = _dedupe_key(event)
         score = _completeness_score(event)
         if key not in best:
             best[key] = event
             best_score[key] = score
-        elif event.venue_id != best[key].venue_id and score > best_score[key]:
+            first_venue[key] = event.venue_id
+        elif event.venue_id != first_venue[key] and score > best_score[key]:
             best[key] = event
             best_score[key] = score
     kept = {ev.id for ev in best.values()}
@@ -100,9 +103,11 @@ async def query_events(
 ) -> list[Event]:
     """Fetch events (with venue eagerly loaded), filtered and optionally de-duplicated.
 
-    All filters are ANDed; ``search``/``genre`` match literally (LIKE wildcards in the
-    input are escaped). Results are ordered by (date, id): date is the meaningful sort
-    for a calendar, and id is a stable tiebreak that makes de-duplication deterministic.
+    All filters are ANDed; ``search``/``genre`` are case-insensitive substring matches
+    with LIKE wildcards in the input matched literally. A venue-level filter passed as
+    an empty list means "matches nothing" (None means "no filter"). Results are ordered
+    by (date, id): date is the meaningful sort for a calendar, and id is a stable
+    tiebreak that makes de-duplication deterministic.
 
     De-duplication happens *after* filtering, so it is relative to the requested set:
     a venue filter that excludes the winning record of a duplicate pair will surface
@@ -115,17 +120,21 @@ async def query_events(
         conditions.append(Event.date >= start)
     if end is not None:
         conditions.append(Event.date <= end)
-    if cities:
+    if cities is not None:
         conditions.append(Venue.city.in_(list(cities)))
-    if sizes:
+    if sizes is not None:
         conditions.append(Venue.size_category.in_(list(sizes)))
-    if venue_slugs:
+    if venue_slugs is not None:
         conditions.append(Venue.slug.in_(list(venue_slugs)))
     if search:
-        term = f"%{_escape_like(search)}%"
-        conditions.append(Event.name.ilike(term, escape="\\") | Event.artist.ilike(term, escape="\\"))
+        # icontains(autoescape=True) wraps the term in %...% and escapes %/_ so user
+        # input matches literally.
+        conditions.append(
+            Event.name.icontains(search, autoescape=True)
+            | Event.artist.icontains(search, autoescape=True)
+        )
     if genre:
-        conditions.append(Event.genre.ilike(f"%{_escape_like(genre)}%", escape="\\"))
+        conditions.append(Event.genre.icontains(genre, autoescape=True))
     if status:
         conditions.append(Event.status == status)
 
@@ -133,7 +142,7 @@ async def query_events(
     # repeating venue columns onto every event row (and needing unique()).
     query = select(Event).options(selectinload(Event.venue))
     # Only JOIN venues when a venue-level filter is present.
-    if cities or sizes or venue_slugs:
+    if cities is not None or sizes is not None or venue_slugs is not None:
         query = query.join(Event.venue)
     if conditions:
         query = query.where(and_(*conditions))

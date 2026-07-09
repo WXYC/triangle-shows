@@ -2,9 +2,7 @@
 
 from datetime import date, timedelta
 
-# A fixed anchor a month out keeps assertions stable as the wall clock advances
-# (the v1 events window defaults to "today onward").
-D = date.today() + timedelta(days=30)
+from conftest import DEFAULT_EVENT_DATE as D  # shared with the make_event factory default
 
 
 async def test_v1_events_returns_neutral_shape(client, make_event):
@@ -56,16 +54,19 @@ async def test_v1_events_window_defaults_to_upcoming(client, make_venue, make_ev
     past = date.today() - timedelta(days=10)
     await make_event(venue=v, artist="Stereolab", date=past)
     await make_event(venue=v, artist="Cat Power", date=D)
-    # Without a start, only upcoming events are returned — never the whole history.
+    # Without any bound, only upcoming events are returned — never the whole history.
     default_window = (await client.get("/api/v1/events")).json()
     assert [e["artist"] for e in default_window] == ["Cat Power"]
-    # History remains reachable with an explicit start.
+    # History remains reachable with an explicit start...
     explicit = (await client.get(f"/api/v1/events?start={past.isoformat()}")).json()
     assert [e["artist"] for e in explicit] == ["Stereolab", "Cat Power"]
+    # ...and an end-only query means "everything up to end" — the start default must
+    # not sneak in and make a historical window silently empty.
+    end_only = (await client.get(f"/api/v1/events?end={date.today().isoformat()}")).json()
+    assert [e["artist"] for e in end_only] == ["Stereolab"]
 
 
-async def test_v1_events_rejects_malformed_query_params(client, make_event):
-    await make_event(artist="Juana Molina", date=D)
+async def test_v1_events_rejects_malformed_query_params(client):
     # Malformed dates are a 422, not a silent full-table dump.
     assert (await client.get("/api/v1/events?start=07/01/2026")).status_code == 422
     assert (await client.get(f"/api/v1/events?start={D.isoformat()}&end=not-a-date")).status_code == 422

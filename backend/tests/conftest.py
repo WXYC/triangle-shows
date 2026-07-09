@@ -15,10 +15,18 @@ dedicated ``*_test`` database it creates on first use. Override the whole URL wi
 parallel runs do not collide.
 """
 
+import hashlib
 import os
 import re
+from datetime import date, timedelta
 
 from sqlalchemy.engine import make_url
+
+# Default date for factory-made events: fixed at collection time, a month in the
+# future so tests keep passing as the wall clock advances (the v1 API defaults its
+# window to "today onward"). Test modules import this as their date anchor so the
+# factory default and test filters can never drift apart.
+DEFAULT_EVENT_DATE = date.today() + timedelta(days=30)
 
 # --- Pin the app to the test database BEFORE importing any app.* module ---------
 # app.config.settings and the engine in app.database read DATABASE_URL at import
@@ -62,27 +70,25 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 # so schema creation doesn't silently depend on which modules the routers happen to
 # import.
 from app.database import Base, get_session  # noqa: E402
-from app import models as _app_models  # noqa: E402,F401
+from app.models import Event, ScrapeLog, Venue  # noqa: E402,F401
 from app.main import app  # noqa: E402
 
 
 def _create_test_database_if_missing() -> None:
     """Create the target test database if it doesn't exist (sync, one-shot).
 
-    Uses psycopg2 against the maintenance ``postgres`` database. ``CREATE DATABASE``
-    can't run inside a transaction, so the connection is put in autocommit mode.
+    Uses psycopg2 against the maintenance ``postgres`` database, connecting via a
+    libpq URI derived from the full test URL so connection details beyond
+    host/port/user (e.g. ``?host=/socket/path``, ``sslmode``) carry through.
+    ``CREATE DATABASE`` can't run inside a transaction, so the connection is put in
+    autocommit mode.
     """
     import psycopg2
     from psycopg2 import sql
 
     url = make_url(TEST_DATABASE_URL)
-    conn = psycopg2.connect(
-        host=url.host,
-        port=url.port or 5432,
-        user=url.username,
-        password=url.password,
-        dbname="postgres",
-    )
+    maintenance_uri = url.set(drivername="postgresql", database="postgres").render_as_string(hide_password=False)
+    conn = psycopg2.connect(maintenance_uri)
     try:
         conn.autocommit = True
         with conn.cursor() as cur:
@@ -127,8 +133,8 @@ async def _engine(_ensure_test_database):
             await engine.dispose()
 
 
-@pytest_asyncio.fixture
-async def _sessionmaker(_engine):
+@pytest.fixture
+def _sessionmaker(_engine):
     return async_sessionmaker(_engine, class_=AsyncSession, expire_on_commit=False)
 
 
@@ -167,8 +173,6 @@ async def make_venue(session):
 
     Sensible defaults are filled in; pass overrides for any field a test cares about.
     """
-    from app.models import Venue
-
     created: list[Venue] = []
 
     async def _make(**overrides) -> Venue:
@@ -196,15 +200,10 @@ async def make_event(session, make_venue):
     """Factory that inserts and commits an Event (creating a Venue if none is given).
 
     ``hash`` is required and unique on the model; a stable one is derived when not
-    supplied so tests don't have to think about it. The default date is a month in
-    the future so tests keep passing as the wall clock advances (the v1 API defaults
-    its window to "today onward").
+    supplied so tests don't have to think about it. The default date is
+    DEFAULT_EVENT_DATE (a month in the future) so tests keep passing as the wall
+    clock advances.
     """
-    import hashlib
-    from datetime import date, timedelta
-
-    from app.models import Event
-
     created: list[Event] = []
 
     async def _make(venue=None, **overrides) -> Event:
@@ -214,7 +213,7 @@ async def make_event(session, make_venue):
         fields = dict(
             venue_id=venue.id,
             name=overrides.get("name") or overrides.get("artist") or f"Test Show {n}",
-            date=date.today() + timedelta(days=30),
+            date=DEFAULT_EVENT_DATE,
             source="manual",
         )
         fields.update(overrides)

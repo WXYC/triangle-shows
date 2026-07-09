@@ -10,9 +10,25 @@ Requires: models.py (ORM objects are converted via from_attributes=True),
 
 # --- Imports ---
 
-from pydantic import BaseModel
-from datetime import date, time, datetime
-from typing import Optional
+from pydantic import AfterValidator, BaseModel
+from datetime import date, time, datetime, timezone
+from typing import Annotated, Optional
+
+
+# --- Shared field types ---
+
+def _assume_utc(value: datetime) -> datetime:
+    """Attach UTC to naive datetimes so they serialize with an explicit offset.
+
+    The ORM stores naive datetime.utcnow() values; without this, timestamps
+    serialize as bare local-looking strings that clients misparse as local time.
+    Already-aware values pass through untouched.
+    """
+    return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value
+
+
+# A datetime stored as naive UTC, always serialized with an explicit UTC offset.
+UTCDateTime = Annotated[datetime, AfterValidator(_assume_utc)]
 
 
 # --- Venue Schema ---
@@ -54,9 +70,8 @@ class EventResponse(BaseModel):
     age_restriction: Optional[str] = None
     description: Optional[str] = None
     source: str
-    # Last-modified timestamp, serialized as UTC (the route mapper attaches the offset).
-    # Changes only when a scrape actually modifies the row.
-    updated_at: Optional[datetime] = None
+    # Last-modified timestamp; changes only when a scrape actually modifies the row.
+    updated_at: Optional[UTCDateTime] = None
 
     # Denormalized venue fields — joined in the query so clients don't need
     # a separate /api/venues request to display venue info alongside events
@@ -86,5 +101,5 @@ class HealthResponse(BaseModel):
     status: str
     event_count: int
     venue_count: int
-    last_scrape: Optional[datetime] = None  # None if no scrape has run yet
+    last_scrape: Optional[UTCDateTime] = None  # None if no scrape has run yet
     version: Optional[str] = None

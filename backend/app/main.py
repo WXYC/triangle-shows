@@ -12,7 +12,7 @@ Requires: DATABASE_URL, LOG_LEVEL, ENABLE_SCHEDULER, RUN_STARTUP_SCRAPE env vars
 # --- Imports ---
 import asyncio
 import logging
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -96,6 +96,14 @@ async def lifespan(app: FastAPI):
     yield
 
     # Shutdown
+    scrape_task = getattr(app.state, "startup_scrape_task", None)
+    if scrape_task is not None and not scrape_task.done():
+        # Cancel and await the in-flight scrape so shutdown doesn't abandon a pending
+        # task mid-transaction ("Task was destroyed but it is pending!").
+        scrape_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await scrape_task
+        logger.info("Startup scrape cancelled at shutdown")
     if scheduler.running:
         scheduler.shutdown()
         logger.info("Scheduler shut down")

@@ -133,11 +133,13 @@ async def list_events(
     """List events with filters and pagination.
 
     Uses the shared query service, so results are cross-venue de-duplicated (matching
-    the calendar feed). Because de-duplication happens in Python, the full matching set
-    is fetched per request, pagination is applied to the de-duplicated set, and `total`
-    reflects the de-duplicated count. That is an accepted tradeoff at this dataset's
-    size (a few thousand rows); if the events table grows past ~50k rows, push the
-    de-duplication into SQL and restore COUNT + LIMIT/OFFSET.
+    the calendar feed) and `search`/`genre` match substrings literally (LIKE wildcards
+    in the input are escaped — an intentional v1.1 change from the historical raw-pattern
+    behavior). Because de-duplication happens in Python, the full matching set is fetched
+    per request, pagination is applied to the de-duplicated set, and `total` reflects the
+    de-duplicated count. That is an accepted tradeoff at this dataset's size (a few
+    thousand rows); if the events table grows past ~50k rows, push the de-duplication
+    into SQL and restore COUNT + LIMIT/OFFSET.
     """
     events = await query_events(
         session,
