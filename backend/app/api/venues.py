@@ -17,7 +17,7 @@ from app.schemas import VenueResponse
 
 # --- Router ---
 
-router = APIRouter(prefix="/api/venues", tags=["venues"])
+router = APIRouter(prefix="/api/venues", tags=["venues"], deprecated=True)  # superseded by /api/v1/venues
 
 
 # --- Endpoints ---

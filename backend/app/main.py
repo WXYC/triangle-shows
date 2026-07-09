@@ -23,7 +23,7 @@ from app.config import settings
 from app.database import async_session
 from app.seed import seed_venues
 from app.scheduler import scheduler, configure_scheduler
-from app.api import events, venues, health, feeds
+from app.api import events, venues, health, feeds, v1
 
 # --- Logging setup ---
 logging.basicConfig(
@@ -77,9 +77,13 @@ async def lifespan(app: FastAPI):
     await seed_venues()
     logger.info("Venues seeded")
 
-    # Kick off a scrape immediately in the background
-    asyncio.create_task(_startup_scrape())
-    logger.info("Startup scrape scheduled")
+    # Kick off a scrape immediately in the background (skipped when RUN_STARTUP_SCRAPE
+    # is false, e.g. under tests or when seeding data manually).
+    if settings.RUN_STARTUP_SCRAPE:
+        asyncio.create_task(_startup_scrape())
+        logger.info("Startup scrape scheduled")
+    else:
+        logger.info("Startup scrape disabled (RUN_STARTUP_SCRAPE=false)")
 
     # Start scheduler if enabled
     if settings.ENABLE_SCHEDULER:
@@ -98,9 +102,14 @@ async def lifespan(app: FastAPI):
 # --- App instantiation ---
 
 app = FastAPI(
-    title="Triangle Shows",
-    description="Concert calendar for the Raleigh-Durham-Chapel Hill area",
-    version="1.0.0",
+    title="Triangle Shows API",
+    description=(
+        "Surface-neutral API for Triangle-area live-music events and venues. "
+        "The versioned /api/v1 endpoints are the canonical, client-agnostic contract "
+        "(consumed by the web calendar and other clients); the unversioned /api/events "
+        "and /api/venues endpoints are deprecated aliases."
+    ),
+    version="1.1.0",
     lifespan=lifespan,
 )
 
@@ -115,7 +124,8 @@ app.add_middleware(
 
 # --- Route registration ---
 
-# API routes
+# API routes — v1 is the canonical surface; the unversioned routers are deprecated aliases.
+app.include_router(v1.router)
 app.include_router(events.router)
 app.include_router(venues.router)
 app.include_router(health.router)

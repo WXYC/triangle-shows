@@ -1,0 +1,13 @@
+# Tooling configuration for the Triangle Shows backend.
+# This file intentionally declares no build-system / project metadata — the app is
+# run from source and its dependencies live in requirements.txt. It exists to hold
+# pytest configuration.
+
+[tool.pytest.ini_options]
+# asyncio_mode = "auto" lets plain `async def test_*` run without a per-test marker.
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+# Put the backend root on sys.path so `import app...` resolves when running pytest
+# from the backend/ directory.
+pythonpath = ["."]
