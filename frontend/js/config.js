@@ -1,5 +1,17 @@
 // API configuration
-const API_BASE = window.location.origin;
+// Hosted same-origin by default. To serve the UI from a different origin than the API
+// (e.g. durm.triangle-shows.net → https://api.triangle-shows.net), set
+// window.TRIANGLE_SHOWS_API_BASE before this script runs — i.e. in a non-deferred inline
+// <head> script, since API_BASE is read (as a const) the moment config.js executes and
+// config.js is the first of the deferred app scripts.
+const API_BASE = window.TRIANGLE_SHOWS_API_BASE || window.location.origin;
+
+// Lower bound for the events request. The calendar loads the full set once and filters
+// client-side, and it renders past shows (styled .ev-past) when the user pages to
+// earlier months. /api/v1/events defaults to today-onward to spare generic API clients
+// an unbounded history dump, so the web client asks from a fixed far-past date to keep
+// loading everything.
+const EVENTS_START_DATE = "2000-01-01";
 
 // Spotify — paste your Client ID from https://developer.spotify.com/dashboard
 // Register redirect URIs: https://triangle-shows.org and http://localhost:8000

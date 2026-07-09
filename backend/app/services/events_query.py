@@ -2,12 +2,11 @@
 Shared events query + cross-venue de-duplication.
 
 Role: The single place that fetches events, applies the common filters, and
-collapses cross-venue duplicates. Every read surface calls this — the FullCalendar
-web feed, the paginated list endpoint, the iCal feed (dedup=False), and the
-surface-neutral /api/v1 endpoints — so they all see the *same* set of events.
-This logic previously lived only inside the FullCalendar handler, which meant the
-plain `/api/events` list returned un-deduplicated rows; moving it here fixes that
-inconsistency.
+collapses cross-venue duplicates. Every read surface calls this — the surface-neutral
+/api/v1 endpoints, the deprecated paginated `/api/events` list, and the iCal feed
+(dedup=False) — so they all see the *same* set of events. This logic once lived only
+inside the web calendar's feed handler, which meant the plain `/api/events` list
+returned un-deduplicated rows; moving it here fixed that inconsistency.
 
 Requires: async PostgreSQL session (app.database), Event/Venue ORM models (app.models).
 """

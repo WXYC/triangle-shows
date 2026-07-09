@@ -1,58 +1,13 @@
-"""Integration tests for the /api/events endpoints after the shared-query refactor.
+"""Integration tests for the deprecated /api/events aliases and the iCal feed.
 
-Guards that the (deprecated) FullCalendar feed keeps its exact shape and de-dup
-behavior, and that the paginated list now de-duplicates via the same service.
+The FullCalendar-shaped feed that once lived at /api/events/fullcalendar has been
+removed — the web client now builds that shape itself (frontend/js/fullcalendar-adapter.js),
+covered by the neutral /api/v1 tests. These guard the surviving deprecated aliases (the
+paginated list now de-duplicates via the shared query service and keeps its historical
+date leniency) and the iCal feed's distinct un-deduped contract.
 """
 
-from datetime import time
-
 from conftest import DEFAULT_EVENT_DATE as D  # shared with the make_event factory default
-
-
-async def test_fullcalendar_shape_and_cross_venue_dedup(client, make_venue, make_event):
-    v1 = await make_venue(slug="cats-cradle", color="#111111")
-    v2 = await make_venue(slug="local-506", color="#222222")
-    await make_event(venue=v1, artist="Juana Molina", date=D)  # sparse, first
-    await make_event(
-        venue=v2, artist="Juana Molina", date=D,
-        image_url="https://img", ticket_url="https://tix", price_min=20.0, price_max=25.0,
-    )
-    resp = await client.get("/api/events/fullcalendar")
-    assert resp.status_code == 200
-    data = resp.json()
-    # The cross-venue duplicate collapses to the richer (v2) record.
-    assert len(data) == 1
-    ev = data[0]
-    assert ev["title"] == "Juana Molina"
-    assert ev["allDay"] is True
-    assert ev["backgroundColor"] == "#222222"
-    assert ev["extendedProps"]["venue_slug"] == "local-506"
-    assert ev["extendedProps"]["price"] == "$20-$25"
-
-
-async def test_fullcalendar_formats_times_without_leading_zero(client, make_event):
-    await make_event(artist="Jessica Pratt", date=D, show_time=time(20, 0), doors_time=time(19, 0))
-    ev = (await client.get("/api/events/fullcalendar")).json()[0]
-    assert ev["extendedProps"]["show_time"] == "8:00 PM"
-    assert ev["extendedProps"]["doors_time"] == "7:00 PM"
-
-
-async def test_fullcalendar_tolerates_malformed_dates(client, make_event):
-    # The deprecated feed keeps its historical leniency: invalid date params are
-    # treated as "no filter" so the calendar still renders.
-    await make_event(artist="Juana Molina", date=D)
-    resp = await client.get("/api/events/fullcalendar?start=not-a-date&end=07/31/2026")
-    assert resp.status_code == 200
-    assert len(resp.json()) == 1
-
-
-async def test_fullcalendar_empty_filter_value_matches_nothing(client, make_event):
-    # A filter that is present but selects nothing (e.g. "?venue=,,") must return an
-    # empty set — the historical behavior — not silently drop the filter and return
-    # every event.
-    await make_event(artist="Juana Molina", date=D)
-    assert (await client.get("/api/events/fullcalendar?venue=,,")).json() == []
-    assert (await client.get("/api/events/fullcalendar?city=,")).json() == []
 
 
 async def test_list_events_dedups_and_reports_deduped_total(client, make_venue, make_event):
@@ -64,6 +19,16 @@ async def test_list_events_dedups_and_reports_deduped_total(client, make_venue, 
     body = (await client.get("/api/events?per_page=50")).json()
     assert body["total"] == 2           # 3 rows, one duplicate pair collapses
     assert len(body["events"]) == 2
+
+
+async def test_list_events_tolerates_malformed_dates(client, make_event):
+    # The deprecated list keeps its historical leniency: invalid date params are treated
+    # as "no filter" so a malformed calendar request still renders (unlike /api/v1/events,
+    # which rejects malformed dates with a 422).
+    await make_event(artist="Juana Molina", date=D)
+    resp = await client.get("/api/events?start=not-a-date&end=07/31/2026")
+    assert resp.status_code == 200
+    assert resp.json()["total"] == 1
 
 
 async def test_get_event_by_id_includes_updated_at_and_404s(client, make_event):

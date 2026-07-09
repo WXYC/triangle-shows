@@ -76,12 +76,23 @@ frontend/
   css/styles.css
   js/
     app.js          # FullCalendar init, loading screen, hidden-show chips
+    fullcalendar-adapter.js  # Maps neutral /api/v1 events → FullCalendar's event shape
     filters.js      # Search, city, venue, and size filter logic
     config.js       # Color palettes, API base URL, site config
     modal.js        # Event detail modal
     favorites.js    # Heart, hide, restore, and export logic
 tools/              # Dev utilities (see below)
 ```
+
+### Frontend tests
+
+The frontend is buildless, but the adapter that maps the neutral `/api/v1` feed into FullCalendar's event shape (`js/fullcalendar-adapter.js`) has unit tests on Node's built-in runner — no build step, no `npm install`:
+
+```bash
+node --test frontend/tests/*.test.js
+```
+
+They lock the price/time string formatting and the `extendedProps` key set that `modal.js`/`filters.js`/`favorites.js` read by name. Backend tests live under `backend/` — see `backend/README.md`.
 
 ### Developer tools
 

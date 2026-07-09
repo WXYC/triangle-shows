@@ -175,13 +175,15 @@ document.addEventListener("DOMContentLoaded", function () {
     eventSources: [
       function (info, successCallback, failureCallback) {
         if (!_initialLoadComplete) {
-          fetch(`${API_BASE}/api/events/fullcalendar`)
+          fetch(`${API_BASE}/api/v1/events?start=${EVENTS_START_DATE}`)
             .then(function (r) {
               if (!r.ok) throw new Error("HTTP " + r.status);
               return r.json();
             })
             .then(function (data) {
-              _allEventsCache = data;
+              // The neutral /api/v1 feed returns plain event resources; build the
+              // FullCalendar shape client-side (see fullcalendar-adapter.js).
+              _allEventsCache = data.map(toFullCalendarEvent);
               _initialLoadComplete = true;
               successCallback(_getFilteredEvents());
             })
