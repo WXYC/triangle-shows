@@ -145,6 +145,18 @@ The authoritative source is [`backend/app/seed.py`](backend/app/seed.py) — eac
 
 ---
 
+## Deployment (WXYC fork)
+
+This fork runs on [Railway](https://railway.app) (project `triangle-shows`, `production` environment) rather than the upstream Cloud Run setup. The service builds from this repo, and pushes to `main` deploy automatically via [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml).
+
+Because Railway's GitHub App is not installed on the fork, the workflow drives the deploy through the Railway CLI (`railway redeploy --from-source`) instead of a native Railway deployment trigger. It requires one repo secret:
+
+- **`RAILWAY_TOKEN`** — a Railway *project token* scoped to the `triangle-shows` production environment (Railway dashboard → project → Settings → Tokens).
+
+To deploy a specific commit out of band, run the workflow manually (`workflow_dispatch`) or `railway redeploy --service triangle-shows --from-source --yes` locally against a linked project.
+
+---
+
 ## Roadmap
 
 Upcoming features and ideas are tracked in [GitHub Issues](https://github.com/ty-fi/triangle-shows/issues). Some things I'm currently thinking about:

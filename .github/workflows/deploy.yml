@@ -1,0 +1,43 @@
+name: Deploy
+
+# Push-to-deploy for the Railway `triangle-shows` service. Railway's GitHub App is
+# not installed on this fork, so a native deployment trigger cannot be created;
+# this workflow drives the deploy through the Railway CLI instead. It re-pulls the
+# latest commit on the configured source branch (the same `redeploy --from-source`
+# path validated by hand), so the deployed artifact tracks `main`.
+#
+# Prerequisite: a `RAILWAY_TOKEN` repo secret holding a Railway *project token*
+# scoped to the triangle-shows production environment
+# (Railway dashboard -> project -> Settings -> Tokens).
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Serialize deploys: never cancel an in-flight deploy, and never run two at once.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      # Fast, zero-dependency gate: don't ship a broken presentation adapter.
+      - name: Frontend tests
+        run: node --test frontend/tests/*.test.js
+
+      - name: Install Railway CLI
+        run: npm install -g @railway/cli
+
+      - name: Deploy to Railway
+        run: railway redeploy --service triangle-shows --environment production --from-source --yes
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
