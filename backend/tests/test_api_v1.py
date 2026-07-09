@@ -91,6 +91,9 @@ async def test_v1_event_detail_and_404(client, make_event):
     assert ok.status_code == 200
     assert ok.json()["artist"] == "Cat Power"
     assert (await client.get("/api/v1/events/999999")).status_code == 404
+    # Ids beyond int4 must 422 at validation, not surface as a database error (500).
+    assert (await client.get("/api/v1/events/99999999999999")).status_code == 422
+    assert (await client.get("/api/events/99999999999999")).status_code == 422
 
 
 async def test_v1_venues_ordered_by_city(client, make_venue):

@@ -7,6 +7,9 @@ values equal the stored ones — these tests enforce that contract so a future r
 of the upsert (e.g. to Core update() or ON CONFLICT) can't silently break it.
 """
 
+from sqlalchemy import select
+
+from app.models import Event
 from app.scrapers.base import ScrapedEvent
 from app.scrapers.manager import ScrapeManager
 from conftest import DEFAULT_EVENT_DATE as D
@@ -33,8 +36,6 @@ async def test_rescrape_with_identical_data_updates_nothing(session, make_venue)
     await session.commit()
     assert (created, updated) == (1, 0)
 
-    from app.models import Event
-    from sqlalchemy import select
     event = (await session.execute(select(Event))).scalar_one()
     first_updated_at = event.updated_at
 
@@ -53,8 +54,6 @@ async def test_rescrape_with_changed_data_bumps_updated_at_and_counter(session, 
     await manager._upsert_events(venue.id, [_scraped(venue.slug)])
     await session.commit()
 
-    from app.models import Event
-    from sqlalchemy import select
     event = (await session.execute(select(Event))).scalar_one()
     first_updated_at = event.updated_at
 

@@ -79,7 +79,10 @@ def _create_test_database_if_missing() -> None:
 
     Uses psycopg2 against the maintenance ``postgres`` database, connecting via a
     libpq URI derived from the full test URL so connection details beyond
-    host/port/user (e.g. ``?host=/socket/path``, ``sslmode``) carry through.
+    host/port/user (e.g. ``?host=/socket/path``) carry through. asyncpg-flavored
+    query params libpq doesn't understand (e.g. ``?ssl=require``) trigger a retry
+    with the query string stripped; if your server refuses that plain bootstrap
+    connection, pre-create the test database yourself.
     ``CREATE DATABASE`` can't run inside a transaction, so the connection is put in
     autocommit mode.
     """
@@ -87,8 +90,12 @@ def _create_test_database_if_missing() -> None:
     from psycopg2 import sql
 
     url = make_url(TEST_DATABASE_URL)
-    maintenance_uri = url.set(drivername="postgresql", database="postgres").render_as_string(hide_password=False)
-    conn = psycopg2.connect(maintenance_uri)
+    maintenance_url = url.set(drivername="postgresql", database="postgres")
+    try:
+        conn = psycopg2.connect(maintenance_url.render_as_string(hide_password=False))
+    except psycopg2.ProgrammingError:
+        # libpq rejected a query parameter it doesn't know (asyncpg-only, e.g. ssl=).
+        conn = psycopg2.connect(maintenance_url.set(query={}).render_as_string(hide_password=False))
     try:
         conn.autocommit = True
         with conn.cursor() as cur:

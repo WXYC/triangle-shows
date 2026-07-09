@@ -16,7 +16,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.common import event_to_response, get_event_or_404, parse_date, split_csv
+from app.api.common import event_to_response, get_event, parse_date, split_csv
 from app.database import get_session
 from app.models import Event
 from app.schemas import EventResponse, EventListResponse
@@ -110,13 +110,14 @@ async def get_fullcalendar_events(
     return [_to_fullcalendar(event) for event in events]
 
 
-@router.get("/{event_id}")
-async def get_event(
-    event_id: int,
-    session: AsyncSession = Depends(get_session),
-) -> EventResponse:
-    """Get a single event by ID."""
-    return event_to_response(await get_event_or_404(session, event_id))
+# Single-event detail — the same shared handler serves /api/v1/events/{event_id}.
+router.add_api_route(
+    "/{event_id}",
+    get_event,
+    methods=["GET"],
+    response_model=EventResponse,
+    summary="Get a single event by id (deprecated alias of /api/v1/events/{event_id})",
+)
 
 
 @router.get("")
