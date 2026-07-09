@@ -7,8 +7,11 @@ FullCalendar-library-shaped objects with server-formatted price/time strings). T
 calendar builds its own presentation from these resources, and the same endpoints are what
 a non-web client (e.g. an iOS app via the WXYC Backend-Service) would consume. The
 unversioned /api/events, /api/venues, and /api/health routers remain as deprecated
-aliases registering the same shared implementations (app.api.common), so the surfaces
-cannot drift and deleting the deprecated modules cannot break v1.
+aliases: venues, health, and the event-detail route register the same shared handlers
+(app.api.common), so those surfaces cannot drift, while the events list/fullcalendar
+routes keep intentionally different shapes (EventListResponse wrapper, lenient dates)
+on top of the same query service. Deleting a deprecated module cannot break v1 —
+nothing here imports from them.
 
 Requires: async PostgreSQL session (app.database), EventStatus enum (app.models), response
 schemas (app.schemas), shared route helpers/handlers (app.api.common), the shared events
@@ -23,7 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.common import (
     event_to_response,
-    get_event_or_404,
+    get_event,
     health_check,
     list_venues,
     split_csv,
@@ -84,13 +87,16 @@ async def list_events(
     return [event_to_response(e) for e in events]
 
 
-@router.get("/events/{event_id}", response_model=EventResponse, summary="Get a single event by id")
-async def get_event(event_id: int, session: AsyncSession = Depends(get_session)) -> EventResponse:
-    return event_to_response(await get_event_or_404(session, event_id))
-
-
-# The venues and health handlers are shared with the deprecated unversioned routers —
-# one implementation registered on both surfaces, so they cannot drift.
+# The event-detail, venues, and health handlers are shared with the deprecated
+# unversioned routers — one implementation registered on both surfaces, so they
+# cannot drift.
+router.add_api_route(
+    "/events/{event_id}",
+    get_event,
+    methods=["GET"],
+    response_model=EventResponse,
+    summary="Get a single event by id",
+)
 router.add_api_route(
     "/venues",
     list_venues,

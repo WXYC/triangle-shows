@@ -64,8 +64,18 @@ async def test_dedup_matches_apostrophe_variants_across_venues(session, make_ven
     v1 = await make_venue(slug="cats-cradle")
     v2 = await make_venue(slug="local-506")
     # U+02BC modifier apostrophe vs ASCII apostrophe — same act, two sources.
-    first = await make_event(venue=v1, artist="Sinead OʼConnor", date=D)
-    await make_event(venue=v2, artist="Sinead O'Connor", date=D)
+    first = await make_event(venue=v1, artist="LʼRain", date=D)
+    await make_event(venue=v2, artist="L'Rain", date=D)
+    result = await query_events(session, start=D, end=D)
+    assert [e.id for e in result] == [first.id]
+
+
+async def test_dedup_matches_compatibility_character_variants(session, make_venue, make_event):
+    v1 = await make_venue(slug="cats-cradle")
+    v2 = await make_venue(slug="local-506")
+    # "№" decomposes to cased "No" under NFKD; normalization must still fold it.
+    first = await make_event(venue=v1, artist="Stereolab № 1", date=D)
+    await make_event(venue=v2, artist="Stereolab No 1", date=D)
     result = await query_events(session, start=D, end=D)
     assert [e.id for e in result] == [first.id]
 

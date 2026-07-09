@@ -5,6 +5,10 @@ the app fixture, and the get_session override — so a green run here means the 
 of the suite has a working foundation.
 """
 
+from datetime import datetime
+
+from app.models import ScrapeLog
+
 
 async def test_health_on_empty_database(client):
     resp = await client.get("/api/health")
@@ -30,10 +34,6 @@ async def test_factories_persist_rows_visible_to_the_api(client, make_event):
 
 async def test_health_last_scrape_carries_utc_offset(client, session, make_venue):
     """last_scrape is stored as naive UTC; the API must serialize it with an explicit offset."""
-    from datetime import datetime
-
-    from app.models import ScrapeLog
-
     venue = await make_venue()
     session.add(ScrapeLog(venue_id=venue.id, scraper_type="manual", status="success", finished_at=datetime.utcnow()))
     await session.commit()

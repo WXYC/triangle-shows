@@ -15,7 +15,7 @@ import zoneinfo
 from datetime import date, datetime
 from typing import Optional
 
-from fastapi import Depends, HTTPException
+from fastapi import Depends, HTTPException, Path
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
@@ -23,6 +23,10 @@ from sqlalchemy.orm import joinedload
 from app.database import get_session
 from app.models import Event, ScrapeLog, Venue
 from app.schemas import EventResponse, HealthResponse
+
+# PostgreSQL int4 bounds for integer path params: out-of-range ids must 422 at
+# validation instead of surfacing as an asyncpg error (HTTP 500) at query time.
+MAX_INT4 = 2**31 - 1
 
 # All venues are in the Research Triangle, so "today" for date windows means the
 # Triangle's calendar date — not the server's, which runs in UTC in production and
@@ -86,14 +90,28 @@ def event_to_response(event: Event) -> EventResponse:
 # --- Lookups ---
 
 async def get_event_or_404(session: AsyncSession, event_id: int) -> Event:
-    """Fetch one Event by primary key (venue eagerly loaded) or raise 404."""
-    event = await session.get(Event, event_id, options=[joinedload(Event.venue)])
+    """Fetch one Event by primary key (venue eagerly loaded) or raise 404.
+
+    populate_existing forces the SELECT (with the joinedload) even on an
+    identity-map hit, so the eager-load guarantee holds regardless of what the
+    session has already loaded.
+    """
+    event = await session.get(
+        Event, event_id, options=[joinedload(Event.venue)], populate_existing=True
+    )
     if not event:
         raise HTTPException(status_code=404, detail="Event not found")
     return event
 
 
 # --- Shared handlers (registered on both the v1 and unversioned routers) ---
+
+async def get_event(
+    event_id: int = Path(ge=1, le=MAX_INT4),
+    session: AsyncSession = Depends(get_session),
+) -> EventResponse:
+    """Single event by id; 404 when absent, 422 for ids outside int4 range."""
+    return event_to_response(await get_event_or_404(session, event_id))
 
 async def list_venues(session: AsyncSession = Depends(get_session)) -> list[Venue]:
     """All venues, ordered by city then name so clients can group by market."""

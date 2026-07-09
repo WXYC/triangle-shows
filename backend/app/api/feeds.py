@@ -9,7 +9,6 @@ Requires: PostgreSQL (via app.database), the shared events query service
 """
 
 # --- Standard library imports ---
-import zoneinfo
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -20,7 +19,7 @@ from icalendar import Calendar, Event as ICalEvent, vText
 from sqlalchemy.ext.asyncio import AsyncSession
 
 # --- Internal imports ---
-from app.api.common import split_csv, today_in_triangle
+from app.api.common import TRIANGLE_TZ, split_csv, today_in_triangle
 from app.database import get_session
 from app.services.events_query import query_events
 
@@ -80,8 +79,7 @@ async def get_ical_feed(
 
         # All-day or timed event — iCal uses DATE vs DATETIME depending on whether time is known
         if event.show_time:
-            tz = zoneinfo.ZoneInfo("America/New_York")
-            start = datetime.combine(event.date, event.show_time, tzinfo=tz)
+            start = datetime.combine(event.date, event.show_time, tzinfo=TRIANGLE_TZ)
             iev.add("dtstart", start)
             # Assume 3-hour show duration when no end time is scraped
             iev.add("dtend",   start + timedelta(hours=3))

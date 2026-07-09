@@ -13,7 +13,7 @@ Requires: async PostgreSQL session (app.database), Event/Venue ORM models (app.m
 """
 
 import unicodedata
-from datetime import date as date_cls
+from datetime import date
 from typing import Optional, Sequence
 
 from sqlalchemy import and_, select
@@ -34,10 +34,13 @@ def _normalize_label(label: str) -> str:
     of the same name still match.
     """
     decomposed = unicodedata.normalize("NFKD", label.casefold())
-    return "".join(
+    filtered = "".join(
         ch for ch in decomposed
         if (category := unicodedata.category(ch))[0] in "LN" and category != "Lm"
     )
+    # Second casefold: NFKD can emit cased letters from compatibility characters
+    # (e.g. "№" decomposes to "No") even after the input was folded.
+    return filtered.casefold()
 
 
 def _dedupe_key(event: Event) -> tuple:
@@ -91,8 +94,8 @@ def dedupe_cross_venue(events: Sequence[Event]) -> list[Event]:
 async def query_events(
     session: AsyncSession,
     *,
-    start: Optional[date_cls] = None,
-    end: Optional[date_cls] = None,
+    start: Optional[date] = None,
+    end: Optional[date] = None,
     cities: Optional[Sequence[str]] = None,
     sizes: Optional[Sequence[str]] = None,
     venue_slugs: Optional[Sequence[str]] = None,
@@ -149,7 +152,7 @@ async def query_events(
     query = query.order_by(Event.date, Event.id)
 
     result = await session.execute(query)
-    events = list(result.scalars().all())
+    events = result.scalars().all()
 
     if dedup:
         events = dedupe_cross_venue(events)

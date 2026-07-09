@@ -2,7 +2,7 @@
 Pydantic response models used to serialize database ORM objects into JSON for the API.
 
 Role: These schemas sit between the SQLAlchemy models (models.py) and the FastAPI
-route handlers (main.py). Each API endpoint returns one of these models, which
+route handlers (app/api/). Each API endpoint returns one of these models, which
 controls exactly what fields are exposed to clients and how they are typed.
 Requires: models.py (ORM objects are converted via from_attributes=True),
           pydantic (validated automatically by FastAPI on response).
