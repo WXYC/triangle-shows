@@ -10,7 +10,6 @@ ENABLE_SCHEDULER, RUN_STARTUP_SCRAPE, APP_ENV, and LOG_LEVEL.
 
 # --- Imports ---
 from pydantic_settings import BaseSettings
-from typing import Optional
 
 
 # --- Settings ---

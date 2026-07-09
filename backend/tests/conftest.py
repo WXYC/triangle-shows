@@ -70,7 +70,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 # so schema creation doesn't silently depend on which modules the routers happen to
 # import.
 from app.database import Base, get_session  # noqa: E402
-from app.models import Event, ScrapeLog, Venue  # noqa: E402,F401
+from app.models import Event, Venue  # noqa: E402
 from app.main import app  # noqa: E402
 
 
