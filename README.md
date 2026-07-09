@@ -61,7 +61,8 @@ See [[SELF-HOSTING]] for setup instructions.
 ```
 backend/
   app/
-    api/            # FastAPI route handlers (events, venues, health, iCal feed)
+    api/            # FastAPI route handlers (v1 canonical surface, deprecated unversioned aliases, iCal feed, shared helpers)
+    services/       # Shared query + cross-venue de-duplication logic used by every read surface
     scrapers/       # One scraper per venue/platform
     models.py       # SQLAlchemy ORM — Venue, Event, ScrapeLog
     schemas.py      # Pydantic response models
@@ -69,6 +70,7 @@ backend/
     seed.py         # Venue seed data (names, URLs, colors, capacities)
     config.py       # Settings loaded from .env
   alembic/          # Database migrations
+  tests/            # pytest suite (real-PostgreSQL harness; see backend/README.md)
 frontend/
   index.html
   css/styles.css

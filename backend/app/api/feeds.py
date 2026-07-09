@@ -4,7 +4,8 @@ Generates the iCal subscription feed served at GET /feeds/events.ics.
 Role: Consumed directly by calendar clients (Apple Calendar, Google Calendar, Outlook).
 Users subscribe once; the feed stays live and reflects whatever the scraper has loaded
 into the database. Optionally filtered to one or more venues via ?venue= slug.
-Requires: PostgreSQL (via app.database), app.models (Event, Venue), icalendar library.
+Requires: PostgreSQL (via app.database), the shared events query service
+(app.services.events_query), shared param helpers (app.api.common), icalendar library.
 """
 
 # --- Standard library imports ---
@@ -16,13 +17,12 @@ from typing import Optional
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import Response
 from icalendar import Calendar, Event as ICalEvent, vText
-from sqlalchemy import select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import joinedload
 
 # --- Internal imports ---
+from app.api.common import split_csv
 from app.database import get_session
-from app.models import Event, Venue
+from app.services.events_query import query_events
 
 # --- Router setup ---
 router = APIRouter(prefix="/feeds", tags=["feeds"])
@@ -38,25 +38,15 @@ async def get_ical_feed(
     """Live iCal subscription feed. Add to Apple Calendar, Google Calendar, or Outlook once;
     new shows appear automatically as the scraper finds them."""
 
-    today = date.today()
-    # Only include upcoming events — no historical clutter in subscribers' calendars
-    conditions = [Event.date >= today]
-
-    needs_join = bool(venue)
-    if venue:
-        # Support multi-venue filtering: ?venue=cat's-cradle,motorco
-        slugs = [s.strip() for s in venue.split(",") if s.strip()]
-        conditions.append(Venue.slug.in_(slugs))
-
-    query = select(Event).options(joinedload(Event.venue))
-    if needs_join:
-        # JOIN is only needed when filtering by venue slug
-        query = query.join(Event.venue)
-    query = query.where(and_(*conditions)).order_by(Event.date)
-
-    result = await session.execute(query)
-    # .unique() is required after joinedload to collapse duplicate rows from the JOIN
-    events = result.unique().scalars().all()
+    # Only upcoming events (no historical clutter in subscribers' calendars), via the
+    # shared query service. dedup=False: the feed lists every venue's own offering,
+    # including cross-venue duplicate listings the calendar collapses.
+    events = await query_events(
+        session,
+        start=date.today(),
+        venue_slugs=split_csv(venue),
+        dedup=False,
+    )
 
     # --- Build the iCal Calendar object ---
 

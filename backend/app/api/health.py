@@ -18,7 +18,7 @@ from app.models import Event, Venue, ScrapeLog
 from app.schemas import HealthResponse
 
 # --- Router ---
-router = APIRouter(prefix="/api/health", tags=["health"])
+router = APIRouter(prefix="/api/health", tags=["health"], deprecated=True)  # superseded by /api/v1/health (same handler)
 
 
 # --- Endpoint ---

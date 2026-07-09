@@ -4,9 +4,9 @@ Guards that the (deprecated) FullCalendar feed keeps its exact shape and de-dup
 behavior, and that the paginated list now de-duplicates via the same service.
 """
 
-from datetime import date, time
+from datetime import date, time, timedelta
 
-D = date(2026, 8, 1)
+D = date.today() + timedelta(days=30)
 
 
 async def test_fullcalendar_shape_and_cross_venue_dedup(client, make_venue, make_event):
@@ -37,6 +37,15 @@ async def test_fullcalendar_formats_times_without_leading_zero(client, make_even
     assert ev["extendedProps"]["doors_time"] == "7:00 PM"
 
 
+async def test_fullcalendar_tolerates_malformed_dates(client, make_event):
+    # The deprecated feed keeps its historical leniency: invalid date params are
+    # treated as "no filter" so the calendar still renders.
+    await make_event(artist="Juana Molina", date=D)
+    resp = await client.get("/api/events/fullcalendar?start=not-a-date&end=07/31/2026")
+    assert resp.status_code == 200
+    assert len(resp.json()) == 1
+
+
 async def test_list_events_dedups_and_reports_deduped_total(client, make_venue, make_event):
     v1 = await make_venue(slug="cats-cradle")
     v2 = await make_venue(slug="local-506")
@@ -55,3 +64,27 @@ async def test_get_event_by_id_includes_updated_at_and_404s(client, make_event):
     assert ok.json()["artist"] == "Cat Power"
     assert ok.json()["updated_at"] is not None
     assert (await client.get("/api/events/999999")).status_code == 404
+
+
+async def test_ical_feed_lists_every_venue_offering(client, make_venue, make_event):
+    """The iCal feed uses the shared query service with dedup=False — cross-venue
+    duplicate listings both appear, unlike the calendar surfaces."""
+    v1 = await make_venue(slug="cats-cradle")
+    v2 = await make_venue(slug="local-506")
+    await make_event(venue=v1, artist="Duke Ellington", date=D)
+    await make_event(venue=v2, artist="Duke Ellington", date=D)
+    resp = await client.get("/feeds/events.ics")
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("text/calendar")
+    assert resp.text.count("SUMMARY:Duke Ellington") == 2
+
+
+async def test_ical_feed_filters_by_venue_slug(client, make_venue, make_event):
+    v1 = await make_venue(slug="cats-cradle")
+    v2 = await make_venue(slug="local-506")
+    await make_event(venue=v1, artist="Juana Molina", date=D)
+    await make_event(venue=v2, artist="Jessica Pratt", date=D)
+    resp = await client.get("/feeds/events.ics?venue=cats-cradle")
+    assert resp.status_code == 200
+    assert "SUMMARY:Juana Molina" in resp.text
+    assert "SUMMARY:Jessica Pratt" not in resp.text

@@ -5,7 +5,7 @@ Role: Imported at startup by main.py and any module that needs runtime config (d
 scheduler toggle, API keys). The `settings` singleton is created at import time, so .env
 must be present (or env vars set) before any module imports this file.
 Requires: .env file (or environment variables) providing DATABASE_URL, TICKETMASTER_API_KEY,
-ENABLE_SCHEDULER, APP_ENV, and LOG_LEVEL.
+ENABLE_SCHEDULER, RUN_STARTUP_SCRAPE, APP_ENV, and LOG_LEVEL.
 """
 
 # --- Imports ---

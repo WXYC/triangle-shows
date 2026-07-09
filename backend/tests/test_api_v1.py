@@ -1,8 +1,10 @@
 """Tests for the surface-neutral /api/v1 API."""
 
-from datetime import date
+from datetime import date, timedelta
 
-D = date(2026, 8, 1)
+# A fixed anchor a month out keeps assertions stable as the wall clock advances
+# (the v1 events window defaults to "today onward").
+D = date.today() + timedelta(days=30)
 
 
 async def test_v1_events_returns_neutral_shape(client, make_event):
@@ -14,10 +16,17 @@ async def test_v1_events_returns_neutral_shape(client, make_event):
     assert ev["artist"] == "Juana Molina"
     assert ev["price_min"] == 20.0
     assert ev["price_max"] == 25.0
-    assert ev["updated_at"] is not None
     assert "venue_name" in ev
     for presentation_key in ("backgroundColor", "borderColor", "extendedProps", "title", "allDay"):
         assert presentation_key not in ev
+
+
+async def test_v1_events_updated_at_carries_utc_offset(client, make_event):
+    await make_event(artist="Nilüfer Yanya", date=D)
+    ev = (await client.get("/api/v1/events")).json()[0]
+    # The sync timestamp must be unambiguous: serialized with an explicit UTC marker.
+    assert ev["updated_at"] is not None
+    assert ev["updated_at"].endswith(("Z", "+00:00"))
 
 
 async def test_v1_events_dedups_cross_venue(client, make_venue, make_event):
@@ -31,6 +40,38 @@ async def test_v1_events_dedups_cross_venue(client, make_venue, make_event):
     data = (await client.get("/api/v1/events")).json()
     assert len(data) == 1
     assert data[0]["venue_slug"] == "local-506"
+
+
+async def test_v1_events_dedup_can_be_disabled(client, make_venue, make_event):
+    v1 = await make_venue(slug="cats-cradle")
+    v2 = await make_venue(slug="local-506")
+    await make_event(venue=v1, artist="Duke Ellington", date=D)
+    await make_event(venue=v2, artist="Duke Ellington", date=D)
+    data = (await client.get("/api/v1/events?dedup=false")).json()
+    assert len(data) == 2
+
+
+async def test_v1_events_window_defaults_to_upcoming(client, make_venue, make_event):
+    v = await make_venue()
+    past = date.today() - timedelta(days=10)
+    await make_event(venue=v, artist="Stereolab", date=past)
+    await make_event(venue=v, artist="Cat Power", date=D)
+    # Without a start, only upcoming events are returned — never the whole history.
+    default_window = (await client.get("/api/v1/events")).json()
+    assert [e["artist"] for e in default_window] == ["Cat Power"]
+    # History remains reachable with an explicit start.
+    explicit = (await client.get(f"/api/v1/events?start={past.isoformat()}")).json()
+    assert [e["artist"] for e in explicit] == ["Stereolab", "Cat Power"]
+
+
+async def test_v1_events_rejects_malformed_query_params(client, make_event):
+    await make_event(artist="Juana Molina", date=D)
+    # Malformed dates are a 422, not a silent full-table dump.
+    assert (await client.get("/api/v1/events?start=07/01/2026")).status_code == 422
+    assert (await client.get(f"/api/v1/events?start={D.isoformat()}&end=not-a-date")).status_code == 422
+    # Unknown status values are rejected rather than matching zero rows.
+    assert (await client.get("/api/v1/events?status=onsale")).status_code == 422
+    assert (await client.get("/api/v1/events?status=on_sale")).status_code == 200
 
 
 async def test_v1_events_filters(client, make_venue, make_event):
@@ -57,11 +98,15 @@ async def test_v1_venues_ordered_by_city(client, make_venue):
     data = (await client.get("/api/v1/venues")).json()
     assert {v["slug"] for v in data} == {"cats-cradle", "local-506"}
     assert [v["city"] for v in data] == ["Carrboro", "Chapel Hill"]
+    # Internal scraping details stay out of the public contract.
+    assert all("scraper_type" not in v for v in data)
 
 
-async def test_v1_health(client, make_event):
+async def test_v1_health_matches_unversioned_alias(client, make_event):
     await make_event(artist="Stereolab", date=D)
     body = (await client.get("/api/v1/health")).json()
     assert body["status"] == "ok"
     assert body["event_count"] == 1
     assert body["venue_count"] == 1
+    # v1 delegates to the same handler, so the two surfaces cannot drift.
+    assert body == (await client.get("/api/health")).json()

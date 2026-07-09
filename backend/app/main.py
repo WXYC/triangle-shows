@@ -6,8 +6,8 @@ Role: First code executed at server startup. The lifespan context manager runs
 before any requests are served; Cloud Scheduler later hits POST /api/scrape to
 trigger periodic re-scrapes every 6 hours.
 
-Requires: DATABASE_URL, LOG_LEVEL, ENABLE_SCHEDULER env vars (via app.config);
-asyncpg-compatible PostgreSQL; Alembic migrations in backend/alembic/.
+Requires: DATABASE_URL, LOG_LEVEL, ENABLE_SCHEDULER, RUN_STARTUP_SCRAPE env vars
+(via app.config); asyncpg-compatible PostgreSQL; Alembic migrations in backend/alembic/.
 """
 # --- Imports ---
 import asyncio
@@ -78,9 +78,11 @@ async def lifespan(app: FastAPI):
     logger.info("Venues seeded")
 
     # Kick off a scrape immediately in the background (skipped when RUN_STARTUP_SCRAPE
-    # is false, e.g. under tests or when seeding data manually).
+    # is false, e.g. under tests or when seeding data manually). The Task is kept on
+    # app.state because the event loop holds only a weak reference — an unreferenced
+    # task can be garbage-collected mid-scrape.
     if settings.RUN_STARTUP_SCRAPE:
-        asyncio.create_task(_startup_scrape())
+        app.state.startup_scrape_task = asyncio.create_task(_startup_scrape())
         logger.info("Startup scrape scheduled")
     else:
         logger.info("Startup scrape disabled (RUN_STARTUP_SCRAPE=false)")
@@ -106,8 +108,8 @@ app = FastAPI(
     description=(
         "Surface-neutral API for Triangle-area live-music events and venues. "
         "The versioned /api/v1 endpoints are the canonical, client-agnostic contract "
-        "(consumed by the web calendar and other clients); the unversioned /api/events "
-        "and /api/venues endpoints are deprecated aliases."
+        "(consumed by the web calendar and other clients); the unversioned /api/events, "
+        "/api/venues, and /api/health endpoints are deprecated aliases."
     ),
     version="1.1.0",
     lifespan=lifespan,

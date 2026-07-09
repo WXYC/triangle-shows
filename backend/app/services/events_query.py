@@ -3,33 +3,56 @@ Shared events query + cross-venue de-duplication.
 
 Role: The single place that fetches events, applies the common filters, and
 collapses cross-venue duplicates. Every read surface calls this — the FullCalendar
-web feed, the paginated list endpoint, and (in future) non-web clients — so they all
-see the *same* set of events. This logic previously lived only inside the FullCalendar
-handler, which meant the plain `/api/events` list returned un-deduplicated rows; moving
-it here fixes that inconsistency.
+web feed, the paginated list endpoint, the iCal feed (dedup=False), and the
+surface-neutral /api/v1 endpoints — so they all see the *same* set of events.
+This logic previously lived only inside the FullCalendar handler, which meant the
+plain `/api/events` list returned un-deduplicated rows; moving it here fixes that
+inconsistency.
 
 Requires: async PostgreSQL session (app.database), Event/Venue ORM models (app.models).
 """
 
-import re
+import unicodedata
 from datetime import date as date_cls
 from typing import Optional, Sequence
 
 from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import joinedload
+from sqlalchemy.orm import selectinload
 
 from app.models import Event, Venue
+
+
+def _normalize_label(label: str) -> str:
+    """Case-fold, strip diacritics, and keep only letters/digits (any script).
+
+    NFKD decomposition splits accented characters into base + combining mark, and
+    the isalnum() filter then drops the marks (and all punctuation/whitespace), so
+    "Hermanos Gutiérrez" and "Hermanos Gutierrez" normalize identically while
+    non-Latin names ("Молчат Дома", "坂本龍一") keep their characters instead of
+    collapsing to an empty string.
+    """
+    decomposed = unicodedata.normalize("NFKD", label.casefold())
+    return "".join(ch for ch in decomposed if ch.isalnum())
+
+
+def _escape_like(term: str) -> str:
+    """Escape LIKE/ILIKE wildcards so user-supplied text matches literally."""
+    return term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
 def _dedupe_key(event: Event) -> tuple:
     """(date, normalized artist-or-name) — the identity used to detect duplicates.
 
-    Normalizing to lowercase alphanumerics means minor punctuation/spacing
-    differences between sources don't defeat the match.
+    Normalizing means minor punctuation/spacing/diacritic differences between
+    sources don't defeat the match. A label with no letters or digits at all
+    (e.g. the band "!!!") yields a per-event key, so symbol-only names on the
+    same date are never treated as duplicates of each other.
     """
     label = event.artist or event.name
-    norm = re.sub(r"[^a-z0-9]", "", label.lower())
+    norm = _normalize_label(label)
+    if not norm:
+        return (event.date, f"\x00id:{event.id}")
     return (event.date, norm)
 
 
@@ -77,10 +100,15 @@ async def query_events(
 ) -> list[Event]:
     """Fetch events (with venue eagerly loaded), filtered and optionally de-duplicated.
 
-    All filters are ANDed. Results are ordered by (date, id): date is the meaningful
-    sort for a calendar, and id is a stable tiebreak that makes de-duplication
-    deterministic. Set ``dedup=False`` to get every matching row (e.g. for feeds that
-    should list all venue offerings).
+    All filters are ANDed; ``search``/``genre`` match literally (LIKE wildcards in the
+    input are escaped). Results are ordered by (date, id): date is the meaningful sort
+    for a calendar, and id is a stable tiebreak that makes de-duplication deterministic.
+
+    De-duplication happens *after* filtering, so it is relative to the requested set:
+    a venue filter that excludes the winning record of a duplicate pair will surface
+    the record that an unfiltered query suppresses. That is intentional — a venue's
+    own listing should show that venue's record. Set ``dedup=False`` to get every
+    matching row (e.g. the iCal feed, which lists all venue offerings).
     """
     conditions = []
     if start is not None:
@@ -94,16 +122,17 @@ async def query_events(
     if venue_slugs:
         conditions.append(Venue.slug.in_(list(venue_slugs)))
     if search:
-        term = f"%{search}%"
-        conditions.append(Event.name.ilike(term) | Event.artist.ilike(term))
+        term = f"%{_escape_like(search)}%"
+        conditions.append(Event.name.ilike(term, escape="\\") | Event.artist.ilike(term, escape="\\"))
     if genre:
-        conditions.append(Event.genre.ilike(f"%{genre}%"))
+        conditions.append(Event.genre.ilike(f"%{_escape_like(genre)}%", escape="\\"))
     if status:
         conditions.append(Event.status == status)
 
-    query = select(Event).options(joinedload(Event.venue))
-    # Only JOIN venues when a venue-level filter is present; the joinedload above
-    # already eager-loads the relationship for every row.
+    # selectinload fetches the ~20 venues in one extra small query instead of
+    # repeating venue columns onto every event row (and needing unique()).
+    query = select(Event).options(selectinload(Event.venue))
+    # Only JOIN venues when a venue-level filter is present.
     if cities or sizes or venue_slugs:
         query = query.join(Event.venue)
     if conditions:
@@ -111,8 +140,7 @@ async def query_events(
     query = query.order_by(Event.date, Event.id)
 
     result = await session.execute(query)
-    # unique() collapses the duplicate rows joinedload produces.
-    events = list(result.unique().scalars().all())
+    events = list(result.scalars().all())
 
     if dedup:
         events = dedupe_cross_venue(events)
