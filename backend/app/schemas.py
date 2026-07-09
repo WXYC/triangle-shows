@@ -55,6 +55,8 @@ class EventResponse(BaseModel):
     age_restriction: Optional[str] = None
     description: Optional[str] = None
     source: str
+    # Last-modified timestamp; lets clients (and an incremental sync) fetch only what changed.
+    updated_at: Optional[datetime] = None
 
     # Denormalized venue fields — joined in the query so clients don't need
     # a separate /api/venues request to display venue info alongside events

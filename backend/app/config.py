@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     DATABASE_URL: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/triangle_shows"
     TICKETMASTER_API_KEY: str = ""
     ENABLE_SCHEDULER: bool = False  # Set to True in production to run scrapes on a cron schedule
+    RUN_STARTUP_SCRAPE: bool = True  # Run a full scrape in the background at startup; set False in tests / manual-seed contexts
     APP_ENV: str = "development"
     LOG_LEVEL: str = "INFO"
 
