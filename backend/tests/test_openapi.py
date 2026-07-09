@@ -19,12 +19,17 @@ async def test_openapi_exposes_v1_paths_and_neutral_schemas(client):
     # updated_at is part of the neutral event contract (used by an incremental sync).
     assert "updated_at" in schemas["EventResponse"]["properties"]
 
+    # Internal scraping machinery stays out of the public venue contract.
+    assert "scraper_type" not in schemas["VenueResponse"]["properties"]
+
 
 async def test_openapi_marks_legacy_aliases_deprecated(client):
     spec = (await client.get("/openapi.json")).json()
     paths = spec["paths"]
-    # The unversioned events + venues routes are deprecated aliases...
+    # The unversioned events + venues + health routes are deprecated aliases...
     assert paths["/api/events"]["get"]["deprecated"] is True
     assert paths["/api/venues"]["get"]["deprecated"] is True
+    assert paths["/api/health"]["get"]["deprecated"] is True
     # ...while the v1 surface is not deprecated.
-    assert paths["/api/v1/events"]["get"].get("deprecated", False) is False
+    for v1_path in ("/api/v1/events", "/api/v1/venues", "/api/v1/health"):
+        assert paths[v1_path]["get"].get("deprecated", False) is False

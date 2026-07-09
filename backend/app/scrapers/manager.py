@@ -16,7 +16,6 @@ from typing import Optional
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.config import settings
 from app.models import Venue, Event, ScrapeLog
@@ -195,7 +194,9 @@ class ScrapeManager:
                 existing.subgenre = se.subgenre or existing.subgenre
                 existing.age_restriction = se.age_restriction or existing.age_restriction
                 existing.description = se.description or existing.description
-                existing.updated_at = datetime.utcnow()
+                # updated_at is NOT stamped here: the column's onupdate fires only when
+                # an assignment above actually changed a value, which keeps updated_at
+                # meaningful as a "this row's data changed" signal for API clients.
                 updated += 1
             else:
                 event = Event(

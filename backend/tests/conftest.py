@@ -6,16 +6,17 @@ Provides an ephemeral PostgreSQL-backed harness: a fresh schema per test
 with the database dependency pointed at the test database, and ORM factories that
 insert deterministic ``Venue``/``Event`` rows without running the scrapers.
 
-Why PostgreSQL and not SQLite: the app uses PostgreSQL-only features — the scrape
-manager upserts via ``sqlalchemy.dialects.postgresql.insert(...).on_conflict_*`` and
-the models use ``JSON`` columns — so SQLite is not a usable substitute. By default
-the harness targets the docker-compose Postgres (see ``docker-compose.yml``) using a
+Why PostgreSQL and not SQLite: production runs PostgreSQL, and testing against the
+same engine keeps dialect-specific behavior (JSON columns, timestamp semantics,
+future ``ON CONFLICT`` upserts) exercised rather than approximated. By default the
+harness targets the docker-compose Postgres (see ``docker-compose.yml``) using a
 dedicated ``*_test`` database it creates on first use. Override the whole URL with
 ``DATABASE_URL_TEST``. Under ``pytest-xdist`` each worker gets its own database so
 parallel runs do not collide.
 """
 
 import os
+import re
 
 from sqlalchemy.engine import make_url
 
@@ -35,11 +36,14 @@ def _resolve_test_db_url() -> str:
     if worker:
         parsed = parsed.set(database=f"{parsed.database}_{worker}")
     # Safety rail: never run the destructive create_all/drop_all cycle against a
-    # database whose name doesn't clearly mark it as a test database.
-    assert parsed.database and "test" in parsed.database.lower(), (
-        f"Refusing to use non-test database {parsed.database!r}; point DATABASE_URL_TEST "
-        "at a database whose name contains 'test'."
-    )
+    # database whose name doesn't clearly mark it as a test database. A raise (not
+    # assert, which -O strips) and a word-boundary match (which "latest"/"contest"
+    # don't satisfy) keep the rail honest.
+    if not (parsed.database and re.search(r"(^|_)test(_|$)", parsed.database.lower())):
+        raise ValueError(
+            f"Refusing to use non-test database {parsed.database!r}; point DATABASE_URL_TEST "
+            "at a database whose name contains a 'test' component (e.g. triangle_shows_test)."
+        )
     return parsed.render_as_string(hide_password=False)
 
 
@@ -54,9 +58,9 @@ from httpx import ASGITransport, AsyncClient  # noqa: E402
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine  # noqa: E402
 
 # Importing app.main builds the FastAPI instance and (transitively, via the routers)
-# registers every ORM model on Base.metadata. `from app import models` is an explicit
-# guard — and it must come BEFORE `from app.main import app` so that binding `models`
-# doesn't rebind the name `app` to the package and shadow the FastAPI instance.
+# registers every ORM model on Base.metadata. The explicit models import is a guard
+# so schema creation doesn't silently depend on which modules the routers happen to
+# import.
 from app.database import Base, get_session  # noqa: E402
 from app import models as _app_models  # noqa: E402,F401
 from app.main import app  # noqa: E402
@@ -89,9 +93,13 @@ def _create_test_database_if_missing() -> None:
         conn.close()
 
 
-@pytest.fixture(scope="session", autouse=True)
+@pytest.fixture(scope="session")
 def _ensure_test_database():
-    """Create the per-run (per-worker) test database once before any test connects."""
+    """Create the per-run (per-worker) test database once before any test connects.
+
+    Not autouse: every database touch flows through ``_engine``, whose explicit
+    dependency on this fixture provides the create-before-connect ordering.
+    """
     _create_test_database_if_missing()
 
 
@@ -105,14 +113,18 @@ async def _engine(_ensure_test_database):
     revisit and switch to a connection-scoped savepoint fixture (see backend/README.md).
     """
     engine = create_async_engine(TEST_DATABASE_URL, echo=False)
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
     try:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
         yield engine
     finally:
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.drop_all)
-        await engine.dispose()
+        # Nested try/finally: dispose must run even when drop_all fails, or every
+        # subsequent test leaks a connection pool.
+        try:
+            async with engine.begin() as conn:
+                await conn.run_sync(Base.metadata.drop_all)
+        finally:
+            await engine.dispose()
 
 
 @pytest_asyncio.fixture
@@ -173,7 +185,6 @@ async def make_venue(session):
         venue = Venue(**fields)
         session.add(venue)
         await session.commit()
-        await session.refresh(venue)
         created.append(venue)
         return venue
 
@@ -185,10 +196,12 @@ async def make_event(session, make_venue):
     """Factory that inserts and commits an Event (creating a Venue if none is given).
 
     ``hash`` is required and unique on the model; a stable one is derived when not
-    supplied so tests don't have to think about it.
+    supplied so tests don't have to think about it. The default date is a month in
+    the future so tests keep passing as the wall clock advances (the v1 API defaults
+    its window to "today onward").
     """
     import hashlib
-    from datetime import date
+    from datetime import date, timedelta
 
     from app.models import Event
 
@@ -201,7 +214,7 @@ async def make_event(session, make_venue):
         fields = dict(
             venue_id=venue.id,
             name=overrides.get("name") or overrides.get("artist") or f"Test Show {n}",
-            date=date(2026, 8, 1),
+            date=date.today() + timedelta(days=30),
             source="manual",
         )
         fields.update(overrides)
@@ -211,7 +224,6 @@ async def make_event(session, make_venue):
         event = Event(**fields)
         session.add(event)
         await session.commit()
-        await session.refresh(event)
         created.append(event)
         return event
 

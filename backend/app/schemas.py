@@ -26,7 +26,6 @@ class VenueResponse(BaseModel):
     capacity: Optional[int] = None
     size_category: str
     website: Optional[str] = None
-    scraper_type: str
     color: str  # Hex color used for calendar event styling per venue
 
     # Allow constructing directly from a SQLAlchemy Venue ORM instance
@@ -55,7 +54,8 @@ class EventResponse(BaseModel):
     age_restriction: Optional[str] = None
     description: Optional[str] = None
     source: str
-    # Last-modified timestamp; lets clients (and an incremental sync) fetch only what changed.
+    # Last-modified timestamp, serialized as UTC (the route mapper attaches the offset).
+    # Changes only when a scrape actually modifies the row.
     updated_at: Optional[datetime] = None
 
     # Denormalized venue fields — joined in the query so clients don't need
@@ -66,20 +66,6 @@ class EventResponse(BaseModel):
     venue_color: Optional[str] = None
 
     model_config = {"from_attributes": True}
-
-
-# --- FullCalendar Schema ---
-
-class FullCalendarEvent(BaseModel):
-    """Event shaped for the FullCalendar v6 JS library (GET /api/events/fullcalendar)."""
-    id: int
-    title: str
-    start: str  # ISO datetime string expected by FullCalendar (e.g. "2025-08-01T20:00:00")
-    end: Optional[str] = None
-    backgroundColor: str
-    borderColor: str
-    textColor: str = "#ffffff"
-    extendedProps: dict  # Arbitrary metadata passed through to FullCalendar event handlers
 
 
 # --- Paginated Event List Schema ---
