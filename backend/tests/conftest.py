@@ -227,10 +227,15 @@ async def make_event(session, make_venue):
         if not fields.get("hash"):
             raw = f"{fields['venue_id']}|{fields['name']}|{fields['date']}|{n}"
             fields["hash"] = hashlib.sha256(raw.encode()).hexdigest()
-        # source_key is NOT NULL; tests that don't care get the hash-tier form the
-        # scrape manager would derive for an event with no external_id/source_url.
+        # source_key is NOT NULL; tests that don't care get the same hash-tier key
+        # the scrape manager would derive for an event with no external_id/source_url
+        # (derived via the canonical function so the fixture can't drift from it).
         if not fields.get("source_key"):
-            fields["source_key"] = f"hash:{fields['hash']}"
+            from app.scrapers.identity import UrlIdentityVerdict, derive_source_key
+
+            fields["source_key"] = derive_source_key(
+                None, None, fields["hash"], UrlIdentityVerdict.HASH_FALLBACK
+            )
         event = Event(**fields)
         session.add(event)
         await session.commit()

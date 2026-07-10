@@ -27,6 +27,7 @@ from app.models import Venue, Event, EventMissState, ScrapeLog
 from app.scrapers.base import BaseScraper, ScrapedEvent
 from app.scrapers.identity import (
     UrlIdentityVerdict,
+    derive_source_key,
     normalize_source_url,
     scraper_class,
     url_identity_verdict,
@@ -179,43 +180,43 @@ class ScrapeManager:
         venue = await self.session.get(Venue, venue_id)
         verdict = url_identity_verdict(venue.scraper_type) if venue else UrlIdentityVerdict.HASH_FALLBACK
 
-        def tier_key(se: ScrapedEvent) -> tuple[str, str]:
-            """The event's winning identity tier as a (tier, value) pair."""
-            if se.external_id:
-                return ("ext", se.external_id)
-            norm = normalize_source_url(se.source_url)
-            if norm and verdict is UrlIdentityVerdict.TRUSTED:
-                return ("url", norm)
-            return ("hash", se.hash)
+        # Precompute per event: ScrapedEvent.hash is a sha256-per-access property
+        # and URL normalization parses the query string — both are consulted
+        # several times below.
+        prepared = [(se, se.hash, normalize_source_url(se.source_url)) for se in scraped_events]
 
         # --- In-batch dedup -------------------------------------------------
-        # Group by identity; within a group, the same date means a true duplicate
+        # Group by identity (derive_source_key is the single source of truth for
+        # tier precedence); within a group, the same date means a true duplicate
         # (featured section + main listing, or an old/new time pair) and collapses
         # to the first occurrence. DIFFERENT dates mean distinct events sharing an
         # identity key (e.g. a recurring series whose occurrences share one URL) —
         # trusting that key would let one occurrence overwrite the other, so every
         # event in such a group demotes to hash identity for this batch.
-        groups: dict[tuple[str, str], dict] = {}
-        for se in scraped_events:
-            groups.setdefault(tier_key(se), {}).setdefault(se.date, se)
+        groups: dict[str, dict] = {}
+        for se, h, norm in prepared:
+            key = derive_source_key(se.external_id, norm, h, verdict)
+            groups.setdefault(key, {}).setdefault(se.date, (se, h, norm))
 
-        batch: dict[tuple[str, str], ScrapedEvent] = {}
+        # batch: source_key -> (event, hash, normalized_url, demoted)
+        batch: dict[str, tuple[ScrapedEvent, str, Optional[str], bool]] = {}
         for key, by_date in groups.items():
             if len(by_date) > 1:
-                for se in by_date.values():
-                    batch.setdefault(("hash", se.hash), se)
+                for se, h, norm in by_date.values():
+                    batch.setdefault(derive_source_key(None, None, h, verdict), (se, h, norm, True))
             else:
-                batch.setdefault(key, next(iter(by_date.values())))
+                se, h, norm = next(iter(by_date.values()))
+                batch.setdefault(key, (se, h, norm, False))
 
         # --- Candidate fetch: one venue-scoped query across all three tiers ---
         # Venue scoping is load-bearing: external_id/URL uniqueness is only assumed
         # within a venue (VenuePilot ids are small integers that collide across
         # venues). The hash used to embed venue_slug and make this implicit.
-        ext_ids = {se.external_id for se in batch.values() if se.external_id}
+        ext_ids = {se.external_id for se, _, _, _ in batch.values() if se.external_id}
         norm_urls = {
-            n for se in batch.values() if (n := normalize_source_url(se.source_url))
+            norm for _, _, norm, _ in batch.values() if norm
         } if verdict is UrlIdentityVerdict.TRUSTED else set()
-        hashes = {se.hash for se in batch.values()}
+        hashes = {h for _, h, _, _ in batch.values()}
 
         conditions = [Event.hash.in_(hashes)]
         if ext_ids:
@@ -228,6 +229,8 @@ class ScrapeManager:
         by_ext: dict[str, Event] = {}
         by_url: dict[str, Event] = {}
         by_hash: dict[str, Event] = {}
+        by_hash_keyed: dict[str, Event] = {}
+        url_counts: dict[str, int] = {}
         for row in result.scalars().all():
             # setdefault + id ordering: when duplicate rows share a key (legal for
             # hash, and for URL until the backfill merges them), the oldest row wins
@@ -235,34 +238,61 @@ class ScrapeManager:
             if row.external_id:
                 by_ext.setdefault(row.external_id, row)
             if row.normalized_source_url:
+                url_counts[row.normalized_source_url] = url_counts.get(row.normalized_source_url, 0) + 1
                 by_url.setdefault(row.normalized_source_url, row)
             by_hash.setdefault(row.hash, row)
+            if row.source_key == f"hash:{row.hash}":
+                by_hash_keyed.setdefault(row.hash, row)
 
-        def match(se: ScrapedEvent, key: tuple[str, str]) -> Optional[Event]:
+        # A URL shared by MULTIPLE stored rows is not identity — the cross-batch
+        # mirror of the in-batch demotion rule. Without this, a later scrape
+        # listing only one occurrence would url-match the OLDEST same-URL row and
+        # rewrite the wrong occurrence in place. Demote affected batch entries to
+        # hash identity, and never url-match against an ambiguous URL.
+        ambiguous_urls = {u for u, c in url_counts.items() if c > 1}
+        if ambiguous_urls:
+            rebatched: dict[str, tuple[ScrapedEvent, str, Optional[str], bool]] = {}
+            for key, (se, h, norm, demoted) in batch.items():
+                if key.startswith("url:") and norm in ambiguous_urls:
+                    rebatched.setdefault(derive_source_key(None, None, h, verdict), (se, h, norm, True))
+                else:
+                    rebatched.setdefault(key, (se, h, norm, demoted))
+            batch = rebatched
+
+        def hash_match(h: str) -> Optional[Event]:
+            """Hash-tier lookup, preferring the row that already HOLDS hash:<h>.
+
+            Duplicate hashes are legal; if the oldest hash-matching row were
+            chosen while a different row holds the hash:<h> source_key, forcing
+            that key onto the older row would collide under the
+            (venue_id, source_key) unique index and fail the venue's scrape.
+            """
+            return by_hash_keyed.get(h) or by_hash.get(h)
+
+        def match(se: ScrapedEvent, h: str, norm: Optional[str], key: str) -> Optional[Event]:
             """Find the existing row for a scraped event, falling through tiers.
 
             Fall-through is what makes tier transitions seamless: an event that
             used to be keyed by URL and now carries an external_id still finds
-            its row via the URL (or hash) column. Batch-demoted events (hash
-            key despite having a URL) match by hash ONLY — their URL is
-            ambiguous this batch, and URL-matching would pile them onto one row.
+            its row via the URL (or hash) column. Demoted events (hash key
+            despite having a URL) match by hash ONLY — their URL is ambiguous,
+            and URL-matching would pile them onto one row.
             """
-            if key[0] == "ext":
-                row = by_ext.get(key[1])
-                if row is None and verdict is UrlIdentityVerdict.TRUSTED:
-                    norm = normalize_source_url(se.source_url)
-                    row = by_url.get(norm) if norm else None
-                return row or by_hash.get(se.hash)
-            if key[0] == "url":
-                return by_url.get(key[1]) or by_hash.get(se.hash)
-            return by_hash.get(se.hash)
+            if key.startswith("ext:"):
+                row = by_ext.get(se.external_id)
+                if row is None and norm and norm not in ambiguous_urls:
+                    row = by_url.get(norm)
+                return row or hash_match(h)
+            if key.startswith("url:"):
+                return by_url.get(norm) or hash_match(h)
+            return hash_match(h)
 
         created = 0
         updated = 0
         claimed: set[int] = set()
 
-        for key, se in batch.items():
-            existing = match(se, key)
+        for key, (se, h, norm, demoted) in batch.items():
+            existing = match(se, h, norm, key)
             if existing is not None and existing.id in claimed:
                 # Two batch identities resolved to one stored row (e.g. an ext-keyed
                 # and a url-keyed listing of the same event). First claim wins;
@@ -275,7 +305,7 @@ class ScrapeManager:
                 # a rename or reschedule is the same event with new values.
                 existing.name = se.name
                 existing.date = se.date
-                existing.hash = se.hash
+                existing.hash = h
                 existing.price_min = se.price_min
                 existing.price_max = se.price_max
                 existing.status = se.status
@@ -296,15 +326,17 @@ class ScrapeManager:
                 existing.normalized_source_url = normalize_source_url(existing.source_url)
                 # source_key recomputes from the MERGED values so a row that keeps
                 # its stored external_id keeps its ext: key even when one scrape
-                # omits the id. Batch-demoted events force the hash tier — their
-                # URL is shared, and a url: key here would collide with the other
-                # demoted row under the (venue_id, source_key) unique index.
-                if key[0] == "hash":
-                    existing.source_key = f"hash:{se.hash}"
+                # omits the id. Demoted events force the hash tier — their URL is
+                # shared, and a url: key here would collide with the other row
+                # holding it under the (venue_id, source_key) unique index. The
+                # same ambiguity guard applies to the merged URL.
+                if demoted:
+                    existing.source_key = derive_source_key(None, None, h, verdict)
                 else:
-                    ext = existing.external_id
-                    norm = existing.normalized_source_url if verdict is UrlIdentityVerdict.TRUSTED else None
-                    existing.source_key = f"ext:{ext}" if ext else (f"url:{norm}" if norm else f"hash:{se.hash}")
+                    merged_norm = existing.normalized_source_url
+                    if merged_norm in ambiguous_urls:
+                        merged_norm = None
+                    existing.source_key = derive_source_key(existing.external_id, merged_norm, h, verdict)
                 # updated_at is NOT stamped here: the column's onupdate fires only when
                 # an assignment above actually changed a value, which keeps updated_at
                 # meaningful as a "this row's data changed" signal for API clients.
@@ -334,11 +366,11 @@ class ScrapeManager:
                     description=se.description,
                     source=se.source,
                     source_url=se.source_url,
-                    normalized_source_url=normalize_source_url(se.source_url),
-                    hash=se.hash,
+                    normalized_source_url=norm,
+                    hash=h,
                     # The batch key IS the identity: ext:/url: for stable tiers,
-                    # hash: for hash-tier and batch-demoted events.
-                    source_key=f"{key[0]}:{key[1]}",
+                    # hash: for hash-tier and demoted events.
+                    source_key=key,
                 )
                 self.session.add(event)
                 created += 1

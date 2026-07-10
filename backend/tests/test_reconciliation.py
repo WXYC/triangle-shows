@@ -175,13 +175,13 @@ async def test_batch_same_identity_different_dates_demotes_to_hash(session, make
     # collapsing (or URL-matching) them would drop or overwrite a real show.
     venue = await make_venue(scraper_type="mec")
     manager = ScrapeManager(session)
-    url = "https://venue.com/event/rocky-horror/"
+    url = "https://venue.com/event/csillagrablok/"
 
     created, updated = await manager._upsert_events(
         venue.id,
         [
-            _scraped(venue.slug, source_url=url, name="Rocky Horror", date=D),
-            _scraped(venue.slug, source_url=url, name="Rocky Horror", date=D + timedelta(days=1)),
+            _scraped(venue.slug, source_url=url, name="Csillagrablók", date=D),
+            _scraped(venue.slug, source_url=url, name="Csillagrablók", date=D + timedelta(days=1)),
         ],
     )
     await session.commit()
@@ -233,3 +233,69 @@ async def test_duplicate_hashes_match_oldest_row_without_crashing(session, make_
     await session.refresh(newer)
     assert older.price_min == 99.0
     assert newer.price_min != 99.0
+
+
+async def test_cross_batch_shared_url_does_not_hijack_wrong_occurrence(session, make_venue):
+    # Two occurrences sharing one URL are demoted in-batch. A LATER scrape that
+    # lists only ONE occurrence must not url-match the oldest same-URL row and
+    # rewrite the other occurrence in place — the shared URL stays non-identity
+    # cross-batch, matching goes through the hash.
+    venue = await make_venue(scraper_type="mec")
+    manager = ScrapeManager(session)
+    url = "https://venue.com/event/csillagrablok-run/"
+
+    await manager._upsert_events(
+        venue.id,
+        [
+            _scraped(venue.slug, source_url=url, name="Csillagrablók", date=D),
+            _scraped(venue.slug, source_url=url, name="Csillagrablók", date=D + timedelta(days=1)),
+        ],
+    )
+    await session.commit()
+
+    created, updated = await manager._upsert_events(
+        venue.id,
+        [_scraped(venue.slug, source_url=url, name="Csillagrablók", date=D + timedelta(days=1), price_min=20.0)],
+    )
+    await session.commit()
+
+    assert created == 0
+    events = await _all_events(session)
+    assert len(events) == 2
+    by_date = {e.date: e for e in events}
+    assert by_date[D].price_min != 20.0  # the D occurrence was not touched
+    assert by_date[D + timedelta(days=1)].price_min == 20.0
+
+
+async def test_forced_hash_key_prefers_row_already_holding_it(session, make_venue, make_event):
+    # Duplicate hashes with mixed source_keys can exist transiently. Forcing
+    # hash:<h> onto the OLDER row while a newer row already holds that key would
+    # violate (venue_id, source_key) and fail the whole venue's scrape — hash
+    # matching must prefer the row that already holds the hash-tier key.
+    venue = await make_venue(scraper_type="mec")
+    manager = ScrapeManager(session)
+    se = _scraped(venue.slug, name="Jessica Pratt")
+    older = await make_event(
+        venue=venue, name=se.name, date=se.date, hash=se.hash,
+        source_url="https://venue.com/event/jp/", normalized_source_url="/event/jp",
+        source_key="url:/event/jp",
+    )
+    holder = await make_event(venue=venue, name=se.name, date=se.date, hash=se.hash, source_key=f"hash:{se.hash}")
+
+    # A demotion batch (same URL, two dates) whose first member carries hash h.
+    created, updated = await manager._upsert_events(
+        venue.id,
+        [
+            _scraped(venue.slug, name="Jessica Pratt", source_url="https://venue.com/event/other/", price_min=42.0),
+            _scraped(
+                venue.slug, name="Jessica Pratt", date=D + timedelta(days=1),
+                source_url="https://venue.com/event/other/",
+            ),
+        ],
+    )
+    await session.commit()  # must not raise UniqueViolation
+
+    await session.refresh(holder)
+    await session.refresh(older)
+    assert holder.price_min == 42.0  # the hash-keyed row took the update
+    assert older.source_key == "url:/event/jp"  # untouched

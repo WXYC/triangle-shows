@@ -32,7 +32,6 @@ depends_on = None
 def upgrade() -> None:
     op.add_column('events', sa.Column('normalized_source_url', sa.String(1000), nullable=True))
     op.add_column('events', sa.Column('source_key', sa.String(1100), nullable=True))
-    op.create_index('ix_events_normalized_source_url', 'events', ['normalized_source_url'])
 
     # Imported here (not module level) so `alembic history` etc. don't need app deps.
     from app.services.identity_backfill import merge_source_key_duplicates, populate_source_keys
@@ -41,6 +40,9 @@ def upgrade() -> None:
     populate_source_keys(conn)
     merge_source_key_duplicates(conn)
 
+    # Indexes are created AFTER the bulk populate/merge so the backfill doesn't
+    # pay index maintenance on every row it touches.
+    op.create_index('ix_events_normalized_source_url', 'events', ['normalized_source_url'])
     op.alter_column('events', 'source_key', nullable=False)
     op.drop_constraint('uq_events_hash', 'events', type_='unique')
     op.create_index('uq_events_venue_source_key', 'events', ['venue_id', 'source_key'], unique=True)
