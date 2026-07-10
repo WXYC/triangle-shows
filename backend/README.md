@@ -42,7 +42,7 @@ Every event carries a `source_key` — a stable, tier-prefixed identity string e
 **Derivation** (`app/scrapers/identity.py::derive_source_key`, precedence order):
 
 1. `ext:<external_id>` — when the scraper supplies a source-system id (Ticketmaster, VenuePilot).
-2. `url:<normalized source_url>` — only for scrapers whose audit verdict is TRUSTED. Normalization (`normalize_source_url`) strips scheme, host, fragment, and a trailing slash; keeps path + query (ticketing pages may carry identity in a query parameter); and removes known tracking params (`utm_*`, `fbclid`, `gclid`).
+2. `url:<normalized source_url>` — only for scrapers whose audit verdict is TRUSTED. Normalization (`normalize_source_url`) strips scheme, host, fragment, and a trailing slash; keeps path + query (ticketing pages may carry identity in a query parameter) with query parameters sorted by name so param order can't change identity; and removes known tracking params (`utm_*`, `fbclid`, `gclid`).
 3. `hash:<sha256>` — the content hash of `(venue_slug | date | normalized name)`, for everything else.
 
 **Stability classes** — the prefix tells you what you can rely on:
