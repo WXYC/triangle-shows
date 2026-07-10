@@ -94,7 +94,7 @@ async def test_single_miss_does_not_tombstone(session, make_venue, scrape):
     assert rows["Jessica Pratt"].removed_at is None
 
 
-async def test_reappearance_resets_the_miss_counter(session, make_venue, scrape):
+async def test_reappearance_resets_the_miss_streak(session, make_venue, scrape):
     """Misses must be consecutive: miss, reappear, miss is two interleaved gaps,
     not a delisting."""
     venue = await make_venue()
@@ -103,7 +103,7 @@ async def test_reappearance_resets_the_miss_counter(session, make_venue, scrape)
 
     await scrape(venue, [keeper, flapper], on_day=DAY1)
     await scrape(venue, [keeper], on_day=DAY2)           # miss 1
-    await scrape(venue, [keeper, flapper], on_day=DAY2)  # reappears -> counter resets
+    await scrape(venue, [keeper, flapper], on_day=DAY2)  # reappears -> streak resets
     await scrape(venue, [keeper], on_day=DAY3)           # miss 1 again, not miss 2
 
     rows = await _events_by_artist(session)
@@ -223,7 +223,9 @@ async def test_mass_disappearance_is_treated_as_scraper_breakage(session, make_v
     far-future entry keeps the horizon wide) is a broken scraper, not a mass
     delisting — no misses recorded when most in-window events vanish at once."""
     venue = await make_venue()
-    shows = [_listing(venue.slug, f"Test Act {n}", D + timedelta(days=n)) for n in range(6)]
+    lineup = ["Stereolab", "Cat Power", "Nilüfer Yanya", "Csillagrablók",
+              "Hermanos Gutiérrez", "Chuquimamani-Condori"]
+    shows = [_listing(venue.slug, artist, D + timedelta(days=n)) for n, artist in enumerate(lineup)]
     far = _listing(venue.slug, "Juana Molina", D + timedelta(days=10))
 
     await scrape(venue, [*shows, far], on_day=DAY1)
@@ -232,8 +234,30 @@ async def test_mass_disappearance_is_treated_as_scraper_breakage(session, make_v
     await scrape(venue, [far], on_day=DAY3)
 
     rows = await _events_by_artist(session)
-    assert all(rows[f"Test Act {n}"].removed_at is None for n in range(6))
+    assert all(rows[artist].removed_at is None for artist in lineup)
     assert (await session.execute(select(EventMissState))).scalars().all() == []
+
+
+async def test_tombstone_backlog_does_not_suppress_new_detections(session, make_venue, make_event, scrape):
+    """Already-tombstoned events are expected to be absent — they must not count as
+    disappearance evidence, or a venue with a tombstone backlog would trip the
+    mass-disappearance guard on every scrape and never tombstone anything again."""
+    venue = await make_venue()
+    # A backlog of six previously delisted (tombstoned) future events.
+    for n, artist in enumerate(["Stereolab", "Cat Power", "Nilüfer Yanya", "Csillagrablók",
+                                "Hermanos Gutiérrez", "Chuquimamani-Condori"]):
+        await make_event(venue=venue, artist=artist, date=D + timedelta(days=n),
+                         removed_at=datetime.utcnow())
+    keeper = _listing(venue.slug, "Juana Molina", D + timedelta(days=10))
+    vanished = _listing(venue.slug, "Jessica Pratt", D)
+
+    await scrape(venue, [keeper, vanished], on_day=DAY1)
+    # The venue delists one live show; the six tombstones must not drown it out.
+    await scrape(venue, [keeper], on_day=DAY2)
+    await scrape(venue, [keeper], on_day=DAY3)
+
+    rows = await _events_by_artist(session)
+    assert rows["Jessica Pratt"].removed_at is not None
 
 
 async def test_stale_miss_streak_expires(session, make_venue, scrape):
@@ -300,14 +324,16 @@ async def test_updated_at_moves_only_on_client_visible_changes(session, make_ven
     assert rows["Jessica Pratt"].updated_at > tombstoned_at
 
 
-async def test_past_event_cleanup_survives_miss_state(session, make_venue, scrape, _sessionmaker):
+async def test_past_event_cleanup_survives_miss_state(session, make_venue, scrape, _sessionmaker, monkeypatch):
     """The 7-day cleanup deletes via Core delete(Event), which bypasses ORM cascades —
     the miss-state FK must cascade at the database level or the nightly job throws.
 
-    The job gets the test's sessionmaker: the module-global engine's pool is bound
-    to another event loop, and the backdate uses the job's own clock (utcnow) so a
-    UTC-ahead host near midnight can't land the date exactly on the strict cutoff.
+    The job's sessionmaker is monkeypatched to the test's: the module-global engine's
+    pool is bound to another event loop (the same seam works for every scheduler job).
+    The backdate uses the job's own clock (utcnow) so a UTC-ahead host near midnight
+    can't land the date exactly on the strict cutoff.
     """
+    monkeypatch.setattr("app.scheduler.async_session", _sessionmaker)
     venue = await make_venue()
     keeper = _listing(venue.slug, "Juana Molina", D + timedelta(days=1))
     vanished = _listing(venue.slug, "Jessica Pratt", D)
@@ -321,7 +347,7 @@ async def test_past_event_cleanup_survives_miss_state(session, make_venue, scrap
     rows["Jessica Pratt"].date = datetime.utcnow().date() - timedelta(days=8)
     await session.commit()
 
-    await cleanup_past_events_job(session_factory=_sessionmaker)
+    await cleanup_past_events_job()
 
     remaining = (await session.execute(select(Event))).scalars().all()
     assert [e.artist for e in remaining] == ["Juana Molina"]

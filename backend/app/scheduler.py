@@ -50,17 +50,17 @@ async def scrape_indie_job():
             logger.info(f"  {r}")
 
 
-async def cleanup_past_events_job(session_factory=None):
+async def cleanup_past_events_job():
     """Delete events more than 7 days in the past.
 
-    session_factory: test override — the default module-global engine's connection
-    pool is bound to the production event loop, so tests must pass their own
-    sessionmaker instead of borrowing pooled connections across loops.
+    Tests must monkeypatch this module's ``async_session`` to their own sessionmaker:
+    the module-global engine's connection pool is bound to the production event loop,
+    and borrowing its pooled connections across per-test loops breaks.
     """
     logger.info("Cleaning up past events")
     # Keep a 7-day buffer so recently-ended events don't vanish immediately
     cutoff = datetime.utcnow().date() - timedelta(days=7)
-    async with (session_factory or async_session)() as session:
+    async with async_session() as session:
         result = await session.execute(
             delete(Event).where(Event.date < cutoff)
         )
