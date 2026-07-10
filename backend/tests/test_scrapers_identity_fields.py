@@ -159,3 +159,37 @@ def test_manager_dispatch_resolves_registry_types():
     assert isinstance(manager._get_scraper(venue("venuepilot")), VenuePilotScraper)
     assert isinstance(manager._get_scraper(venue("mec")), MECScraper)
     assert manager._get_scraper(venue("no-such-type")) is None
+
+
+def test_scraped_event_stringifies_numeric_external_id():
+    # Numeric ids from JSON APIs must not crash the per-event parse (a silent
+    # per-event drop) — they coerce to their string form.
+    assert _event(external_id=39482).external_id == "39482"
+
+
+# --- Tribe Events: per-event JSON-LD url must win over the detail-page href ---
+
+
+def _tribe_scraper():
+    from app.scrapers.tribe_events import TribeEventsScraper
+
+    return TribeEventsScraper("test-venue", {"url": "https://venue.com/events/"})
+
+
+def test_tribe_event_own_jsonld_url_wins_over_detail_href():
+    # The Events Calendar emits occurrence-specific URLs; a detail page can embed
+    # several Event items, so the passed href must not override data["url"].
+    data = {
+        "@type": "Event",
+        "name": "Jessica Pratt",
+        "startDate": "2026-09-01",
+        "url": "https://venue.com/event/jessica-pratt/2026-09-01/",
+    }
+    parsed = _tribe_scraper()._parse_jsonld_event(data, source_url="https://venue.com/event/jessica-pratt/")
+    assert parsed.source_url == "https://venue.com/event/jessica-pratt/2026-09-01/"
+
+
+def test_tribe_detail_href_is_fallback_when_jsonld_lacks_url():
+    data = {"@type": "Event", "name": "Jessica Pratt", "startDate": "2026-09-01"}
+    parsed = _tribe_scraper()._parse_jsonld_event(data, source_url="https://venue.com/event/jessica-pratt/")
+    assert parsed.source_url == "https://venue.com/event/jessica-pratt/"

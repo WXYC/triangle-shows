@@ -33,6 +33,10 @@ from app.scrapers.identity import UrlIdentityVerdict, derive_source_key, normali
         ),
         # A URL that is ONLY tracking params normalizes to the bare path.
         ("https://host/path?utm_source=x", "/path"),
+        # Query-parameter order must not change identity — the same page can
+        # emit its params in either order across scrapes.
+        ("https://host/path?venue=k&eid=7", "/path?eid=7&venue=k"),
+        ("https://host/path?eid=7&venue=k", "/path?eid=7&venue=k"),
         # Trailing slash is insignificant.
         ("https://host/path/", "/path"),
         # Bare host → root path, still a usable identity.

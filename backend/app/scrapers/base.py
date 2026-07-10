@@ -15,6 +15,8 @@ from datetime import date, time, datetime
 from functools import cached_property
 from typing import Optional
 
+from app.scrapers.identity import UrlIdentityVerdict
+
 
 # --- ScrapedEvent Dataclass ---
 
@@ -44,9 +46,12 @@ class ScrapedEvent:
 
     def __post_init__(self):
         # A blank external_id must never survive as an identity key: reconciliation
-        # would match every event at the venue onto one row (issue #8).
-        if self.external_id is not None and not self.external_id.strip():
-            self.external_id = None
+        # would match every event at the venue onto one row (issue #8). Non-string
+        # ids (numeric JSON API values) are stringified rather than crashing the
+        # per-event parse — a silent drop of every event at a venue is worse than
+        # a lenient cast.
+        if self.external_id is not None:
+            self.external_id = str(self.external_id).strip() or None
 
     @cached_property
     def hash(self) -> str:
@@ -83,6 +88,13 @@ BROWSER_HEADERS = {
 
 class BaseScraper(ABC):
     """Abstract base class for all venue scrapers."""
+
+    # Identity audit verdict (issue #8): may this scraper's source_url serve as
+    # event identity? The safe default is HASH_FALLBACK; every concrete scraper
+    # must still declare its own verdict explicitly — tests/test_identity.py
+    # rejects inherited declarations, so this default only defends runtime paths
+    # (e.g. a scraper deployed without its audit).
+    URL_IDENTITY = UrlIdentityVerdict.HASH_FALLBACK
 
     def __init__(self, venue_slug: str, config: Optional[dict] = None):
         self.venue_slug = venue_slug

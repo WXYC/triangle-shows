@@ -252,7 +252,7 @@ class MECScraper(BaseScraper):
                 # Identity: the event's own JSON-LD url first; a page URL only when
                 # it's a per-event detail page. A shared listing URL would alias
                 # every event on the page under one identity (issue #8).
-                source_url=data.get("url") or (page_url if page_url_is_event else None) or None,
+                source_url=data.get("url") or (page_url if page_url_is_event else None),
             )
         except Exception as e:
             logger.warning(f"[MEC] Failed to parse JSON-LD event: {e}")
