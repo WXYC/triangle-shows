@@ -54,6 +54,7 @@ _events = sa.table(
     sa.column("normalized_source_url", sa.String),
     sa.column("hash", sa.String),
     sa.column("source_key", sa.String),
+    sa.column("removed_at", sa.DateTime),
     sa.column("updated_at", sa.DateTime),
 )
 _venues = sa.table(
@@ -194,6 +195,15 @@ def merge_source_key_duplicates(conn: Connection, venue_id: Optional[int] = None
             for col in _MERGE_COLUMNS:
                 if row[col] is not None:
                     merged[col] = row[col]
+        # removed_at inverts the newest-non-null rule: the rename that created a
+        # phantom pair also made the OLD row vanish from scrapes, so the survivor
+        # (oldest id) is exactly the row the vanished-events diff likely
+        # tombstoned. One live row proves the venue still advertises the event —
+        # presence evidence wins, mirroring the scrape diff's relist behavior.
+        if any(row["removed_at"] is None for row in rows):
+            merged["removed_at"] = None
+        else:
+            merged["removed_at"] = survivor["removed_at"]
 
         conn.execute(delete(_events).where(_events.c.id.in_([row["id"] for row in losers])))
         conn.execute(

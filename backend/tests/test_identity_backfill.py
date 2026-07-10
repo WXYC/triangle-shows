@@ -104,6 +104,58 @@ async def test_merge_collapses_same_url_duplicates_keeping_oldest_id(session, ma
     await _assert_identity_index_creatable(session)
 
 
+async def test_merge_clears_tombstone_when_any_duplicate_is_live(session, make_venue, make_event):
+    # Cross-feature interaction with the vanished-events diff (issue #9): the
+    # rename that created a phantom pair also made the OLD row vanish from
+    # scrapes, so by migration time the oldest row — the merge survivor — is
+    # exactly the one likely to carry a removed_at tombstone. Presence evidence
+    # must win: if any row in the group is live, the merged event is live.
+    from datetime import datetime
+
+    venue = await make_venue(scraper_type="mec")
+    url = "https://v.com/event/jessica-pratt/"
+    older = await make_event(
+        venue=venue, name="Jessica Pratt", source_url=url, date=D,
+        removed_at=datetime(2026, 7, 1),
+    )
+    await make_event(
+        venue=venue, name="Jessica Pratt (Rescheduled)", source_url=url,
+        date=D + timedelta(days=7),
+    )
+
+    await _run_backfill(session, populate_source_keys)
+    await _run_backfill(session, merge_source_key_duplicates)
+
+    events = await _all_events(session)
+    assert len(events) == 1
+    assert events[0].id == older.id
+    assert events[0].removed_at is None
+
+
+async def test_merge_keeps_tombstone_when_all_duplicates_are_removed(session, make_venue, make_event):
+    from datetime import datetime
+
+    venue = await make_venue(scraper_type="mec")
+    url = "https://v.com/event/chuquimamani-condori/"
+    stamp = datetime(2026, 7, 1)
+    older = await make_event(
+        venue=venue, name="Chuquimamani-Condori", source_url=url, date=D,
+        removed_at=stamp,
+    )
+    await make_event(
+        venue=venue, name="Chuquimamani-Condori (Moved)", source_url=url,
+        date=D + timedelta(days=7), removed_at=datetime(2026, 7, 3),
+    )
+
+    await _run_backfill(session, populate_source_keys)
+    await _run_backfill(session, merge_source_key_duplicates)
+
+    events = await _all_events(session)
+    assert len(events) == 1
+    assert events[0].id == older.id
+    assert events[0].removed_at == stamp
+
+
 async def test_merge_leaves_untrusted_venues_alone(session, make_venue, make_event):
     # squarespace rows share URLs legitimately-ambiguously; their keys are
     # hash-tier (distinct), so nothing merges even with identical source_urls.
