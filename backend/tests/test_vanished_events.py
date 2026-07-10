@@ -9,7 +9,7 @@ so the guards (failed/zero-event scrapes, horizon, per-day cap, reset on
 reappearance) are exercised exactly as production scrapes would hit them.
 """
 
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 import pytest
 from sqlalchemy import select
@@ -201,6 +201,77 @@ async def test_event_beyond_snapshot_horizon_is_never_missed(session, make_venue
     assert (await session.execute(select(EventMissState))).scalars().all() == []
 
 
+async def test_event_on_the_horizon_date_is_never_missed(session, make_venue, scrape):
+    """The horizon guard is exclusive: item-capped listings can cut mid-date, so the
+    max-seen date itself is unvouched — an absent event sharing it is 'below the
+    fold', not missing."""
+    venue = await make_venue()
+    keeper = _listing(venue.slug, "Juana Molina", D)
+    below_fold = _listing(venue.slug, "Jessica Pratt", D)  # same date as the keeper
+
+    await scrape(venue, [keeper, below_fold], on_day=DAY1)
+    await scrape(venue, [keeper], on_day=DAY2)
+    await scrape(venue, [keeper], on_day=DAY3)
+
+    rows = await _events_by_artist(session)
+    assert rows["Jessica Pratt"].removed_at is None
+    assert (await session.execute(select(EventMissState))).scalars().all() == []
+
+
+async def test_mass_disappearance_is_treated_as_scraper_breakage(session, make_venue, scrape):
+    """A page that suddenly stops rendering most of a venue's calendar (while one
+    far-future entry keeps the horizon wide) is a broken scraper, not a mass
+    delisting — no misses recorded when most in-window events vanish at once."""
+    venue = await make_venue()
+    shows = [_listing(venue.slug, f"Test Act {n}", D + timedelta(days=n)) for n in range(6)]
+    far = _listing(venue.slug, "Juana Molina", D + timedelta(days=10))
+
+    await scrape(venue, [*shows, far], on_day=DAY1)
+    # Two days of a degraded page rendering only the far-future entry.
+    await scrape(venue, [far], on_day=DAY2)
+    await scrape(venue, [far], on_day=DAY3)
+
+    rows = await _events_by_artist(session)
+    assert all(rows[f"Test Act {n}"].removed_at is None for n in range(6))
+    assert (await session.execute(select(EventMissState))).scalars().all() == []
+
+
+async def test_stale_miss_streak_expires(session, make_venue, scrape):
+    """Two misses separated by a long unobserved gap are two isolated glitches, not
+    a delisting: a streak with no observation for over a week restarts instead of
+    supplying the tombstoning second miss."""
+    venue = await make_venue()
+    keeper = _listing(venue.slug, "Juana Molina", D + timedelta(days=1))
+    vanished = _listing(venue.slug, "Jessica Pratt", D)
+
+    await scrape(venue, [keeper, vanished], on_day=DAY1)
+    await scrape(venue, [keeper], on_day=DAY2)                      # miss 1
+    # Next observed miss comes 10 days later: stale streak restarts.
+    await scrape(venue, [keeper], on_day=DAY2 + timedelta(days=10))
+    rows = await _events_by_artist(session)
+    assert rows["Jessica Pratt"].removed_at is None
+    # A consecutive follow-up miss the day after does tombstone.
+    await scrape(venue, [keeper], on_day=DAY2 + timedelta(days=11))
+    await session.refresh(rows["Jessica Pratt"])
+    assert rows["Jessica Pratt"].removed_at is not None
+
+
+async def test_scrape_result_reports_tombstoned_and_relisted(session, make_venue, scrape):
+    """Tombstone stamps and relist clears are client-visible changes — the scrape
+    result (and log) must account for them, not just upsert field changes."""
+    venue = await make_venue()
+    keeper = _listing(venue.slug, "Juana Molina", D + timedelta(days=1))
+    vanished = _listing(venue.slug, "Jessica Pratt", D)
+
+    await scrape(venue, [keeper, vanished], on_day=DAY1)
+    r_miss = await scrape(venue, [keeper], on_day=DAY2)
+    assert (r_miss["tombstoned"], r_miss["relisted"]) == (0, 0)
+    r_stamp = await scrape(venue, [keeper], on_day=DAY3)
+    assert (r_stamp["tombstoned"], r_stamp["relisted"]) == (1, 0)
+    r_relist = await scrape(venue, [keeper, vanished], on_day=DAY3)
+    assert (r_relist["tombstoned"], r_relist["relisted"]) == (0, 1)
+
+
 async def test_updated_at_moves_only_on_client_visible_changes(session, make_venue, scrape):
     """updated_at is the downstream sync cursor: miss bookkeeping must not touch it;
     setting or clearing the tombstone must."""
@@ -229,9 +300,14 @@ async def test_updated_at_moves_only_on_client_visible_changes(session, make_ven
     assert rows["Jessica Pratt"].updated_at > tombstoned_at
 
 
-async def test_past_event_cleanup_survives_miss_state(session, make_venue, scrape):
+async def test_past_event_cleanup_survives_miss_state(session, make_venue, scrape, _sessionmaker):
     """The 7-day cleanup deletes via Core delete(Event), which bypasses ORM cascades —
-    the miss-state FK must cascade at the database level or the nightly job throws."""
+    the miss-state FK must cascade at the database level or the nightly job throws.
+
+    The job gets the test's sessionmaker: the module-global engine's pool is bound
+    to another event loop, and the backdate uses the job's own clock (utcnow) so a
+    UTC-ahead host near midnight can't land the date exactly on the strict cutoff.
+    """
     venue = await make_venue()
     keeper = _listing(venue.slug, "Juana Molina", D + timedelta(days=1))
     vanished = _listing(venue.slug, "Jessica Pratt", D)
@@ -242,10 +318,10 @@ async def test_past_event_cleanup_survives_miss_state(session, make_venue, scrap
 
     # Simulate the show date passing beyond the cleanup buffer.
     rows = await _events_by_artist(session)
-    rows["Jessica Pratt"].date = date.today() - timedelta(days=8)
+    rows["Jessica Pratt"].date = datetime.utcnow().date() - timedelta(days=8)
     await session.commit()
 
-    await cleanup_past_events_job()
+    await cleanup_past_events_job(session_factory=_sessionmaker)
 
     remaining = (await session.execute(select(Event))).scalars().all()
     assert [e.artist for e in remaining] == ["Juana Molina"]

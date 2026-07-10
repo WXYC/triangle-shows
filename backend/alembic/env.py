@@ -20,7 +20,7 @@ from alembic import context
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from app.database import Base
-from app.models import Venue, Event, ScrapeLog  # noqa: F401 - ensure models are imported
+from app.models import Venue, Event, EventMissState, ScrapeLog  # noqa: F401 - ensure models are imported
 
 # --- Alembic Config & URL Setup ---
 

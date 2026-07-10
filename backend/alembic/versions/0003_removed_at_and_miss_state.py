@@ -24,7 +24,6 @@ def upgrade() -> None:
     op.create_table(
         'event_miss_state',
         sa.Column('event_id', sa.Integer(), nullable=False),
-        sa.Column('miss_count', sa.Integer(), nullable=False),
         sa.Column('last_miss_date', sa.Date(), nullable=False),
         sa.ForeignKeyConstraint(['event_id'], ['events.id'], ondelete='CASCADE'),
         sa.PrimaryKeyConstraint('event_id'),

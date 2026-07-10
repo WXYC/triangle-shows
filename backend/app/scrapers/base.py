@@ -12,6 +12,7 @@ import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import date, time, datetime
+from functools import cached_property
 from typing import Optional
 
 
@@ -41,12 +42,16 @@ class ScrapedEvent:
     description: Optional[str] = None
     source_url: Optional[str] = None
 
-    @property
+    @cached_property
     def hash(self) -> str:
         """Generate dedup hash from venue_slug + date + normalized name.
 
         Strip the words 'box'/'boxes' before normalizing so DPAC events
         like 'Piano Box Series' and 'Piano Boxes Series' collapse to one hash.
+
+        Cached: the upsert and the snapshot diff each read it several times per
+        event. Scrapers must not mutate the identity fields (name, date,
+        venue_slug) after the first access.
         """
         name = re.sub(r'\b(box|boxes)\b', '', self.name, flags=re.IGNORECASE)
         normalized = re.sub(r'[^a-z0-9]', '', name.lower().strip())
