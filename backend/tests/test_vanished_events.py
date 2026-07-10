@@ -125,7 +125,7 @@ async def test_reappearance_clears_the_tombstone_and_truly_resets(session, make_
     await session.refresh(rows["Jessica Pratt"])
     assert rows["Jessica Pratt"].removed_at is None      # ...relisted -> cleared
 
-    # The counter reset with it: one further miss is not enough to re-tombstone,
+    # The streak reset with it: one further miss is not enough to re-tombstone,
     # two on distinct days are.
     await scrape(venue, [keeper], on_day=DAY3 + timedelta(days=1))
     await session.refresh(rows["Jessica Pratt"])
@@ -236,6 +236,29 @@ async def test_mass_disappearance_is_treated_as_scraper_breakage(session, make_v
     rows = await _events_by_artist(session)
     assert all(rows[artist].removed_at is None for artist in lineup)
     assert (await session.execute(select(EventMissState))).scalars().all() == []
+
+
+async def test_multiple_events_vanishing_together_all_tombstone(session, make_venue, scrape):
+    """A minority-sized batch of simultaneous delistings (below the mass guard)
+    records a first miss for every vanished event in one scrape — the multi-row
+    insert path — and each tombstones after the second day."""
+    venue = await make_venue()
+    lineup = ["Stereolab", "Cat Power", "Nilüfer Yanya", "Csillagrablók", "Hermanos Gutiérrez"]
+    shows = [_listing(venue.slug, artist, D + timedelta(days=n)) for n, artist in enumerate(lineup)]
+    keeper = _listing(venue.slug, "Juana Molina", D + timedelta(days=10))
+
+    await scrape(venue, [*shows, keeper], on_day=DAY1)
+    # Two shows delisted at once: 2 of 5 live in-window events is a minority and
+    # below the absolute floor, so the mass guard must not swallow it.
+    remaining = [*shows[2:], keeper]
+    await scrape(venue, remaining, on_day=DAY2)
+    assert len((await session.execute(select(EventMissState))).scalars().all()) == 2
+    await scrape(venue, remaining, on_day=DAY3)
+
+    rows = await _events_by_artist(session)
+    assert rows["Stereolab"].removed_at is not None
+    assert rows["Cat Power"].removed_at is not None
+    assert all(rows[a].removed_at is None for a in lineup[2:])
 
 
 async def test_tombstone_backlog_does_not_suppress_new_detections(session, make_venue, make_event, scrape):
