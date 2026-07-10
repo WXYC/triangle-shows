@@ -227,6 +227,10 @@ async def make_event(session, make_venue):
         if not fields.get("hash"):
             raw = f"{fields['venue_id']}|{fields['name']}|{fields['date']}|{n}"
             fields["hash"] = hashlib.sha256(raw.encode()).hexdigest()
+        # source_key is NOT NULL; tests that don't care get the hash-tier form the
+        # scrape manager would derive for an event with no external_id/source_url.
+        if not fields.get("source_key"):
+            fields["source_key"] = f"hash:{fields['hash']}"
         event = Event(**fields)
         session.add(event)
         await session.commit()
