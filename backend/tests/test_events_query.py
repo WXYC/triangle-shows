@@ -217,9 +217,10 @@ async def test_dedup_live_record_displaces_tombstoned_incumbent(session, make_ve
 
 
 async def test_dedup_live_rename_wins_over_same_venue_tombstone(session, make_venue, make_event):
-    """The rename shape stable identity (#8) makes routine: a renamed event gets a new
-    hash, so the venue holds an old tombstoned row and a live row for the same show.
-    The first-venue invariant must not shield the tombstone."""
+    """Hash-based identity makes the rename shape routine (until #8 lands stable
+    identity): a renamed event gets a new hash, so the venue holds an old tombstoned
+    row and a live row for the same show. The first-venue invariant must not shield
+    the tombstone."""
     v = await make_venue()
     await make_event(
         venue=v, artist="Chuquimamani-Condori", name="Chuquimamani-Condori", date=D,

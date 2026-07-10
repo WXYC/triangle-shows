@@ -70,7 +70,7 @@ async def list_events(
     genre: Optional[str] = Query(None, description="Case-insensitive substring match against genre"),
     status: Optional[EventStatus] = Query(None, description="Ticket/availability status"),
     dedup: bool = Query(True, description="Collapse cross-venue duplicate listings; pass false for every stored row"),
-    include_removed: bool = Query(False, description="Include soft-removed events (removed_at set: the venue no longer advertises them). Delisting is an observation with ~1-day minimum latency and a day-of blind spot — consumers decide what it means; status is never inferred from it. Mirror-style consumers should also pass dedup=false to see every tombstoned row."),
+    include_removed: bool = Query(False, description="Include soft-removed events (removed_at set: the venue no longer advertises them). Delisting is an observation — it requires misses on two distinct Eastern calendar days (as little as ~12 hours apart under the scheduled scrape cadence) and has a day-of blind spot; consumers decide what it means, and status is never inferred from it. Mirror-style consumers should pass dedup=false to see every tombstoned row AND an explicit back-dated start (e.g. 8 days ago): the default start=today window hides a tombstone stamped on the event's own show date, and rows are hard-deleted 7 days past their date."),
     session: AsyncSession = Depends(get_session),
 ) -> list[EventResponse]:
     """All events matching the filters, cross-venue de-duplicated and ordered by date.

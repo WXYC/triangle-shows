@@ -94,10 +94,12 @@ class Event(Base):
 
 
 class EventMissState(Base):
-    """Consecutive-miss bookkeeping for the vanished-event diff (manager.py).
+    """Miss-streak bookkeeping for the vanished-event diff (manager.py).
 
-    One row per event currently missing from its venue's scrape snapshots. Kept off
-    the events row on purpose: events.updated_at must move only for client-visible
+    One row per event currently missing from its venue's scrape snapshots; the row's
+    existence IS the streak ("missed at least once"), so a further miss on a later
+    day within the staleness window tombstones — no counter needed. Kept off the
+    events row on purpose: events.updated_at must move only for client-visible
     changes, and any UPDATE to an events row would fire its onupdate stamp. No ORM
     relationship to Event is declared — the diff reads and writes this table by
     explicit query, and deletion is handled at the database level (the FK cascades
@@ -108,7 +110,6 @@ class EventMissState(Base):
     event_id: Mapped[int] = mapped_column(
         ForeignKey("events.id", ondelete="CASCADE"), primary_key=True
     )
-    miss_count: Mapped[int] = mapped_column(Integer)
     # Triangle calendar date (America/New_York) of the most recent miss; the diff
     # records at most one miss per event per calendar day.
     last_miss_date: Mapped[date] = mapped_column(Date)

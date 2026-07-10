@@ -97,9 +97,13 @@ def dedupe_cross_venue(events: Sequence[Event]) -> list[Event]:
     rich it is, and a live record always beats a tombstoned incumbent regardless of
     score or venue — otherwise a consumer passing ``include_removed=true`` would see
     "removed" for a show that is still on (the same-venue rename shape makes this
-    routine: old row tombstones, new row lives, both share the key). Pass events in a
-    stable order (``query_events`` orders by date then id) so the outcome is
-    deterministic. Input order is otherwise preserved in the output.
+    routine: old row tombstones, new row lives, both share the key). Two carve-outs:
+    symbol-only labels have no comparable key (each is id-keyed, exempt from de-dup
+    entirely), so a live and a tombstoned "!!!" row both surface; and the liveness
+    rule, like de-duplication itself, is relative to the input set — a filter that
+    excluded the live record upstream leaves the tombstoned one to win its key.
+    Pass events in a stable order (``query_events`` orders by date then id) so the
+    outcome is deterministic. Input order is otherwise preserved in the output.
     """
     live_best = _pick_winners([e for e in events if e.removed_at is None])
     tombstoned_best = _pick_winners(
