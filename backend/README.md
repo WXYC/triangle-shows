@@ -37,7 +37,7 @@ A new scraper must declare its own verdict — `tests/test_identity.py` fails if
 
 ## The `source_key` contract
 
-Every event carries a `source_key` — a stable, tier-prefixed identity string exposed on `GET /api/v1/events` and `GET /api/v1/events/{id}`. It is the key external consumers reconcile on (WXYC Backend-Service upserts concerts as `(source='triangle_shows', source_id=source_key)`); treat its derivation as a published contract and change it only with a documented migration plan.
+Every event carries a `source_key` — a stable, tier-prefixed identity string exposed on `GET /api/v1/events` and `GET /api/v1/events/{id}`. It is the key external consumers reconcile on, **always qualified by venue** because uniqueness is per-venue (see below): WXYC Backend-Service upserts concerts as `(source='triangle_shows', source_id='<venue_slug>:' + source_key)`. Keying on bare `source_key` is wrong — cross-venue collisions (e.g. VenuePilot's small-integer ids) would fold distinct venues' events into one row. Treat the derivation as a published contract and change it only with a documented migration plan.
 
 **Derivation** (`app/scrapers/identity.py::derive_source_key`, precedence order):
 
