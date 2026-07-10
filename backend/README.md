@@ -35,6 +35,26 @@ Each scraper class declares a machine-readable verdict, `URL_IDENTITY` (see `app
 
 A new scraper must declare its own verdict — `tests/test_identity.py` fails if one is missing from the registry or relies on an inherited default. When in doubt, declare `HASH_FALLBACK`: it preserves today's content-hash behavior, while a wrong `TRUSTED` can merge distinct events into one row.
 
+## The `source_key` contract
+
+Every event carries a `source_key` — a stable, tier-prefixed identity string exposed on `GET /api/v1/events` and `GET /api/v1/events/{id}`. It is the key external consumers reconcile on (WXYC Backend-Service upserts concerts as `(source='triangle_shows', source_id=source_key)`); treat its derivation as a published contract and change it only with a documented migration plan.
+
+**Derivation** (`app/scrapers/identity.py::derive_source_key`, precedence order):
+
+1. `ext:<external_id>` — when the scraper supplies a source-system id (Ticketmaster, VenuePilot).
+2. `url:<normalized source_url>` — only for scrapers whose audit verdict is TRUSTED. Normalization (`normalize_source_url`) strips scheme, host, fragment, and a trailing slash; keeps path + query (ticketing pages may carry identity in a query parameter); and removes known tracking params (`utm_*`, `fbclid`, `gclid`).
+3. `hash:<sha256>` — the content hash of `(venue_slug | date | normalized name)`, for everything else.
+
+**Stability classes** — the prefix tells you what you can rely on:
+
+- `ext:` and `url:` keys survive renames and reschedules: the row updates in place and the key does not change.
+- `hash:` keys do NOT survive renames or reschedules — the name and date are baked into the hash, so consumers see a delete+create pair for those venues. This is inherent to hash-fallback venues (see the audit table above).
+- A key can migrate tiers (e.g. a scraper starts supplying `external_id` for an event previously keyed by URL). The row is preserved — reconciliation matches on per-tier columns, not on `source_key` — but the key value changes, which a consumer sees as delete+create churn. Tier shifts are rare, one-time events per row.
+
+**Uniqueness** is per-venue: `(venue_id, source_key)` is unique; `source_key` alone is not (VenuePilot ids are small integers that collide across venues).
+
+**One-time churn window after the identity migration**: rows whose stored `source_url` was a shared listing-page URL (the pre-fix mec scraper) migrate to per-event keys over the first scrape cycle after deploy. Consumers should begin keying on `source_key` only after that cycle completes.
+
 ## Running locally
 
 ```bash
