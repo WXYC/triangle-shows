@@ -50,7 +50,12 @@ def normalize_source_url(url: Optional[str]) -> Optional[str]:
         return None
     parts = urlsplit(url.strip())
     path = parts.path.rstrip("/") or "/"
-    query_pairs = [(k, v) for k, v in parse_qsl(parts.query, keep_blank_values=True) if not _is_tracking_param(k)]
+    # Sorted so the SAME page emitting its params in a different order still
+    # normalizes to one identity — source_key stability outranks preserving the
+    # original query-string form.
+    query_pairs = sorted(
+        (k, v) for k, v in parse_qsl(parts.query, keep_blank_values=True) if not _is_tracking_param(k)
+    )
     if query_pairs:
         return f"{path}?{urlencode(query_pairs)}"
     return path

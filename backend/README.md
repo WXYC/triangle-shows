@@ -27,7 +27,7 @@ Each scraper class declares a machine-readable verdict, `URL_IDENTITY` (see `app
 | `rhp_events` | TRUSTED | per-event detail-page link from the event wrapper |
 | `motorco` | TRUSTED | per-event url from the calendar's JS event blocks (WordPress detail page) |
 | `eventprime` | TRUSTED | per-event detail link from the listing row |
-| `carolina_theatre` | TRUSTED | per-event card link to the event's detail page |
+| `carolina_theatre` | TRUSTED | per-event card link to the event's detail page (venue currently removed in `seed.py`; re-audit if re-added) |
 | `koka_booth` | TRUSTED | event's own JSON-LD `url` or `None` — never the shared listing page |
 | `squarespace` | HASH_FALLBACK | `fullUrl` is regenerated from the title on rename — not rename-stable |
 | `webflow_cms` | HASH_FALLBACK | `source_url` is the ticket link, not guaranteed event-unique |

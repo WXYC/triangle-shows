@@ -234,7 +234,11 @@ class TribeEventsScraper(BaseScraper):
                 image_url=image_url,
                 status=status,
                 description=description[:500] if description else None,
-                source_url=source_url or data.get("url"),
+                # Identity: the event's own JSON-LD url first — The Events Calendar
+                # emits occurrence-specific URLs for recurring events, and the passed
+                # detail-page href must not override them (a detail page can embed
+                # several Event items that would otherwise all share the href).
+                source_url=data.get("url") or source_url,
             )
         except Exception as e:
             logger.warning(f"[Tribe] Failed to parse JSON-LD event: {e}")
