@@ -16,7 +16,7 @@ python tools/wait_for_deploy.py --url http://localhost:8000
 ## Scraping
 
 ### `run_scrape.py`
-Triggers the `/api/scrape` endpoint and prints a structured summary table (found / created / updated per venue). Appends results to `tools/scrape_results.log`.
+Triggers the `/api/scrape` endpoint and prints a structured summary table (found / created / updated / tombstoned / relisted per venue). Appends results to `tools/scrape_results.log`.
 
 ```
 python tools/run_scrape.py                          # scrape all venues

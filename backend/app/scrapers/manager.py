@@ -10,11 +10,13 @@ session, and all scraper modules in app.scrapers/.
 """
 
 # --- Imports ---
+import asyncio
 import logging
+from collections import defaultdict
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -38,6 +40,14 @@ MISS_STREAK_MAX_GAP_DAYS = 7
 # absolute floor keeps small venues working: a 3-show calendar that really drops
 # 2 shows still records normally.
 MASS_DISAPPEARANCE_MIN = 5
+
+# Serializes the DB write phase (upsert + snapshot diff + commit) per venue. The
+# startup scrape task, the APScheduler crons, and POST /api/scrape all run on one
+# event loop, and overlapping writes for the same venue could otherwise deadlock on
+# unordered row updates or roll each other back mid-diff. Scraping (the slow network
+# part) stays outside the lock. Cross-process overlap is not covered here — the
+# miss-state insert's ON CONFLICT handles its one cross-process hazard.
+_venue_write_locks: dict[int, asyncio.Lock] = defaultdict(asyncio.Lock)
 
 
 # --- ScrapeManager ---
@@ -126,18 +136,19 @@ class ScrapeManager:
                 raise ValueError(f"No scraper available for {venue_slug}")
 
             scraped_events = await scraper.scrape()
-            created, updated = await self._upsert_events(venue_id, scraped_events)
-            # Same transaction as the upsert: a crash below rolls everything back,
-            # so misses can never be recorded for a scrape that never logged success.
-            tombstoned, relisted = await self._apply_snapshot_diff(venue_id, scraped_events)
+            async with _venue_write_locks[venue_id]:
+                created, updated = await self._upsert_events(venue_id, scraped_events)
+                # Same transaction as the upsert: a crash below rolls everything back,
+                # so misses can never be recorded for a scrape that never logged success.
+                tombstoned, relisted = await self._apply_snapshot_diff(venue_id, scraped_events)
 
-            log.status = "success"
-            log.events_found = len(scraped_events)
-            log.events_created = created
-            log.events_updated = updated
-            log.finished_at = datetime.utcnow()
-            log.duration_seconds = (log.finished_at - log.started_at).total_seconds()
-            await self.session.commit()
+                log.status = "success"
+                log.events_found = len(scraped_events)
+                log.events_created = created
+                log.events_updated = updated
+                log.finished_at = datetime.utcnow()
+                log.duration_seconds = (log.finished_at - log.started_at).total_seconds()
+                await self.session.commit()
 
             logger.info(
                 f"[{venue_slug}] Scrape complete: {len(scraped_events)} found, "
@@ -308,39 +319,39 @@ class ScrapeManager:
                     event.removed_at = None
                     relisted += 1
 
-        missing_result = await self.session.execute(
+        # One fetch of the venue's LIVE in-window events, partitioned in Python, so
+        # the mass guard's numerator and denominator share a single predicate by
+        # construction. Tombstoned rows are deliberately excluded: their absence is
+        # already explained, so they are neither disappearance evidence (a tombstone
+        # backlog would trip the mass guard on every scrape and suppress all new
+        # detections) nor in need of further miss upkeep. The exclusive horizon means
+        # the venue's latest-dated stored event is structurally unobservable — the
+        # accepted price of never trusting the possibly-truncated boundary date.
+        in_window_result = await self.session.execute(
             select(Event).where(
                 Event.venue_id == venue_id,
                 Event.date >= today,
                 Event.date < horizon,
-                Event.hash.not_in(snapshot_hashes),
+                Event.removed_at.is_(None),
             )
         )
-        missing = missing_result.scalars().all()
+        in_window = in_window_result.scalars().all()
+        missing = [e for e in in_window if e.hash not in snapshot_hashes]
         if not missing:
-            await self.session.flush()
             return 0, relisted
 
-        # Mass-disappearance guard: when most of the venue's in-window calendar
+        # Mass-disappearance guard: when most of the venue's live in-window calendar
         # vanishes in one scrape, the page is degraded (bot challenge, half-rendered
         # listing, partial parse failure), not mass-delisted — record nothing.
         # Deliberately fail-safe toward not tombstoning: a venue that genuinely
-        # delists most of its calendar will keep the signal suppressed until the
+        # delists most of its calendar at once keeps the signal suppressed until the
         # snapshot again covers the majority of what we have stored.
-        in_window_total = (
-            await self.session.execute(
-                select(func.count())
-                .select_from(Event)
-                .where(Event.venue_id == venue_id, Event.date >= today, Event.date < horizon)
-            )
-        ).scalar_one()
-        if len(missing) >= MASS_DISAPPEARANCE_MIN and 2 * len(missing) > in_window_total:
+        if len(missing) >= MASS_DISAPPEARANCE_MIN and 2 * len(missing) > len(in_window):
             logger.warning(
-                f"[venue {venue_id}] {len(missing)} of {in_window_total} in-window "
+                f"[venue {venue_id}] {len(missing)} of {len(in_window)} live in-window "
                 f"events missing from a {len(scraped_events)}-event snapshot — "
                 f"treating as scraper breakage, no misses recorded"
             )
-            await self.session.flush()
             return 0, relisted
 
         states_result = await self.session.execute(
@@ -365,24 +376,24 @@ class ScrapeManager:
                 state.last_miss_date = today
             else:
                 # A second miss on a later day: the venue delisted this event.
-                # Never re-stamp (updated_at must not churn), never touch status —
+                # `missing` holds only live rows, so this never re-stamps a tombstone
+                # (updated_at must not churn), and status is never touched —
                 # removed_at records "the venue no longer advertises this", no more.
                 state.last_miss_date = today
-                if event.removed_at is None:
-                    event.removed_at = datetime.utcnow()
-                    tombstoned += 1
+                event.removed_at = datetime.utcnow()
+                tombstoned += 1
 
         if first_misses:
-            # ON CONFLICT DO NOTHING: a concurrent scrape of the same venue (startup
-            # scrape overlapping a scheduled run) may have inserted the same row; the
-            # loser must not blow up its whole transaction on the primary key.
+            # ON CONFLICT DO NOTHING: a concurrent scrape of the same venue in another
+            # process may have inserted the same row; the loser must not blow up its
+            # whole transaction on the primary key. In-process overlap is already
+            # serialized by the per-venue write lock in scrape_venue.
             await self.session.execute(
                 pg_insert(EventMissState)
                 .values([{"event_id": eid, "last_miss_date": today} for eid in first_misses])
                 .on_conflict_do_nothing()
             )
 
-        await self.session.flush()
         return tombstoned, relisted
 
     # --- Bulk scrape entry points ---

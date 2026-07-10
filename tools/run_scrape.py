@@ -94,10 +94,15 @@ def main():
 
         lines.append(f"Venues  : {len(results)}  ({len(successes)} ok, {len(failures)} failed)")
         # Aggregate event counts across all successful scrapers
-        total_found   = sum(r.get("found",   0) for r in successes)
-        total_created = sum(r.get("created", 0) for r in successes)
-        total_updated = sum(r.get("updated", 0) for r in successes)
-        lines.append(f"Events  : {total_found} found  |  {total_created} created  |  {total_updated} updated")
+        total_found      = sum(r.get("found",      0) for r in successes)
+        total_created    = sum(r.get("created",    0) for r in successes)
+        total_updated    = sum(r.get("updated",    0) for r in successes)
+        total_tombstoned = sum(r.get("tombstoned", 0) for r in successes)
+        total_relisted   = sum(r.get("relisted",   0) for r in successes)
+        lines.append(
+            f"Events  : {total_found} found  |  {total_created} created  |  {total_updated} updated"
+            f"  |  {total_tombstoned} tombstoned  |  {total_relisted} relisted"
+        )
         lines.append("")
 
         # Successes
@@ -108,7 +113,9 @@ def main():
                     f"    OK  {r['venue']:<30}  "
                     f"found={r.get('found',0):>3}  "
                     f"created={r.get('created',0):>3}  "
-                    f"updated={r.get('updated',0):>3}"
+                    f"updated={r.get('updated',0):>3}  "
+                    f"tombstoned={r.get('tombstoned',0):>3}  "
+                    f"relisted={r.get('relisted',0):>3}"
                 )
 
         # Failures
