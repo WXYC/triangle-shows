@@ -52,6 +52,11 @@ class ScrapedEvent:
         # a lenient cast.
         if self.external_id is not None:
             self.external_id = str(self.external_id).strip() or None
+        # Malformed JSON-LD can hand scrapers a dict/list where a URL string
+        # belongs ("url": {"@id": ...}). A non-string is not a usable identity
+        # and would fail the varchar column bind — treat it as no URL.
+        if self.source_url is not None and not isinstance(self.source_url, str):
+            self.source_url = None
 
     @cached_property
     def hash(self) -> str:

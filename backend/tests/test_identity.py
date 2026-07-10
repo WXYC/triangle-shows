@@ -112,3 +112,11 @@ def test_unknown_scraper_type_gets_safe_verdict():
     from app.scrapers.identity import UrlIdentityVerdict, url_identity_verdict
 
     assert url_identity_verdict("some-future-scraper") is UrlIdentityVerdict.HASH_FALLBACK
+
+
+def test_normalize_source_url_tolerates_non_string_input():
+    """Defense in depth: a non-str reaching the normalizer means a scraper let
+    malformed JSON-LD through — that must cost URL-tier identity, not the whole
+    venue's scrape cycle."""
+    assert normalize_source_url({"@id": "https://x"}) is None
+    assert normalize_source_url(123) is None
