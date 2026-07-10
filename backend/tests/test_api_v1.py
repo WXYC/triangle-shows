@@ -1,6 +1,6 @@
 """Tests for the surface-neutral /api/v1 API."""
 
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 from conftest import DEFAULT_EVENT_DATE as D  # shared with the make_event factory default
 
@@ -103,6 +103,36 @@ async def test_v1_event_detail_and_404(client, make_event):
     # Ids beyond int4 must 422 at validation, not surface as a database error (500).
     assert (await client.get("/api/v1/events/99999999999999")).status_code == 422
     assert (await client.get("/api/events/99999999999999")).status_code == 422
+
+
+async def test_v1_events_excludes_tombstoned_by_default(client, make_venue, make_event):
+    v = await make_venue()
+    await make_event(venue=v, artist="Juana Molina", date=D)
+    await make_event(venue=v, artist="Jessica Pratt", date=D, removed_at=datetime.utcnow())
+    data = (await client.get("/api/v1/events")).json()
+    assert [e["artist"] for e in data] == ["Juana Molina"]
+
+
+async def test_v1_events_include_removed_exposes_tombstones(client, make_venue, make_event):
+    v = await make_venue()
+    await make_event(venue=v, artist="Juana Molina", date=D)
+    await make_event(venue=v, artist="Jessica Pratt", date=D, removed_at=datetime.utcnow())
+    data = (await client.get("/api/v1/events?include_removed=true")).json()
+    by_artist = {e["artist"]: e for e in data}
+    assert set(by_artist) == {"Juana Molina", "Jessica Pratt"}
+    # removed_at rides along: populated for tombstones (with an explicit UTC
+    # marker, like every timestamp), null for live rows.
+    assert by_artist["Jessica Pratt"]["removed_at"].endswith(("Z", "+00:00"))
+    assert by_artist["Juana Molina"]["removed_at"] is None
+
+
+async def test_v1_event_detail_returns_tombstoned_event_by_id(client, make_event):
+    """Downstream consumers mirror-and-decide: a known id must stay resolvable
+    after the venue delists the show."""
+    e = await make_event(artist="Jessica Pratt", date=D, removed_at=datetime.utcnow())
+    resp = await client.get(f"/api/v1/events/{e.id}")
+    assert resp.status_code == 200
+    assert resp.json()["removed_at"] is not None
 
 
 async def test_v1_venues_ordered_by_city(client, make_venue):

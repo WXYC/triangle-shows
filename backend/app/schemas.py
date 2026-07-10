@@ -72,6 +72,11 @@ class EventResponse(BaseModel):
     source: str
     # Last-modified timestamp; changes only when a scrape actually modifies the row.
     updated_at: Optional[UTCDateTime] = None
+    # Soft tombstone: when the venue stopped advertising this event; null for live
+    # rows. List endpoints exclude tombstoned events unless include_removed=true;
+    # the detail endpoint always resolves them by id. Observation, not
+    # interpretation — status is never inferred from a delisting.
+    removed_at: Optional[UTCDateTime] = None
 
     # Denormalized venue fields — joined in the query so clients don't need
     # a separate /api/venues request to display venue info alongside events

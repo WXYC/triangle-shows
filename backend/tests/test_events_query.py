@@ -4,7 +4,7 @@ These lock in the de-duplication behavior that previously lived inline in the
 FullCalendar feed handler, so it can be relied on from every consumer.
 """
 
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 from app.services.events_query import query_events
 from conftest import DEFAULT_EVENT_DATE as D  # shared with the make_event factory default
@@ -162,6 +162,83 @@ async def test_filters_by_search_status_and_genre(session, make_venue, make_even
     assert [e.id for e in await query_events(session, search="molina")] == [match.id]
     assert [e.id for e in await query_events(session, status="on_sale")] == [match.id]
     assert [e.id for e in await query_events(session, genre="rock")] == [match.id]
+
+
+async def test_tombstoned_events_are_excluded_by_default(session, make_venue, make_event):
+    """removed_at is a soft tombstone: every list surface inherits the exclusion
+    because it lives here, in the shared query, as the default."""
+    v = await make_venue()
+    live = await make_event(venue=v, artist="Juana Molina", date=D)
+    await make_event(venue=v, artist="Jessica Pratt", date=D, removed_at=datetime.utcnow())
+    result = await query_events(session, start=D, end=D)
+    assert [e.id for e in result] == [live.id]
+
+
+async def test_include_removed_returns_tombstoned_rows(session, make_venue, make_event):
+    v = await make_venue()
+    live = await make_event(venue=v, artist="Juana Molina", date=D)
+    gone = await make_event(venue=v, artist="Jessica Pratt", date=D, removed_at=datetime.utcnow())
+    result = await query_events(session, start=D, end=D, include_removed=True)
+    assert {e.id for e in result} == {live.id, gone.id}
+
+
+async def test_dedup_tombstoned_record_never_displaces_live_record(session, make_venue, make_event):
+    """Liveness dominates completeness: with include_removed=true a richer tombstoned
+    record must not win the key — the consumer would see 'removed' for a show
+    that's still on."""
+    v1 = await make_venue(slug="cats-cradle")
+    v2 = await make_venue(slug="local-506")
+    live = await make_event(venue=v1, artist="Juana Molina", date=D)
+    await make_event(
+        venue=v2, artist="Juana Molina", date=D,
+        image_url="https://img", ticket_url="https://tix", price_min=15.0,
+        removed_at=datetime.utcnow(),
+    )
+    result = await query_events(session, start=D, end=D, include_removed=True)
+    assert [e.id for e in result] == [live.id]
+
+
+async def test_dedup_live_record_displaces_tombstoned_incumbent(session, make_venue, make_event):
+    """The converse direction: the tombstoned record is older (first-seen incumbent)
+    and no richer live record exists — a live record of any completeness must
+    still win the key."""
+    v1 = await make_venue(slug="cats-cradle")
+    v2 = await make_venue(slug="local-506")
+    # Tombstoned incumbent inserted first (lower id), even somewhat richer...
+    await make_event(
+        venue=v1, artist="Jessica Pratt", date=D,
+        ticket_url="https://tix", removed_at=datetime.utcnow(),
+    )
+    # ...sparser live record from another venue at a score the old rules wouldn't
+    # promote (no strictly-greater completeness).
+    live = await make_event(venue=v2, artist="Jessica Pratt", date=D)
+    result = await query_events(session, start=D, end=D, include_removed=True)
+    assert [e.id for e in result] == [live.id]
+
+
+async def test_dedup_live_rename_wins_over_same_venue_tombstone(session, make_venue, make_event):
+    """The rename shape stable identity (#8) makes routine: a renamed event gets a new
+    hash, so the venue holds an old tombstoned row and a live row for the same show.
+    The first-venue invariant must not shield the tombstone."""
+    v = await make_venue()
+    await make_event(
+        venue=v, artist="Chuquimamani-Condori", name="Chuquimamani-Condori", date=D,
+        ticket_url="https://tix", removed_at=datetime.utcnow(),
+    )
+    live = await make_event(
+        venue=v, artist="Chuquimamani-Condori", name="Chuquimamani-Condori (rescheduled)", date=D,
+    )
+    result = await query_events(session, start=D, end=D, include_removed=True)
+    assert [e.id for e in result] == [live.id]
+
+
+async def test_dedup_tombstoned_only_key_still_surfaces(session, make_venue, make_event):
+    """A key with no live record at all keeps its (best) tombstoned record —
+    mirror-style consumers must still see that the show was removed."""
+    v = await make_venue()
+    gone = await make_event(venue=v, artist="Jessica Pratt", date=D, removed_at=datetime.utcnow())
+    result = await query_events(session, start=D, end=D, include_removed=True)
+    assert [e.id for e in result] == [gone.id]
 
 
 async def test_search_treats_like_wildcards_literally(session, make_venue, make_event):

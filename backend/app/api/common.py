@@ -11,8 +11,7 @@ Requires: async PostgreSQL session (app.database), ORM models (app.models), resp
 schemas (app.schemas).
 """
 import os
-import zoneinfo
-from datetime import date, datetime
+from datetime import date
 from typing import Optional
 
 from fastapi import Depends, HTTPException, Path
@@ -21,22 +20,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
 from app.database import get_session
+# Re-exported for the API layer: routes and feeds import these from here, keeping
+# app.market_time an implementation detail shared with the scrape manager.
+from app.market_time import TRIANGLE_TZ, today_in_triangle  # noqa: F401
 from app.models import Event, ScrapeLog, Venue
 from app.schemas import EventResponse, HealthResponse
 
 # PostgreSQL int4 bounds for integer path params: out-of-range ids must 422 at
 # validation instead of surfacing as an asyncpg error (HTTP 500) at query time.
 MAX_INT4 = 2**31 - 1
-
-# All venues are in the Research Triangle, so "today" for date windows means the
-# Triangle's calendar date — not the server's, which runs in UTC in production and
-# rolls over at 8 PM Eastern.
-TRIANGLE_TZ = zoneinfo.ZoneInfo("America/New_York")
-
-
-def today_in_triangle() -> date:
-    """Current calendar date in the venues' market timezone (America/New_York)."""
-    return datetime.now(TRIANGLE_TZ).date()
 
 
 # --- Query-parameter helpers ---

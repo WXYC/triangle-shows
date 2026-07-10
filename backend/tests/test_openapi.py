@@ -22,6 +22,14 @@ def test_openapi_exposes_v1_paths_and_neutral_schemas():
     # updated_at is part of the neutral event contract (used by an incremental sync).
     assert "updated_at" in schemas["EventResponse"]["properties"]
 
+    # removed_at (soft tombstone) is part of the contract too, and the opt-in to see
+    # tombstoned rows exists on the v1 list only — deprecated surfaces don't grow it.
+    assert "removed_at" in schemas["EventResponse"]["properties"]
+    v1_params = {p["name"] for p in paths["/api/v1/events"]["get"]["parameters"]}
+    assert "include_removed" in v1_params
+    deprecated_params = {p["name"] for p in paths["/api/events"]["get"]["parameters"]}
+    assert "include_removed" not in deprecated_params
+
     # Internal scraping machinery stays out of the public venue contract.
     assert "scraper_type" not in schemas["VenueResponse"]["properties"]
 

@@ -62,16 +62,14 @@ def _completeness_score(event: Event) -> int:
     return bool(event.image_url) + bool(event.ticket_url) + (event.price_min is not None)
 
 
-def dedupe_cross_venue(events: Sequence[Event]) -> list[Event]:
-    """Collapse events sharing a (date, artist/name) key, keeping the best record.
+def _pick_winners(events: Sequence[Event]) -> dict[tuple, Event]:
+    """One winner per dedupe key, among records of equal liveness.
 
     The first record for a key wins by default; a record from a venue *other than the
     first-seen venue* replaces it when strictly more complete. Comparing against the
     first-seen venue (not the current winner) keeps the invariant that records from
     the first venue can only ever contribute their first-seen row — later, richer
-    rows from that same venue never displace a cross-venue winner. Pass events in a
-    stable order (``query_events`` orders by date then id) so the outcome is
-    deterministic. Input order is otherwise preserved in the output.
+    rows from that same venue never displace a cross-venue winner.
     """
     best: dict[tuple, Event] = {}
     best_score: dict[tuple, int] = {}
@@ -86,7 +84,28 @@ def dedupe_cross_venue(events: Sequence[Event]) -> list[Event]:
         elif event.venue_id != first_venue[key] and score > best_score[key]:
             best[key] = event
             best_score[key] = score
-    kept = {ev.id for ev in best.values()}
+    return best
+
+
+def dedupe_cross_venue(events: Sequence[Event]) -> list[Event]:
+    """Collapse events sharing a (date, normalized artist/name) key, keeping the best.
+
+    Liveness dominates completeness: records are partitioned into live and tombstoned
+    (``removed_at`` set), winners are picked within each partition by the completeness
+    rules in ``_pick_winners``, and a tombstoned winner surfaces only for keys with no
+    live record at all. So a tombstoned record can never displace a live one however
+    rich it is, and a live record always beats a tombstoned incumbent regardless of
+    score or venue — otherwise a consumer passing ``include_removed=true`` would see
+    "removed" for a show that is still on (the same-venue rename shape makes this
+    routine: old row tombstones, new row lives, both share the key). Pass events in a
+    stable order (``query_events`` orders by date then id) so the outcome is
+    deterministic. Input order is otherwise preserved in the output.
+    """
+    live_best = _pick_winners([e for e in events if e.removed_at is None])
+    tombstoned_best = _pick_winners(
+        [e for e in events if e.removed_at is not None and _dedupe_key(e) not in live_best]
+    )
+    kept = {ev.id for ev in live_best.values()} | {ev.id for ev in tombstoned_best.values()}
     return [e for e in events if e.id in kept]
 
 
@@ -102,6 +121,7 @@ async def query_events(
     genre: Optional[str] = None,
     status: Optional[str] = None,
     dedup: bool = True,
+    include_removed: bool = False,
 ) -> list[Event]:
     """Fetch events (with venue eagerly loaded), filtered and optionally de-duplicated.
 
@@ -118,6 +138,11 @@ async def query_events(
     matching row (e.g. the iCal feed, which lists all venue offerings).
     """
     conditions = []
+    # Soft-tombstoned events (removed_at set: the venue no longer advertises them)
+    # are excluded by default so every list surface inherits the exclusion; pass
+    # include_removed=True to see them (mirror-style consumers, /api/v1 opt-out).
+    if not include_removed:
+        conditions.append(Event.removed_at.is_(None))
     if start is not None:
         conditions.append(Event.date >= start)
     if end is not None:

@@ -14,11 +14,12 @@ import logging
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.models import Venue, Event, ScrapeLog
+from app.market_time import today_in_triangle
+from app.models import Venue, Event, EventMissState, ScrapeLog
 from app.scrapers.base import BaseScraper, ScrapedEvent
 from app.scrapers.ticketmaster import TicketmasterScraper
 
@@ -112,6 +113,9 @@ class ScrapeManager:
 
             scraped_events = await scraper.scrape()
             created, updated = await self._upsert_events(venue_id, scraped_events)
+            # Same transaction as the upsert: a crash below rolls everything back,
+            # so misses can never be recorded for a scrape that never logged success.
+            await self._apply_snapshot_diff(venue_id, scraped_events)
 
             log.status = "success"
             log.events_found = len(scraped_events)
@@ -229,6 +233,89 @@ class ScrapeManager:
 
         await self.session.flush()
         return created, updated
+
+    # --- Vanished-event snapshot diff ---
+
+    async def _apply_snapshot_diff(self, venue_id: int, scraped_events: list[ScrapedEvent]) -> None:
+        """Diff a successful scrape's snapshot against the venue's stored events.
+
+        Treats the scrape as a full snapshot of the venue's listing window: stored
+        events absent from it accrue misses, and two misses on distinct Triangle
+        calendar days stamp the soft tombstone (Event.removed_at). An empty snapshot
+        counts for nothing — zero events from an active venue almost certainly means
+        a broken scraper, not a mass cancellation (the manager logs 'success' for
+        zero-event scrapes, so this gate cannot live on ScrapeLog status).
+        """
+        if not scraped_events:
+            return
+
+        today = today_in_triangle()
+        snapshot_hashes = {se.hash for se in scraped_events}
+        # Horizon guard: never mark events beyond this scrape's visible window as
+        # missing. Per-scrape by design — a truncated page lowers the max-seen date.
+        horizon = max(se.date for se in scraped_events)
+
+        # Any appearance resets the event's miss streak (misses must be consecutive),
+        # and a tombstoned event that reappears comes back to life. Clearing removed_at
+        # goes through the ORM row so its onupdate stamps updated_at — reappearance is
+        # a client-visible change, unlike the miss bookkeeping below.
+        appeared_ids = select(Event.id).where(
+            Event.venue_id == venue_id, Event.hash.in_(snapshot_hashes)
+        )
+        await self.session.execute(
+            delete(EventMissState).where(EventMissState.event_id.in_(appeared_ids))
+        )
+        relisted = await self.session.execute(
+            select(Event).where(
+                Event.venue_id == venue_id,
+                Event.hash.in_(snapshot_hashes),
+                Event.removed_at.is_not(None),
+            )
+        )
+        for event in relisted.scalars():
+            event.removed_at = None
+
+        result = await self.session.execute(
+            select(Event).where(
+                Event.venue_id == venue_id,
+                Event.date >= today,
+                Event.date <= horizon,
+                Event.hash.not_in(snapshot_hashes),
+            )
+        )
+        missing = result.scalars().all()
+        if not missing:
+            return
+
+        states = {
+            s.event_id: s
+            for s in (
+                await self.session.execute(
+                    select(EventMissState).where(
+                        EventMissState.event_id.in_([e.id for e in missing])
+                    )
+                )
+            ).scalars()
+        }
+        for event in missing:
+            state = states.get(event.id)
+            if state is None:
+                state = EventMissState(event_id=event.id, miss_count=1, last_miss_date=today)
+                self.session.add(state)
+            elif state.last_miss_date == today:
+                # At most one miss per Triangle calendar day: indie venues scrape
+                # 3x/day, and one degraded-but-nonzero day must never tombstone.
+                continue
+            else:
+                state.miss_count += 1
+                state.last_miss_date = today
+            # Delisted across two distinct scrape days: stamp the tombstone. Never
+            # re-stamp (updated_at must not churn), never touch status — removed_at
+            # records "the venue no longer advertises this", nothing more.
+            if state.miss_count >= 2 and event.removed_at is None:
+                event.removed_at = datetime.utcnow()
+
+        await self.session.flush()
 
     # --- Bulk scrape entry points ---
 
