@@ -46,7 +46,10 @@ def normalize_source_url(url: Optional[str]) -> Optional[str]:
     identity in a parameter; a trailing slash is insignificant. Returns None for
     missing/blank input — no URL means no URL-tier identity.
     """
-    if url is None or not url.strip():
+    # Non-str inputs (malformed JSON-LD objects that slipped past a scraper)
+    # carry no URL identity; failing soft here keeps one bad listing from
+    # killing an entire venue's scrape cycle.
+    if not isinstance(url, str) or not url.strip():
         return None
     parts = urlsplit(url.strip())
     path = parts.path.rstrip("/") or "/"

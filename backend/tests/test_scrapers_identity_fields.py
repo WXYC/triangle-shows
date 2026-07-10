@@ -193,3 +193,12 @@ def test_tribe_detail_href_is_fallback_when_jsonld_lacks_url():
     data = {"@type": "Event", "name": "Jessica Pratt", "startDate": "2026-09-01"}
     parsed = _tribe_scraper()._parse_jsonld_event(data, source_url="https://venue.com/event/jessica-pratt/")
     assert parsed.source_url == "https://venue.com/event/jessica-pratt/"
+
+
+def test_scraped_event_coerces_non_string_source_url_to_none():
+    # Malformed JSON-LD can put a dict/list where a URL string belongs (e.g.
+    # "url": {"@id": ...}); it must not survive into identity derivation or a
+    # varchar column bind.
+    assert _event(source_url={"@id": "https://x"}).source_url is None
+    assert _event(source_url=["https://x"]).source_url is None
+    assert _event(source_url="https://x").source_url == "https://x"
