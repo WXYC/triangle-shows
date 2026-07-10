@@ -30,6 +30,9 @@ def test_openapi_exposes_v1_paths_and_neutral_schemas():
     deprecated_params = {p["name"] for p in paths["/api/events"]["get"]["parameters"]}
     assert "include_removed" not in deprecated_params
 
+    # source_key is the stable per-event identity contract (issue #8).
+    assert "source_key" in schemas["EventResponse"]["properties"]
+
     # Internal scraping machinery stays out of the public venue contract.
     assert "scraper_type" not in schemas["VenueResponse"]["properties"]
 
