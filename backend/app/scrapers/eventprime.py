@@ -19,6 +19,7 @@ import httpx
 from bs4 import BeautifulSoup
 
 from app.scrapers.base import BaseScraper, ScrapedEvent, BROWSER_HEADERS
+from app.scrapers.identity import UrlIdentityVerdict
 
 # --- Module-level setup ---
 logger = logging.getLogger(__name__)
@@ -40,6 +41,9 @@ class EventPrimeScraper(BaseScraper):
 
     Used by: Kings
     """
+
+    # Audit (issue #8): source_url is the per-event detail link from the listing row (EventPrime per-event page).
+    URL_IDENTITY = UrlIdentityVerdict.TRUSTED
 
     async def scrape(self) -> list[ScrapedEvent]:
         """Fetch the Kings homepage, parse the Shows table, and return deduplicated events."""

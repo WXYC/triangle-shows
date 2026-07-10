@@ -14,6 +14,7 @@ from typing import Optional
 import httpx
 
 from app.scrapers.base import BaseScraper, ScrapedEvent, BROWSER_HEADERS
+from app.scrapers.identity import UrlIdentityVerdict
 
 # --- Module-level setup ---
 
@@ -28,6 +29,9 @@ class SquarespaceScraper(BaseScraper):
     Squarespace sites expose /events?format=json which returns event data.
     Used by: Neptune's Parlour, Moon Room
     """
+
+    # Audit (issue #8): fullUrl is regenerated from the title when an event is renamed - not rename-stable, so URLs cannot anchor identity.
+    URL_IDENTITY = UrlIdentityVerdict.HASH_FALLBACK
 
     async def scrape(self) -> list[ScrapedEvent]:
         """Fetch all upcoming events from the configured Squarespace events feed."""

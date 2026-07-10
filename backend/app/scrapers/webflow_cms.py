@@ -15,6 +15,7 @@ import httpx
 from bs4 import BeautifulSoup
 
 from app.scrapers.base import BaseScraper, ScrapedEvent, BROWSER_HEADERS
+from app.scrapers.identity import UrlIdentityVerdict
 
 # --- Module Setup ---
 logger = logging.getLogger(__name__)
@@ -37,6 +38,9 @@ class WebflowCMSScraper(BaseScraper):
         shows_path     - path prefix for event pages (default: /shows/)
         date_format    - strptime format string (default: %B %d, %Y)
     """
+
+    # Audit (issue #8): source_url is the ticket link, which is not guaranteed event-unique across a venue's listings.
+    URL_IDENTITY = UrlIdentityVerdict.HASH_FALLBACK
 
     async def scrape(self) -> list[ScrapedEvent]:
         """Fetch the venue's Webflow page and extract events from the CMS collection markup."""

@@ -21,6 +21,7 @@ import httpx
 from bs4 import BeautifulSoup
 
 from app.scrapers.base import BaseScraper, ScrapedEvent, BROWSER_HEADERS
+from app.scrapers.identity import UrlIdentityVerdict
 
 # --- Module-level setup ---
 
@@ -34,6 +35,9 @@ class TribeEventsScraper(BaseScraper):
 
     Used by: The Cave
     """
+
+    # Audit (issue #8): source_url is the event's own JSON-LD/detail-page url; The Events Calendar emits occurrence-specific URLs (date embedded for recurring events).
+    URL_IDENTITY = UrlIdentityVerdict.TRUSTED
 
     async def scrape(self) -> list[ScrapedEvent]:
         url = self.config.get("url", "")

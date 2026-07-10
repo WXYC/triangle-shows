@@ -14,6 +14,7 @@ from typing import Optional
 import httpx
 
 from app.scrapers.base import BaseScraper, ScrapedEvent, BROWSER_HEADERS
+from app.scrapers.identity import UrlIdentityVerdict
 
 # --- Module Setup ---
 
@@ -49,6 +50,9 @@ class VenuePilotScraper(BaseScraper):
 
     Used by: Haw River Ballroom
     """
+
+    # Audit (issue #8): source_url is ticketsUrl (not guaranteed event-unique); identity comes from external_id, the VenuePilot event id.
+    URL_IDENTITY = UrlIdentityVerdict.HASH_FALLBACK
 
     async def scrape(self) -> list[ScrapedEvent]:
         """Fetch all upcoming events for this venue from the VenuePilot GraphQL API."""
@@ -100,6 +104,11 @@ class VenuePilotScraper(BaseScraper):
             if show_time == doors_time:
                 doors_time = None
 
+            # GraphQL can return id as an int, a string, or null; null must stay
+            # None (str(None) would mint the shared identity key "None").
+            raw_id = item.get("id")
+            external_id = str(raw_id) if raw_id is not None else None
+
             support = (item.get("support") or "").strip() or None
             image_url = item.get("highlightedImage") or None
             ticket_url = item.get("ticketsUrl") or None
@@ -113,7 +122,7 @@ class VenuePilotScraper(BaseScraper):
                 date=event_date,
                 venue_slug=self.venue_slug,
                 source="venuepilot",
-                external_id=str(item.get("id", "")),
+                external_id=external_id,
                 artist=name,
                 support_artists=support,
                 doors_time=doors_time,

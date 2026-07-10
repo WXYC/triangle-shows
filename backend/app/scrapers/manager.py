@@ -25,6 +25,7 @@ from app.config import settings
 from app.market_time import today_in_triangle
 from app.models import Venue, Event, EventMissState, ScrapeLog
 from app.scrapers.base import BaseScraper, ScrapedEvent
+from app.scrapers.identity import scraper_class
 from app.scrapers.ticketmaster import TicketmasterScraper
 
 logger = logging.getLogger(__name__)
@@ -63,44 +64,14 @@ class ScrapeManager:
                 api_key=settings.TICKETMASTER_API_KEY,
                 config=venue.scraper_config,
             )
-        # Remaining scraper types are imported lazily to avoid circular imports
-        # and to keep startup time fast when only a subset of scrapers are used.
-        elif venue.scraper_type == "rhp_events":
-            from app.scrapers.rhp_events import RHPEventsScraper
-            return RHPEventsScraper(venue.slug, venue.scraper_config)
-        elif venue.scraper_type == "tribe_events":
-            from app.scrapers.tribe_events import TribeEventsScraper
-            return TribeEventsScraper(venue.slug, venue.scraper_config)
-        elif venue.scraper_type == "squarespace":
-            from app.scrapers.squarespace import SquarespaceScraper
-            return SquarespaceScraper(venue.slug, venue.scraper_config)
-        elif venue.scraper_type == "eventprime":
-            from app.scrapers.eventprime import EventPrimeScraper
-            return EventPrimeScraper(venue.slug, venue.scraper_config)
-        elif venue.scraper_type == "motorco":
-            from app.scrapers.motorco import MotorcoScraper
-            return MotorcoScraper(venue.slug, venue.scraper_config)
-        elif venue.scraper_type == "carolina_theatre":
-            from app.scrapers.carolina_theatre import CarolinaTheatreScraper
-            return CarolinaTheatreScraper(venue.slug, venue.scraper_config)
-        elif venue.scraper_type == "venuepilot":
-            from app.scrapers.venuepilot import VenuePilotScraper
-            return VenuePilotScraper(venue.slug, venue.scraper_config)
-        elif venue.scraper_type == "koka_booth":
-            from app.scrapers.koka_booth import KokaBoothScraper
-            return KokaBoothScraper(venue.slug, venue.scraper_config)
-        elif venue.scraper_type == "mec":
-            from app.scrapers.mec import MECScraper
-            return MECScraper(venue.slug, venue.scraper_config)
-        elif venue.scraper_type == "webflow_cms":
-            from app.scrapers.webflow_cms import WebflowCMSScraper
-            return WebflowCMSScraper(venue.slug, venue.scraper_config)
-        elif venue.scraper_type == "tickpick_organizer":
-            from app.scrapers.tickpick_organizer import TickPickOrganizerScraper
-            return TickPickOrganizerScraper(venue.slug, venue.scraper_config)
-        else:
+        # All other scraper types dispatch through the canonical registry in
+        # identity.py (which also carries the per-scraper identity verdicts);
+        # classes are resolved lazily so scraper deps load only when used.
+        cls = scraper_class(venue.scraper_type)
+        if cls is None:
             logger.warning(f"Unknown scraper type: {venue.scraper_type}")
             return None
+        return cls(venue.slug, venue.scraper_config)
 
     # --- Per-venue scrape logic ---
 

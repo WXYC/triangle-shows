@@ -17,6 +17,7 @@ import httpx
 from bs4 import BeautifulSoup
 
 from app.scrapers.base import BaseScraper, ScrapedEvent, BROWSER_HEADERS
+from app.scrapers.identity import UrlIdentityVerdict
 
 # --- Module-level setup ---
 logger = logging.getLogger(__name__)
@@ -36,6 +37,9 @@ class MECScraper(BaseScraper):
 
     Used by: Shadowbox Studio
     """
+
+    # Audit (issue #8): source_url is the event's own JSON-LD url (per-event detail page); MEC/WordPress slugs persist across renames and one URL covers one event-date.
+    URL_IDENTITY = UrlIdentityVerdict.TRUSTED
 
     # CSS selectors for event links on MEC listing pages.
     # Listed from most specific to least; we stop at the first one that matches.
@@ -65,8 +69,10 @@ class MECScraper(BaseScraper):
             resp.raise_for_status()
             soup = BeautifulSoup(resp.text, "lxml")
 
-            # Try JSON-LD on listing page first
-            for ev in self._extract_jsonld_events(soup, source_url=url):
+            # Try JSON-LD on listing page first. The listing URL is shared by every
+            # event on the page, so it is NOT an identity fallback (issue #8) —
+            # only a ticket-link fallback.
+            for ev in self._extract_jsonld_events(soup, page_url=url, page_url_is_event=False):
                 if ev.hash not in seen_hashes:
                     seen_hashes.add(ev.hash)
                     events.append(ev)
@@ -88,7 +94,7 @@ class MECScraper(BaseScraper):
                     detail_resp = await client.get(href)
                     detail_resp.raise_for_status()
                     detail_soup = BeautifulSoup(detail_resp.text, "lxml")
-                    for ev in self._extract_jsonld_events(detail_soup, source_url=href):
+                    for ev in self._extract_jsonld_events(detail_soup, page_url=href, page_url_is_event=True):
                         if ev.hash not in seen_hashes:
                             seen_hashes.add(ev.hash)
                             events.append(ev)
@@ -110,8 +116,15 @@ class MECScraper(BaseScraper):
     # JSON-LD extraction (same pattern as TribeEventsScraper)
     # ------------------------------------------------------------------
 
-    def _extract_jsonld_events(self, soup: BeautifulSoup, source_url: str = "") -> list[ScrapedEvent]:
-        """Find all <script type='application/ld+json'> blocks and parse any Event items."""
+    def _extract_jsonld_events(
+        self, soup: BeautifulSoup, page_url: str = "", page_url_is_event: bool = False
+    ) -> list[ScrapedEvent]:
+        """Find all <script type='application/ld+json'> blocks and parse any Event items.
+
+        page_url_is_event declares whether page_url identifies a single event (a
+        detail page) or is shared by many (a listing page); only the former may
+        serve as a source_url fallback.
+        """
         events = []
         for script in soup.find_all("script", type="application/ld+json"):
             try:
@@ -129,12 +142,14 @@ class MECScraper(BaseScraper):
                         continue
                 elif item_type not in ("Event", "MusicEvent"):
                     continue
-                parsed = self._parse_jsonld_event(item, source_url)
+                parsed = self._parse_jsonld_event(item, page_url, page_url_is_event)
                 if parsed:
                     events.append(parsed)
         return events
 
-    def _parse_jsonld_event(self, data: dict, source_url: str = "") -> Optional[ScrapedEvent]:
+    def _parse_jsonld_event(
+        self, data: dict, page_url: str = "", page_url_is_event: bool = False
+    ) -> Optional[ScrapedEvent]:
         """Convert a single schema.org Event dict into a ScrapedEvent; returns None on failure."""
         try:
             name = data.get("name", "").strip()
@@ -228,13 +243,16 @@ class MECScraper(BaseScraper):
                 artist=artist,
                 support_artists=", ".join(support) if support else None,
                 show_time=show_time,
-                ticket_url=ticket_url or source_url or None,
+                ticket_url=ticket_url or page_url or None,
                 price_min=price_min,
                 price_max=price_max,
                 image_url=image_url,
                 status=status,
                 description=description,
-                source_url=source_url or data.get("url") or None,
+                # Identity: the event's own JSON-LD url first; a page URL only when
+                # it's a per-event detail page. A shared listing URL would alias
+                # every event on the page under one identity (issue #8).
+                source_url=data.get("url") or (page_url if page_url_is_event else None) or None,
             )
         except Exception as e:
             logger.warning(f"[MEC] Failed to parse JSON-LD event: {e}")
