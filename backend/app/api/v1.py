@@ -40,6 +40,18 @@ from app.services.events_query import query_events
 
 router = APIRouter(prefix="/api/v1", tags=["v1"])
 
+# "Chapel Hill-Carrboro" is a display grouping, not a municipality — venues.city holds
+# real towns. The v1 city param keeps accepting the grouping as an alias for both
+# municipalities so pre-existing links keep working. Expansion happens per CSV token
+# and only at this surface; stored rows never carry the grouping label.
+CITY_ALIASES = {"Chapel Hill-Carrboro": ("Chapel Hill", "Carrboro")}
+
+
+def _expand_city_aliases(cities: Optional[list[str]]) -> Optional[list[str]]:
+    if cities is None:
+        return None
+    return [c for token in cities for c in CITY_ALIASES.get(token, (token,))]
+
 
 # --- Endpoints ---
 
@@ -75,7 +87,7 @@ async def list_events(
         session,
         start=start,
         end=end,
-        cities=split_csv(city),
+        cities=_expand_city_aliases(split_csv(city)),
         sizes=split_csv(size),
         venue_slugs=split_csv(venue),
         search=search,

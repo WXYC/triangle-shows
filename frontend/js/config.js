@@ -205,6 +205,7 @@ document.addEventListener("DOMContentLoaded", applySiteConfig);
 // border = chip border/text color; activeBg = subtle tint for active state
 const CITY_COLORS = {
   Raleigh:                { border: "#a83850", activeBg: "rgba(168,56,80,0.16)" },    // ruby
+  Cary:                   { border: "#b08030", activeBg: "rgba(176,128,48,0.16)" },   // topaz
   Durham:                 { border: "#2a6098", activeBg: "rgba(42,96,152,0.16)" },    // sapphire
   "Chapel Hill-Carrboro": { border: "#2a7a50", activeBg: "rgba(42,122,80,0.16)" },   // emerald
   Saxapahaw:              { border: "#8a30a8", activeBg: "rgba(138,48,168,0.16)" },   // orchid

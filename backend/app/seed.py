@@ -38,7 +38,7 @@ VENUES = [
     {
         "name": "Koka Booth Amphitheatre",
         "slug": "koka-booth",
-        "city": "Raleigh",
+        "city": "Cary",
         "capacity": 7000,
         "size_category": "large",
         "website": "https://www.boothamphitheatre.com/",
@@ -94,7 +94,7 @@ VENUES = [
     {
         "name": "Cat's Cradle",
         "slug": "cats-cradle",
-        "city": "Chapel Hill-Carrboro",
+        "city": "Carrboro",
         "capacity": 750,
         "size_category": "medium",
         "website": "https://catscradle.com/",
@@ -117,7 +117,7 @@ VENUES = [
     {
         "name": "Local 506",
         "slug": "local-506",
-        "city": "Chapel Hill-Carrboro",
+        "city": "Chapel Hill",
         "capacity": 250,
         "size_category": "small",
         "website": "https://local506.com/",
@@ -150,7 +150,7 @@ VENUES = [
     {
         "name": "Cat's Cradle Back Room",
         "slug": "cats-cradle-back-room",
-        "city": "Chapel Hill-Carrboro",
+        "city": "Carrboro",
         "capacity": None,
         "size_category": "small",
         "website": "https://catscradle.com/",
@@ -162,7 +162,7 @@ VENUES = [
     {
         "name": "The Cave",
         "slug": "the-cave",
-        "city": "Chapel Hill-Carrboro",
+        "city": "Chapel Hill",
         "capacity": 100,
         "size_category": "small",
         "website": "https://www.caverntavern.com/",

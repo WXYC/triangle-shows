@@ -85,6 +85,23 @@ async def test_v1_events_filters(client, make_venue, make_event):
     assert [e["artist"] for e in (await client.get("/api/v1/events?search=pratt")).json()] == ["Jessica Pratt"]
 
 
+async def test_v1_city_alias_expands_to_both_municipalities(client, make_venue, make_event):
+    carrboro = await make_venue(slug="cats-cradle", city="Carrboro")
+    chapel_hill = await make_venue(slug="local-506", city="Chapel Hill")
+    durham = await make_venue(slug="the-pinhook", city="Durham")
+    await make_event(venue=carrboro, artist="Juana Molina", date=D)
+    await make_event(venue=chapel_hill, artist="Jessica Pratt", date=D)
+    await make_event(venue=durham, artist="Chuquimamani-Condori", date=D)
+    # "Chapel Hill-Carrboro" is a display grouping, not a stored city value; the v1
+    # param keeps accepting it as an alias for both municipalities so old links work.
+    data = (await client.get("/api/v1/events?city=Chapel Hill-Carrboro")).json()
+    assert {e["artist"] for e in data} == {"Juana Molina", "Jessica Pratt"}
+    # The param is comma-separated and the alias expands per token, so it composes
+    # with plain municipalities.
+    mixed = (await client.get("/api/v1/events?city=Chapel Hill-Carrboro,Durham")).json()
+    assert {e["artist"] for e in mixed} == {"Juana Molina", "Jessica Pratt", "Chuquimamani-Condori"}
+
+
 async def test_v1_empty_filter_value_matches_nothing(client, make_event):
     # A filter that is present but contains no usable segments (e.g. "?venue=,,") selects
     # nothing, rather than being silently dropped so every event is returned.
