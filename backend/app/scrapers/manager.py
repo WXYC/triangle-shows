@@ -1,22 +1,23 @@
 """
-Scrape orchestrator: runs all venue scrapers, deduplicates results by hash, and
-upserts events + scrape logs into the database.
+Scrape orchestrator: runs all venue scrapers, deduplicates results by hash,
+upserts events + scrape logs, and diffs each venue's snapshot against stored
+events to maintain the vanished-event signal (Event.removed_at tombstones and
+their event_miss_state streak bookkeeping).
 
 Role: Triggered by POST /api/scrape (called by the scheduler every 6 hours or
 by Cloud Scheduler). Sits between the individual scrapers and the database —
-it owns the fan-out, error isolation, and upsert logic.
+it owns the fan-out, error isolation, the upsert, the snapshot diff, and the
+per-venue write serialization (advisory lock).
 Requires: TICKETMASTER_API_KEY (via app.config.settings), async PostgreSQL
 session, and all scraper modules in app.scrapers/.
 """
 
 # --- Imports ---
-import asyncio
 import logging
-from collections import defaultdict
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -40,14 +41,6 @@ MISS_STREAK_MAX_GAP_DAYS = 7
 # absolute floor keeps small venues working: a 3-show calendar that really drops
 # 2 shows still records normally.
 MASS_DISAPPEARANCE_MIN = 5
-
-# Serializes the DB write phase (upsert + snapshot diff + commit) per venue. The
-# startup scrape task, the APScheduler crons, and POST /api/scrape all run on one
-# event loop, and overlapping writes for the same venue could otherwise deadlock on
-# unordered row updates or roll each other back mid-diff. Scraping (the slow network
-# part) stays outside the lock. Cross-process overlap is not covered here — the
-# miss-state insert's ON CONFLICT handles its one cross-process hazard.
-_venue_write_locks: dict[int, asyncio.Lock] = defaultdict(asyncio.Lock)
 
 
 # --- ScrapeManager ---
@@ -136,19 +129,32 @@ class ScrapeManager:
                 raise ValueError(f"No scraper available for {venue_slug}")
 
             scraped_events = await scraper.scrape()
-            async with _venue_write_locks[venue_id]:
-                created, updated = await self._upsert_events(venue_id, scraped_events)
-                # Same transaction as the upsert: a crash below rolls everything back,
-                # so misses can never be recorded for a scrape that never logged success.
-                tombstoned, relisted = await self._apply_snapshot_diff(venue_id, scraped_events)
 
-                log.status = "success"
-                log.events_found = len(scraped_events)
-                log.events_created = created
-                log.events_updated = updated
-                log.finished_at = datetime.utcnow()
-                log.duration_seconds = (log.finished_at - log.started_at).total_seconds()
-                await self.session.commit()
+            # Serialize the write phase (upsert + snapshot diff + commit) per venue.
+            # Overlapping scrapes are real — the startup scrape task, APScheduler
+            # crons, POST /api/scrape, and during a rolling deploy a whole second
+            # process — and unserialized they can deadlock on unordered row updates
+            # or strand each other's miss-state writes mid-diff. A transaction-scoped
+            # advisory lock covers coroutines and processes alike and releases itself
+            # at commit/rollback, even if the connection dies. hashtext(database)
+            # partitions the cluster-global lock space so parallel test databases
+            # (pytest-xdist) never contend with each other. The slow network fetch
+            # above deliberately stays outside the lock.
+            await self.session.execute(
+                select(func.pg_advisory_xact_lock(func.hashtext(func.current_database()), venue_id))
+            )
+            created, updated = await self._upsert_events(venue_id, scraped_events)
+            # Same transaction as the upsert: a crash below rolls everything back,
+            # so misses can never be recorded for a scrape that never logged success.
+            tombstoned, relisted = await self._apply_snapshot_diff(venue_id, scraped_events)
+
+            log.status = "success"
+            log.events_found = len(scraped_events)
+            log.events_created = created
+            log.events_updated = updated
+            log.finished_at = datetime.utcnow()
+            log.duration_seconds = (log.finished_at - log.started_at).total_seconds()
+            await self.session.commit()
 
             logger.info(
                 f"[{venue_slug}] Scrape complete: {len(scraped_events)} found, "
@@ -384,10 +390,9 @@ class ScrapeManager:
                 tombstoned += 1
 
         if first_misses:
-            # ON CONFLICT DO NOTHING: a concurrent scrape of the same venue in another
-            # process may have inserted the same row; the loser must not blow up its
-            # whole transaction on the primary key. In-process overlap is already
-            # serialized by the per-venue write lock in scrape_venue.
+            # ON CONFLICT DO NOTHING: belt-and-braces under the per-venue advisory
+            # lock in scrape_venue — even if a same-venue writer ever slips past the
+            # serialization, a duplicate first-miss must not blow up the transaction.
             await self.session.execute(
                 pg_insert(EventMissState)
                 .values([{"event_id": eid, "last_miss_date": today} for eid in first_misses])
