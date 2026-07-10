@@ -8,10 +8,11 @@ The versioned `/api/v1` endpoints (`/api/v1/events`, `/api/v1/events/{id}`, `/ap
 
 ## API contracts
 
-Two deliberate contract choices, called out so they aren't mistaken for bugs:
+Three deliberate contract choices, called out so they aren't mistaken for bugs:
 
 - **Presentation is the client's job.** `/api/v1/events` returns neutral event resources — no `title`, `backgroundColor`, or `extendedProps`, and no formatted price or 12-hour time strings. The web client builds the FullCalendar shape from those resources in `frontend/js/fullcalendar-adapter.js`. The old server-shaped `GET /api/events/fullcalendar` feed was removed once that logic moved client-side; any non-web consumer (e.g. iOS via the WXYC Backend-Service) builds its own presentation the same way.
 - **Calendar de-duplicates; the iCal feed does not.** The `/api/v1/events` and `/api/events` JSON surfaces cross-venue de-duplicate — when the same artist plays the same date at two venues, the record with the most complete metadata wins, so the calendar grid shows one tile per artist/date. `/feeds/events.ics` intentionally keeps every listing (it queries with `dedup=False`): a calendar *subscriber* should see each venue's offering rather than a collapsed view. This asymmetry is by design — don't "fix" one surface to match the other.
+- **Delisted events are soft-tombstoned, not deleted.** When an event a venue previously advertised goes missing from that venue's scrape snapshots on two distinct calendar days, the scrape diff stamps `removed_at` (see `app/scrapers/manager.py`). List surfaces exclude tombstoned events by default; `/api/v1/events?include_removed=true` opts in (mirror-style consumers should combine it with `dedup=false`), and the detail endpoint always resolves a tombstoned id. `removed_at` records "the venue no longer advertises this" — an observation with a ~1-day minimum latency and a day-of blind spot; `status` is never inferred from it, and the 7-day past-date cleanup remains the only thing that deletes rows.
 
 ## Running locally
 

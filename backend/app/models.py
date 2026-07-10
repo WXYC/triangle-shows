@@ -83,10 +83,35 @@ class Event(Base):
     source: Mapped[str] = mapped_column(String(50))  # scraper name that produced this event, e.g. "ticketmaster"
     source_url: Mapped[Optional[str]] = mapped_column(String(1000), nullable=True)
     hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)  # SHA-256 of key fields; used by manager.py to deduplicate on upsert
+    # Soft tombstone: when the venue stopped advertising this event (observation, not
+    # interpretation — status is never inferred from it, and nothing hard-deletes on it).
+    # Stamped/cleared by the scrape diff (manager.py), which also bumps updated_at.
+    removed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     venue: Mapped["Venue"] = relationship(back_populates="events")
+
+
+class EventMissState(Base):
+    """Consecutive-miss bookkeeping for the vanished-event diff (manager.py).
+
+    One row per event currently missing from its venue's scrape snapshots. Kept off
+    the events row on purpose: events.updated_at must move only for client-visible
+    changes, and any UPDATE to an events row would fire its onupdate stamp. No ORM
+    relationship to Event is declared — the diff reads and writes this table by
+    explicit query, and deletion is handled at the database level (the FK cascades
+    so the scheduler's Core delete(Event) cleanup can't hit FK violations).
+    """
+    __tablename__ = "event_miss_state"
+
+    event_id: Mapped[int] = mapped_column(
+        ForeignKey("events.id", ondelete="CASCADE"), primary_key=True
+    )
+    miss_count: Mapped[int] = mapped_column(Integer)
+    # Triangle calendar date (America/New_York) of the most recent miss; the diff
+    # records at most one miss per event per calendar day.
+    last_miss_date: Mapped[date] = mapped_column(Date)
 
 
 class ScrapeLog(Base):

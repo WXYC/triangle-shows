@@ -70,6 +70,7 @@ async def list_events(
     genre: Optional[str] = Query(None, description="Case-insensitive substring match against genre"),
     status: Optional[EventStatus] = Query(None, description="Ticket/availability status"),
     dedup: bool = Query(True, description="Collapse cross-venue duplicate listings; pass false for every stored row"),
+    include_removed: bool = Query(False, description="Include soft-removed events (removed_at set: the venue no longer advertises them). Delisting is an observation with ~1-day minimum latency and a day-of blind spot — consumers decide what it means; status is never inferred from it. Mirror-style consumers should also pass dedup=false to see every tombstoned row."),
     session: AsyncSession = Depends(get_session),
 ) -> list[EventResponse]:
     """All events matching the filters, cross-venue de-duplicated and ordered by date.
@@ -94,6 +95,7 @@ async def list_events(
         genre=genre,
         status=status.value if status else None,
         dedup=dedup,
+        include_removed=include_removed,
     )
     return [event_to_response(e) for e in events]
 

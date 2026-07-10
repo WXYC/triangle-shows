@@ -7,6 +7,8 @@ paginated list now de-duplicates via the shared query service and keeps its hist
 date leniency) and the iCal feed's distinct un-deduped contract.
 """
 
+from datetime import datetime
+
 from conftest import DEFAULT_EVENT_DATE as D  # shared with the make_event factory default
 
 
@@ -51,6 +53,23 @@ async def test_ical_feed_lists_every_venue_offering(client, make_venue, make_eve
     assert resp.status_code == 200
     assert resp.headers["content-type"].startswith("text/calendar")
     assert resp.text.count("SUMMARY:Duke Ellington") == 2
+
+
+async def test_deprecated_list_and_ical_feed_exclude_tombstoned_events(client, make_venue, make_event):
+    """The exclusion lives in the shared query service's default, so the surfaces
+    with no include_removed opt-out — the deprecated list and the iCal feed —
+    inherit it without any handler changes."""
+    v = await make_venue()
+    await make_event(venue=v, artist="Juana Molina", date=D)
+    await make_event(venue=v, artist="Jessica Pratt", date=D, removed_at=datetime.utcnow())
+
+    body = (await client.get("/api/events")).json()
+    assert body["total"] == 1
+    assert [e["artist"] for e in body["events"]] == ["Juana Molina"]
+
+    ics = (await client.get("/feeds/events.ics")).text
+    assert "SUMMARY:Juana Molina" in ics
+    assert "Jessica Pratt" not in ics
 
 
 async def test_ical_feed_filters_by_venue_slug(client, make_venue, make_event):
