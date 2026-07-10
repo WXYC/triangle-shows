@@ -70,6 +70,10 @@ class EventResponse(BaseModel):
     age_restriction: Optional[str] = None
     description: Optional[str] = None
     source: str
+    # Stable per-event identity, tier-prefixed (ext:/url:/hash:) — the key external
+    # consumers reconcile on. ext:/url: keys survive renames and reschedules; hash:
+    # keys do not (see the source_key contract section in backend/README.md).
+    source_key: str
     # Last-modified timestamp; changes only when a scrape actually modifies the row.
     updated_at: Optional[UTCDateTime] = None
     # Soft tombstone: when the venue stopped advertising this event; null for live

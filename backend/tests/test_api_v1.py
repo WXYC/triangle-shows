@@ -170,3 +170,15 @@ async def test_v1_health_matches_unversioned_alias(client, make_event):
     assert body["venue_count"] == 1
     # v1 delegates to the same handler, so the two surfaces cannot drift.
     assert body == (await client.get("/api/health")).json()
+
+
+async def test_v1_events_exposes_source_key(client, make_event):
+    # source_key is the stable per-event identity consumers key on (issue #8) —
+    # e.g. Backend-Service upserts concerts as (source='triangle_shows',
+    # source_id=source_key). It must round-trip exactly as stored.
+    await make_event(artist="Chuquimamani-Condori", date=D, source_key="url:/event/chuqui")
+    ev = (await client.get("/api/v1/events")).json()[0]
+    assert ev["source_key"] == "url:/event/chuqui"
+
+    detail = (await client.get(f"/api/v1/events/{ev['id']}")).json()
+    assert detail["source_key"] == "url:/event/chuqui"
