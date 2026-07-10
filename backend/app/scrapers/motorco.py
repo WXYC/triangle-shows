@@ -17,6 +17,7 @@ from typing import Optional
 import httpx
 
 from app.scrapers.base import BaseScraper, ScrapedEvent, BROWSER_HEADERS
+from app.scrapers.identity import UrlIdentityVerdict
 
 # --- Module-level setup ---
 
@@ -34,6 +35,9 @@ class MotorcoScraper(BaseScraper):
 
     Used by: Motorco Music Hall
     """
+
+    # Audit (issue #8): source_url is the per-event url from the calendar's JS event blocks (WordPress detail page; slug persists across renames).
+    URL_IDENTITY = UrlIdentityVerdict.TRUSTED
 
     async def scrape(self) -> list[ScrapedEvent]:
         """Fetch the Motorco calendar page and return upcoming ScrapedEvent objects."""

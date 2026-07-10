@@ -15,6 +15,7 @@ import httpx
 from bs4 import BeautifulSoup
 
 from app.scrapers.base import BaseScraper, ScrapedEvent, BROWSER_HEADERS
+from app.scrapers.identity import UrlIdentityVerdict
 
 # --- Module-level setup ---
 logger = logging.getLogger(__name__)
@@ -28,6 +29,9 @@ class TickPickOrganizerScraper(BaseScraper):
     Used by: Chapel of Bones
     Config: {"organizer_id": "chapel-of-bones"}
     """
+
+    # Audit (issue #8): source_url is the TickPick ticket page; event-uniqueness across an organizer's listings is unverified.
+    URL_IDENTITY = UrlIdentityVerdict.HASH_FALLBACK
 
     async def scrape(self) -> list[ScrapedEvent]:
         """Fetch the TickPick organizer page and extract all upcoming events."""

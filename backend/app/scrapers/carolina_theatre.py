@@ -18,6 +18,7 @@ import httpx
 from bs4 import BeautifulSoup
 
 from app.scrapers.base import BaseScraper, ScrapedEvent, BROWSER_HEADERS
+from app.scrapers.identity import UrlIdentityVerdict
 
 # --- Module-level setup ---
 
@@ -45,6 +46,9 @@ class CarolinaTheatreScraper(BaseScraper):
 
     Used by: Carolina Theatre
     """
+
+    # Audit (issue #8): source_url is the per-event card link to the event's detail page.
+    URL_IDENTITY = UrlIdentityVerdict.TRUSTED
 
     async def scrape(self) -> list[ScrapedEvent]:
         """Fetch the events listing page and return deduplicated ScrapedEvent objects."""

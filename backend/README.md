@@ -14,6 +14,27 @@ Three deliberate contract choices, called out so they aren't mistaken for bugs:
 - **Calendar de-duplicates; the iCal feed does not.** The `/api/v1/events` and `/api/events` JSON surfaces cross-venue de-duplicate — when the same artist plays the same date at two venues, the record with the most complete metadata wins, so the calendar grid shows one tile per artist/date. `/feeds/events.ics` intentionally keeps every *live* listing (it queries with `dedup=False`; soft-removed events drop out of the feed like every list surface): a calendar *subscriber* should see each venue's offering rather than a collapsed view. This asymmetry is by design — don't "fix" one surface to match the other.
 - **Delisted events are soft-tombstoned, not deleted.** When an event a venue previously advertised goes missing from that venue's scrape snapshots on two distinct calendar days (as little as ~12 hours apart under the scheduled cadence), the scrape diff stamps `removed_at` (see `app/scrapers/manager.py` — misses are guarded by a per-day cap, a per-scrape horizon, a mass-disappearance guard, and a streak-staleness window). Two deliberate blind spots follow from the guards: a venue that delists the *majority* of its in-window calendar at once produces no tombstones (indistinguishable from scraper breakage; those events age out via the past-date cleanup instead), and conversely a single event a scraper persistently fails to parse reads as a delisting until the parse recovers (reappearance self-heals). List surfaces exclude tombstoned events by default; `/api/v1/events?include_removed=true` opts in, and the detail endpoint always resolves a tombstoned id. Mirror-style consumers must combine `include_removed=true` with `dedup=false` **and an explicit back-dated `start`** (e.g. 8 days ago) — the default `start=today` window hides a tombstone stamped on the event's own show date. `removed_at` records "the venue no longer advertises this" — an observation with a day-of blind spot; `status` is never inferred from it, and the 7-day past-date cleanup remains the only thing that deletes rows.
 
+## Event identity: per-scraper audit
+
+Each scraper class declares a machine-readable verdict, `URL_IDENTITY` (see `app/scrapers/identity.py::UrlIdentityVerdict`), answering one question: **may this scraper's `source_url` serve as event identity?** `TRUSTED` asserts both rename/reschedule stability (the source keeps the URL when the event is edited) and occurrence-uniqueness (one URL never covers two event-dates). Anything less is `HASH_FALLBACK`: the scraper's events reconcile by `external_id` when present, else content hash, and `source_url` is never an identity key. The verdict gates URL-tier reconciliation, the `source_key` migration backfill, and the duplicate merge — it is consumed from code (`url_identity_verdict(scraper_type)`), and the table below is a human-readable summary of those declarations (the code is canonical).
+
+| Scraper type | Verdict | Why |
+|---|---|---|
+| `ticketmaster` | HASH_FALLBACK | `source_url` is the ticket page (not guaranteed event-unique); identity comes from `external_id`, the Ticketmaster event id |
+| `venuepilot` | HASH_FALLBACK | `source_url` is `ticketsUrl` (not guaranteed event-unique); identity comes from `external_id`, the VenuePilot event id |
+| `mec` | TRUSTED | `source_url` is the event's own JSON-LD `url` (per-event detail page); slugs persist across renames |
+| `tribe_events` | TRUSTED | per-event JSON-LD/detail URL; The Events Calendar emits occurrence-specific URLs for recurring events |
+| `rhp_events` | TRUSTED | per-event detail-page link from the event wrapper |
+| `motorco` | TRUSTED | per-event url from the calendar's JS event blocks (WordPress detail page) |
+| `eventprime` | TRUSTED | per-event detail link from the listing row |
+| `carolina_theatre` | TRUSTED | per-event card link to the event's detail page |
+| `koka_booth` | TRUSTED | event's own JSON-LD `url` or `None` — never the shared listing page |
+| `squarespace` | HASH_FALLBACK | `fullUrl` is regenerated from the title on rename — not rename-stable |
+| `webflow_cms` | HASH_FALLBACK | `source_url` is the ticket link, not guaranteed event-unique |
+| `tickpick_organizer` | HASH_FALLBACK | TickPick ticket page; event-uniqueness across an organizer's listings is unverified |
+
+A new scraper must declare its own verdict — `tests/test_identity.py` fails if one is missing from the registry or relies on an inherited default. When in doubt, declare `HASH_FALLBACK`: it preserves today's content-hash behavior, while a wrong `TRUSTED` can merge distinct events into one row.
+
 ## Running locally
 
 ```bash

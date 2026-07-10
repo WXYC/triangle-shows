@@ -18,6 +18,7 @@ from typing import Optional
 import httpx
 
 from app.scrapers.base import BaseScraper, ScrapedEvent
+from app.scrapers.identity import UrlIdentityVerdict
 
 # --- Module-level setup ---
 
@@ -31,6 +32,9 @@ TM_BASE_URL = "https://app.ticketmaster.com/discovery/v2"
 
 class TicketmasterScraper(BaseScraper):
     """Scrape events from Ticketmaster Discovery API v2."""
+
+    # Audit (issue #8): source_url is the ticket page (not guaranteed event-unique); identity comes from external_id, the Ticketmaster event id.
+    URL_IDENTITY = UrlIdentityVerdict.HASH_FALLBACK
 
     def __init__(self, venue_slug: str, venue_tm_id: str, api_key: str, config: Optional[dict] = None):
         super().__init__(venue_slug, config)

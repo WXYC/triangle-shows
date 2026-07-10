@@ -20,6 +20,7 @@ from bs4 import BeautifulSoup
 
 # --- Internal Imports ---
 from app.scrapers.base import BaseScraper, ScrapedEvent
+from app.scrapers.identity import UrlIdentityVerdict
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +33,9 @@ class KokaBoothScraper(BaseScraper):
     Scrapes the venue's own Carbonhouse CMS site for events not on Ticketmaster.
     Used by: Koka Booth Amphitheatre (supplementary to TM)
     """
+
+    # Audit (issue #8): source_url is the event's own JSON-LD url or None - never the shared listing page (see _parse_jsonld).
+    URL_IDENTITY = UrlIdentityVerdict.TRUSTED
 
     async def scrape(self) -> list[ScrapedEvent]:
         """Fetch and parse all events from boothamphitheatre.com."""
@@ -152,7 +156,10 @@ class KokaBoothScraper(BaseScraper):
                 show_time=show_time,
                 ticket_url=ticket_url or page_url,
                 image_url=image or None,
-                source_url=item.get("url") or page_url,
+                # Identity: only the event's own JSON-LD url. page_url is the shared
+                # listing page — as source_url it would alias every event on the
+                # page under one identity (issue #8); it stays a ticket fallback only.
+                source_url=item.get("url") or None,
             )
         except Exception as e:
             logger.warning(f"[KokaBooth] JSON-LD parse error: {e}")

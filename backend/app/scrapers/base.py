@@ -42,6 +42,12 @@ class ScrapedEvent:
     description: Optional[str] = None
     source_url: Optional[str] = None
 
+    def __post_init__(self):
+        # A blank external_id must never survive as an identity key: reconciliation
+        # would match every event at the venue onto one row (issue #8).
+        if self.external_id is not None and not self.external_id.strip():
+            self.external_id = None
+
     @cached_property
     def hash(self) -> str:
         """Generate dedup hash from venue_slug + date + normalized name.

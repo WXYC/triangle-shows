@@ -18,6 +18,7 @@ import httpx
 from bs4 import BeautifulSoup
 
 from app.scrapers.base import BaseScraper, ScrapedEvent, BROWSER_HEADERS
+from app.scrapers.identity import UrlIdentityVerdict
 
 # --- Module-level setup ---
 logger = logging.getLogger(__name__)
@@ -31,6 +32,9 @@ class RHPEventsScraper(BaseScraper):
     Used by: Lincoln Theatre, Cat's Cradle, Cat's Cradle Back Room,
              Local 506, The Pinhook
     """
+
+    # Audit (issue #8): source_url is the per-event detail-page link from the event wrapper.
+    URL_IDENTITY = UrlIdentityVerdict.TRUSTED
 
     async def scrape(self) -> list[ScrapedEvent]:
         url = self.config.get("url", "")
