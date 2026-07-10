@@ -55,9 +55,12 @@ function _updateVenueRestoreBtn() {
 
 async function loadVenues(attempt = 0) {
   try {
-    const resp = await fetch(`${API_BASE}/api/venues`);
+    const resp = await fetch(`${API_BASE}/api/v1/venues`);
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const allVenues = await resp.json();
+    // The subdomain lock compares the raw municipality, not the display group —
+    // fine while the only locked city (Durham) is ungrouped. A subdomain locking a
+    // grouped city would need cityDisplayGroup() here and in _checkEventVisible.
     venues = SITE_CONFIG.city
       ? allVenues.filter((v) => v.city === SITE_CONFIG.city)
       : allVenues;
@@ -80,7 +83,9 @@ function renderFilters() {
 
 function renderCityFilters() {
   const container = document.getElementById("city-filters");
-  const cities = [...new Set(venues.map((v) => v.city))].sort();
+  // Chips are display groups, not raw municipalities: Chapel Hill and Carrboro
+  // share one "Chapel Hill-Carrboro" chip (see city-groups.js).
+  const cities = [...new Set(venues.map((v) => cityDisplayGroup(v.city)))].sort();
 
   container.innerHTML = cities
     .map((city) => {
@@ -113,7 +118,7 @@ function renderVenueFilters() {
       // Existing venues preserve their prior state.
       const isChecked = !hasExistingState || currentChecked.has(v.slug) || !document.querySelector(`[data-venue="${v.slug}"]`);
       return `
-      <label class="venue-checkbox" data-venue-city="${v.city}">
+      <label class="venue-checkbox" data-venue-city="${cityDisplayGroup(v.city)}">
         <input type="checkbox" data-venue="${v.slug}" ${isChecked ? "checked" : ""} onchange="toggleVenue('${v.slug}')">
         <span class="venue-dot" style="background-color: ${v.color}"></span>
         <span class="venue-label">${v.name}</span>

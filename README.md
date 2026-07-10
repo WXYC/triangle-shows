@@ -21,13 +21,13 @@ Triangle Shows aggregates live music listings from 21+ venues across the Triangl
 | Shadowbox Studio | Durham |
 | Stancyks | Durham |
 | The Pinhook | Durham |
-| Cat's Cradle and Back Room | Chapel Hill-Carrboro |
-| Local 506 | Chapel Hill-Carrboro |
-| The Cave | Chapel Hill-Carrboro |
+| Cat's Cradle and Back Room | Carrboro |
+| Local 506 | Chapel Hill |
+| The Cave | Chapel Hill |
 | Haw River Ballroom | Saxapahaw |
 | Chapel of Bones | Raleigh |
 | Kings | Raleigh |
-| Koka Booth Amphitheatre | Raleigh |
+| Koka Booth Amphitheatre | Cary |
 | Lincoln Theatre | Raleigh |
 | Neptune's Parlour | Raleigh |
 | Pour House | Raleigh |
