@@ -10,7 +10,7 @@ Requires: app.database (Base), PostgreSQL via asyncpg/SQLAlchemy async.
 
 from datetime import datetime, date, time
 from typing import Optional
-from sqlalchemy import String, Integer, Float, Text, Date, Time, DateTime, ForeignKey, JSON
+from sqlalchemy import String, Integer, Float, Text, Date, Time, DateTime, ForeignKey, JSON, Index
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 import enum
 
@@ -82,13 +82,30 @@ class Event(Base):
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     source: Mapped[str] = mapped_column(String(50))  # scraper name that produced this event, e.g. "ticketmaster"
     source_url: Mapped[Optional[str]] = mapped_column(String(1000), nullable=True)
-    hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)  # SHA-256 of key fields; used by manager.py to deduplicate on upsert
+    # Reconciliation key for the URL tier: source_url with scheme/host/fragment/tracking
+    # params stripped (identity.normalize_source_url). Stored for every row that has a
+    # source_url, regardless of which identity tier won.
+    normalized_source_url: Mapped[Optional[str]] = mapped_column(String(1000), nullable=True, index=True)
+    # Content hash (venue_slug | date | normalized name). No longer unique: identity
+    # uniqueness lives in (venue_id, source_key), and duplicate hashes can transiently
+    # exist (e.g. an event rescheduled onto a date where a duplicate listing was once
+    # ingested). Still indexed — it's the tier-3 reconciliation key and in-batch dedup key.
+    hash: Mapped[str] = mapped_column(String(64), index=True)
+    # The event's canonical external identity, tier-prefixed: "ext:<external_id>",
+    # "url:<normalized_source_url>", or "hash:<hash>" (identity.derive_source_key).
+    # External contract — consumers (WXYC Backend-Service) key on it; ext/url keys are
+    # stable across rename/reschedule, hash keys are not. 1100 = prefix + String(1000) URL.
+    source_key: Mapped[str] = mapped_column(String(1100), nullable=False)
     # Soft tombstone: when the venue stopped advertising this event (observation, not
     # interpretation — status is never inferred from it, and nothing hard-deletes on it).
     # Stamped/cleared by the scrape diff (manager.py), which also bumps updated_at.
     removed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Identity is per-venue: external_id/source_url uniqueness is only assumed within a
+    # venue (e.g. VenuePilot ids are small integers that can collide across venues).
+    __table_args__ = (Index("uq_events_venue_source_key", "venue_id", "source_key", unique=True),)
 
     venue: Mapped["Venue"] = relationship(back_populates="events")
 
