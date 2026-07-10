@@ -109,8 +109,8 @@ async def test_merge_leaves_untrusted_venues_alone(session, make_venue, make_eve
     # hash-tier (distinct), so nothing merges even with identical source_urls.
     venue = await make_venue(scraper_type="squarespace")
     url = "https://sq.com/events/show"
-    await make_event(venue=venue, name="Show A", source_url=url, date=D)
-    await make_event(venue=venue, name="Show B", source_url=url, date=D + timedelta(days=1))
+    await make_event(venue=venue, name="Cat Power", source_url=url, date=D)
+    await make_event(venue=venue, name="Nilüfer Yanya", source_url=url, date=D + timedelta(days=1))
 
     await _run_backfill(session, populate_source_keys)
     await _run_backfill(session, merge_source_key_duplicates)
@@ -123,8 +123,8 @@ async def test_merge_scopes_to_requested_venue(session, make_venue, make_event):
     venue_b = await make_venue(scraper_type="mec")
     venue_a_id, venue_b_id = venue_a.id, venue_b.id
     for venue in (venue_a, venue_b):
-        await make_event(venue=venue, name="Dupe", source_url="https://v.com/event/dupe/", date=D)
-        await make_event(venue=venue, name="Dupe 2", source_url="https://v.com/event/dupe/", date=D)
+        await make_event(venue=venue, name="Stereolab", source_url="https://v.com/event/stereolab/", date=D)
+        await make_event(venue=venue, name="Stereolab (Late Show)", source_url="https://v.com/event/stereolab/", date=D)
 
     await _run_backfill(session, populate_source_keys)
     await _run_backfill(session, merge_source_key_duplicates, venue_id=venue_a_id)
@@ -132,3 +132,39 @@ async def test_merge_scopes_to_requested_venue(session, make_venue, make_event):
     events = await _all_events(session)
     assert len([e for e in events if e.venue_id == venue_a_id]) == 1
     assert len([e for e in events if e.venue_id == venue_b_id]) == 2
+
+
+async def test_listing_page_urls_never_become_identity_in_backfill(session, make_venue, make_event):
+    # Stored rows scraped before the part-1 fixes can carry the venue's shared
+    # listing page as source_url. The audit verdict describes the FIXED scraper,
+    # not this legacy data — treating the listing URL as identity would merge
+    # every event on the page into one row (explicit issue #8 constraint).
+    venue = await make_venue(
+        scraper_type="mec", scraper_config={"url": "https://venue.com/events/"}
+    )
+    a = await make_event(venue=venue, name="Juana Molina", source_url="https://venue.com/events/", date=D)
+    b = await make_event(
+        venue=venue, name="Hermanos Gutiérrez", source_url="https://venue.com/events/",
+        date=D + timedelta(days=1),
+    )
+
+    await _run_backfill(session, populate_source_keys)
+    await _run_backfill(session, merge_source_key_duplicates)
+
+    events = await _all_events(session)
+    assert len(events) == 2  # distinct events survive
+    assert all(e.source_key == f"hash:{e.hash}" for e in events)
+    assert all(e.normalized_source_url is None for e in events)
+    await _assert_identity_index_creatable(session)
+
+
+async def test_populate_does_not_stamp_updated_at(session, make_venue, make_event):
+    # Gaining identity metadata is not a content change; a mass updated_at bump
+    # would force every incremental-sync consumer into a full refetch.
+    event = await make_event(source_url="https://v.com/event/one/")
+    before = event.updated_at
+
+    await _run_backfill(session, populate_source_keys)
+
+    events = await _all_events(session)
+    assert events[0].updated_at == before
