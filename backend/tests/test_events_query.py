@@ -24,6 +24,19 @@ async def test_dedup_prefers_richer_record_across_venues(session, make_venue, ma
     assert [e.id for e in result] == [rich.id]
 
 
+async def test_dedup_prefers_record_with_headliner_across_venues(session, make_venue, make_event):
+    v1 = await make_venue(slug="cats-cradle", city="Carrboro")
+    v2 = await make_venue(slug="local-506", city="Chapel Hill")
+    # Sparse, headliner-less record inserted first...
+    await make_event(venue=v1, artist="Juana Molina", date=D)
+    # ...record with a resolved structured-performer headliner at a different venue.
+    # Every other completeness signal ties, so headliner is the deciding factor —
+    # the resolver keys off it, so the headliner-bearing row must win.
+    rich = await make_event(venue=v2, artist="Juana Molina", date=D, headliner="Juana Molina")
+    result = await query_events(session, start=D, end=D)
+    assert [e.id for e in result] == [rich.id]
+
+
 async def test_dedup_keeps_first_across_venues_when_scores_tie(session, make_venue, make_event):
     v1 = await make_venue(slug="cats-cradle")
     v2 = await make_venue(slug="local-506")

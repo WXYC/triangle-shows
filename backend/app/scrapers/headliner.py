@@ -52,9 +52,10 @@ _EVENING_WITH_RE = re.compile(r"^an evening with:?\s+", re.IGNORECASE)
 _PRESENTS_RE = re.compile(r"\bpresents?\s*:\s*", re.IGNORECASE)
 
 # Support-act tails. "w/" tolerates a missing space after the slash but must not
-# fire on "w/o"; "//" requires leading whitespace so it can't split a URL-ish name.
+# fire on "w/o" or its long form "w/out" (nor "without"); "//" requires leading
+# whitespace so it can't split a URL-ish name.
 _SUPPORT_TAIL_RES = (
-    re.compile(r"\s+w/(?!o\b)\s*", re.IGNORECASE),
+    re.compile(r"\s+w/(?!o(?:ut)?\b)\s*", re.IGNORECASE),
     re.compile(r"\s+//\s*"),
     re.compile(r"\s+(?:feat\.?|ft\.?|featuring)\s+", re.IGNORECASE),
     re.compile(r"\s+with special guests?\b", re.IGNORECASE),
@@ -74,12 +75,39 @@ _TRIBUTE_RE = re.compile(
 )
 
 
+# Separator/filler characters that carry no band-name signal, so a keyword tag
+# padded with them ("LOW TIX!", "SOLD-OUT") still counts as keyword-dominated.
+_TAG_FILLER_RE = re.compile(r"[\s\-–—:;,.!/&+]+")
+
+
 def _is_noise_tag(content: str) -> bool:
-    """Is this parenthetical/bracket content ticketing noise (vs a band name)?"""
+    """Is this parenthetical/bracket content ticketing noise (vs a band name)?
+
+    Conservative on purpose: a leading parenthetical is only noise when it is
+    *recognizably* ticketing/venue framing, so a band name that happens to open
+    a billing in parentheses — "(Free Energy) Truth Club", "(Sandy) Alex G" —
+    survives. Three rules qualify a tag as noise:
+
+    - Empty ("()") — carries nothing worth keeping.
+    - An age gate anywhere ("18+", "21 +").
+    - A ticketing/venue keyword that *dominates* the tag: once every matched
+      keyword phrase and all separator/filler characters are removed, nothing
+      band-like is left ("(SOLD OUT)", "(LOW TIX)", "(Record Shop)", "(Seated)").
+      Merely *containing* a common word is not enough — "(Free Energy)" keeps
+      "Energy" after the "Free" match, so it is a name, not noise.
+    """
     content = content.strip()
     if not content:
         return True  # "()" carries nothing worth keeping
-    return bool(_AGE_GATE_RE.search(content) or _TAG_KEYWORD_RE.search(content))
+    if _AGE_GATE_RE.search(content):
+        return True
+    if not _TAG_KEYWORD_RE.search(content):
+        return False
+    # Keyword-dominance: strip every keyword match, then the filler around them.
+    # A residue means the tag also names something (a band), so it isn't noise.
+    residue = _TAG_KEYWORD_RE.sub("", content)
+    residue = _TAG_FILLER_RE.sub("", residue)
+    return not residue
 
 
 def extract_headliner(billing: Optional[str]) -> Optional[str]:

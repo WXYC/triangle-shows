@@ -38,6 +38,27 @@ def test_strips_support_act_tails(billing, expected):
     assert extract_headliner(billing) == expected
 
 
+# --- "w/" tail must not fire on "w/o" or "w/out"/"without" ---
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        # "w/o" (short) and "w/out" (long form) are part of the name, not a support
+        # tail — the "w/" delimiter must skip both, and plain "without" too.
+        "Angel w/o Wings",
+        "The Man w/out a Country",
+        "Nothing without You",
+    ],
+)
+def test_w_slash_o_forms_are_not_support_tails(name):
+    assert extract_headliner(name) == name
+
+
+def test_w_slash_still_strips_a_real_support_tail():
+    # The guard for "w/o"/"w/out" must not disable the ordinary "w/ Support" cut.
+    assert extract_headliner("Truth Club w/ Weak Signal") == "Truth Club"
+
+
 # --- Leading ticketing/venue tags ---
 
 @pytest.mark.parametrize(
@@ -48,6 +69,9 @@ def test_strips_support_act_tails(billing, expected):
         ("[CANCELLED] Stereolab", "Stereolab"),
         ("(21+) Hermanos Gutiérrez", "Hermanos Gutiérrez"),
         ("(FREE SHOW) Truth Club", "Truth Club"),
+        # A tag that is ENTIRELY a keyword ("Seated") is keyword-dominated, so it
+        # strips — the residue after removing the keyword and filler is empty.
+        ("(Seated) Some Band", "Some Band"),
         # A name that is nothing but a tag cleans down to nothing.
         ("(SOLD OUT)", None),
     ],
@@ -121,6 +145,10 @@ def test_non_performance_events_yield_null(billing):
         "Iron and Wine",
         # Parenthetical band names survive: only recognized noise tags strip.
         "(Sandy) Alex G",
+        # A leading parenthetical BAND name survives even when it contains a word
+        # that also appears in the ticketing vocabulary ("Free"): the keyword must
+        # DOMINATE the tag to count as noise, and "Free Energy" leaves "Energy".
+        "(Free Energy) Truth Club",
         # Trailing symbols are part of the name, not dangling punctuation.
         "Sunn O)))",
         # A plain "with"/"w"-word is not the "w/" delimiter.
