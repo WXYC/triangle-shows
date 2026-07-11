@@ -15,6 +15,7 @@ Triangle Shows aggregates live music listings from 21+ venues across the Triangl
 | Venue | City |
 |---|---|
 | Boom Club | Durham |
+| Carolina Theatre | Durham |
 | DPAC | Durham |
 | Motorco Music Hall | Durham |
 | Rubies on Five Points | Durham |
@@ -120,6 +121,7 @@ Each venue is handled by one scraper type. Last updated 2026-06-29 — may drift
 | `ticketmaster` | Koka Booth Amphitheatre, Red Hat Amphitheater, DPAC, The Ritz |
 | `rhp_events` | Lincoln Theatre, Cat's Cradle, Cat's Cradle Back Room, Local 506, The Pinhook |
 | `motorco` | Motorco Music Hall |
+| `carolina_theatre` | Carolina Theatre |
 | `eventprime` | Kings |
 | `tribe_events` | The Cave |
 | `venuepilot` | Haw River Ballroom, Rubies on Five Points, Stanczyks |

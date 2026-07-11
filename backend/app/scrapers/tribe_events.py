@@ -7,8 +7,8 @@ Role: One of several venue scrapers called by scrapers/manager.py during each sc
 It fetches the venue's events listing page, extracts any JSON-LD Event objects found there,
 then follows individual event detail links to pick up any events not represented on the listing page.
 
-Requires: app.scrapers.base (BaseScraper, ScrapedEvent, BROWSER_HEADERS); venue config must
-include a "url" key pointing to the venue's Tribe Events listing page.
+Requires: app.scrapers.base (BaseScraper, ScrapedEvent) for the shared fetch_soup HTTP
+path; venue config must include a "url" key pointing to the venue's Tribe Events listing page.
 """
 
 # --- Imports ---
@@ -17,10 +17,9 @@ import logging
 from datetime import datetime, date, time
 from typing import Optional
 
-import httpx
 from bs4 import BeautifulSoup
 
-from app.scrapers.base import BaseScraper, ScrapedEvent, BROWSER_HEADERS
+from app.scrapers.base import BaseScraper, ScrapedEvent
 from app.scrapers.identity import UrlIdentityVerdict
 
 # --- Module-level setup ---
@@ -46,11 +45,10 @@ class TribeEventsScraper(BaseScraper):
 
         events = []
 
-        async with httpx.AsyncClient(timeout=30, follow_redirects=True, headers=BROWSER_HEADERS) as client:
+        # One client for the listing page plus every detail-page fetch below.
+        async with self.http_client() as client:
             # First get the events listing page
-            resp = await client.get(url)
-            resp.raise_for_status()
-            soup = BeautifulSoup(resp.text, "lxml")
+            soup = await self.fetch_soup(url, client=client)
 
             # Extract JSON-LD from listing page
             events.extend(self._extract_jsonld_events(soup))
@@ -76,9 +74,7 @@ class TribeEventsScraper(BaseScraper):
                     continue
 
                 try:
-                    detail_resp = await client.get(href)
-                    detail_resp.raise_for_status()
-                    detail_soup = BeautifulSoup(detail_resp.text, "lxml")
+                    detail_soup = await self.fetch_soup(href, client=client)
                     # Pass the detail page URL so it can be used as fallback ticket/source URL
                     detail_events = self._extract_jsonld_events(detail_soup, source_url=href)
                     events.extend(detail_events)

@@ -13,10 +13,9 @@ import logging
 from datetime import datetime, date, time
 from typing import Optional
 
-import httpx
 from bs4 import BeautifulSoup
 
-from app.scrapers.base import BaseScraper, ScrapedEvent, BROWSER_HEADERS
+from app.scrapers.base import BaseScraper, ScrapedEvent
 from app.scrapers.identity import UrlIdentityVerdict
 
 # --- Module-level setup ---
@@ -63,11 +62,10 @@ class MECScraper(BaseScraper):
         events: list[ScrapedEvent] = []
         seen_hashes: set[str] = set()  # Deduplicate across listing + detail pages
 
-        async with httpx.AsyncClient(timeout=30, follow_redirects=True, headers=BROWSER_HEADERS) as client:
+        # One client for the listing page plus every detail-page fetch below.
+        async with self.http_client() as client:
             # --- Step 1: listing page ---
-            resp = await client.get(url)
-            resp.raise_for_status()
-            soup = BeautifulSoup(resp.text, "lxml")
+            soup = await self.fetch_soup(url, client=client)
 
             # Try JSON-LD on listing page first. The listing URL is shared by every
             # event on the page, so it is NOT an identity fallback (issue #8) —
@@ -91,9 +89,7 @@ class MECScraper(BaseScraper):
             # --- Step 3: fetch each detail page ---
             for href in detail_links:
                 try:
-                    detail_resp = await client.get(href)
-                    detail_resp.raise_for_status()
-                    detail_soup = BeautifulSoup(detail_resp.text, "lxml")
+                    detail_soup = await self.fetch_soup(href, client=client)
                     for ev in self._extract_jsonld_events(detail_soup, page_url=href, page_url_is_event=True):
                         if ev.hash not in seen_hashes:
                             seen_hashes.add(ev.hash)
