@@ -4,9 +4,9 @@ Scraper for Kings Raleigh using their custom WordPress theme with a server-rende
 Role: Instantiated and called by scrapers/manager.py during each scrape cycle (triggered every
       6 hours via POST /api/scrape). The class name reflects an earlier EventPrime implementation
       that was replaced; the actual target is Kings Raleigh's hand-rolled WordPress theme.
-Requires: app.scrapers.base (BaseScraper, ScrapedEvent, BROWSER_HEADERS); httpx and
-          beautifulsoup4/lxml must be installed; no venue-specific env vars needed beyond
-          the optional "url" key in the venue's scraper config.
+Requires: app.scrapers.base (BaseScraper, ScrapedEvent) for the shared fetch_soup HTTP
+          path; no venue-specific env vars needed beyond the optional "url" key in the
+          venue's scraper config.
 """
 
 # --- Imports ---
@@ -15,10 +15,7 @@ import re
 from datetime import datetime, date
 from typing import Optional
 
-import httpx
-from bs4 import BeautifulSoup
-
-from app.scrapers.base import BaseScraper, ScrapedEvent, BROWSER_HEADERS
+from app.scrapers.base import BaseScraper, ScrapedEvent
 from app.scrapers.identity import UrlIdentityVerdict
 
 # --- Module-level setup ---
@@ -50,10 +47,7 @@ class EventPrimeScraper(BaseScraper):
         url = self.config.get("url", "https://www.kingsraleigh.com/")
         events = []
 
-        async with httpx.AsyncClient(timeout=30, follow_redirects=True, headers=BROWSER_HEADERS) as client:
-            resp = await client.get(url)
-            resp.raise_for_status()
-            soup = BeautifulSoup(resp.text, "lxml")
+        soup = await self.fetch_soup(url)
 
         shows_table = soup.find("table", id="Shows")
         if not shows_table:

@@ -5,7 +5,10 @@ Role: Defines the ScrapedEvent dataclass (the unit of data each scraper returns)
 and BaseScraper ABC (the interface every venue scraper must implement). The scrape
 manager (scrapers/manager.py) imports BaseScraper subclasses, calls their scrape()
 method, and uses ScrapedEvent.hash for deduplication before upserting to PostgreSQL.
-Requires: No env vars or external services — pure Python stdlib only.
+BaseScraper also owns the shared HTML fetch path (fetch_soup) so the HTML scrapers
+don't each re-declare the httpx client config and BeautifulSoup parser.
+Requires: httpx and beautifulsoup4/lxml (for fetch_soup); no env vars or external
+services.
 """
 import hashlib
 import re
@@ -14,6 +17,9 @@ from dataclasses import dataclass, field
 from datetime import date, time, datetime
 from functools import cached_property
 from typing import Optional
+
+import httpx
+from bs4 import BeautifulSoup
 
 from app.scrapers.identity import UrlIdentityVerdict
 
@@ -80,14 +86,22 @@ class ScrapedEvent:
         return hashlib.sha256(raw.encode()).hexdigest()
 
 
-# --- Shared HTTP Headers ---
+# --- Shared HTTP config ---
 
-# Mimic a real browser so venue sites don't block the scraper as a bot
+# Seconds before an HTTP request is abandoned. Shared so every scraper's fetch
+# uses the same budget (a slow venue can't hang a whole scrape cycle).
+HTTP_TIMEOUT = 30
+
+# Mimic a real browser so venue sites don't block the scraper as a bot. Keep the
+# User-Agent on a current Chrome release: a stale UA is a fingerprint some venue
+# WAFs hard-block (a stale Chrome/122 was the root cause of the Carolina Theatre
+# outage), so bump this when Chrome's stable major moves on. A scraper that needs
+# its own UA can pass headers= to fetch_soup rather than editing this shared dict.
 BROWSER_HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
         "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/122.0.0.0 Safari/537.36"
+        "Chrome/137.0.0.0 Safari/537.36"
     ),
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     "Accept-Language": "en-US,en;q=0.5",
@@ -115,6 +129,60 @@ class BaseScraper(ABC):
     async def scrape(self) -> list[ScrapedEvent]:
         """Scrape events and return a list of ScrapedEvent objects."""
         ...
+
+    # --- HTTP Helpers ---
+    # Shared fetch path so the HTML scrapers don't each repeat the httpx client
+    # config + GET + raise_for_status + BeautifulSoup(..., "lxml") boilerplate.
+
+    @staticmethod
+    def http_client(headers: Optional[dict] = None) -> httpx.AsyncClient:
+        """Build the standard browser-mimicking httpx client (caller manages its lifecycle).
+
+        Multi-page scrapers that fetch detail pages open one of these with
+        ``async with self.http_client() as client:`` and pass ``client`` to each
+        ``fetch_soup`` call so a single connection pool is reused. Single-page
+        scrapers don't need this — ``fetch_soup`` opens and closes its own client.
+        Pass ``headers`` to override the shared browser headers (e.g. a venue that
+        needs a bespoke User-Agent); ``None`` uses :data:`BROWSER_HEADERS`.
+        """
+        return httpx.AsyncClient(
+            timeout=HTTP_TIMEOUT,
+            follow_redirects=True,
+            headers=headers if headers is not None else BROWSER_HEADERS,
+        )
+
+    async def fetch_soup(
+        self,
+        url: str,
+        *,
+        client: Optional[httpx.AsyncClient] = None,
+        headers: Optional[dict] = None,
+        parser: str = "lxml",
+    ) -> BeautifulSoup:
+        """GET ``url`` and return its parsed BeautifulSoup tree.
+
+        Encapsulates the client config (timeout, redirects, browser headers), the
+        GET, ``raise_for_status()``, and the BeautifulSoup parse that every HTML
+        scraper otherwise repeats. Raises ``httpx.HTTPStatusError`` on a non-2xx
+        response — a caller that treats some statuses as normal (e.g. a 404 that
+        just means "past the last page") should catch it.
+
+        Pass ``client`` to reuse an existing connection pool for extra fetches
+        (multi-page scrapers); omit it and ``fetch_soup`` opens and closes its own
+        client for the call. ``headers`` overrides the request headers: on an
+        owned client they replace the browser defaults for the whole client; on a
+        passed-in ``client`` they are per-request headers layered over whatever
+        headers that client already carries.
+        """
+        if client is not None:
+            resp = await client.get(url, headers=headers) if headers is not None else await client.get(url)
+            resp.raise_for_status()
+            return BeautifulSoup(resp.text, parser)
+
+        async with self.http_client(headers=headers) as owned_client:
+            resp = await owned_client.get(url)
+            resp.raise_for_status()
+            return BeautifulSoup(resp.text, parser)
 
     # --- Parsing Helpers ---
     # Shared utility methods so individual scrapers don't duplicate price/time logic

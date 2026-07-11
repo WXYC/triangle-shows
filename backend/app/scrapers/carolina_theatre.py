@@ -14,10 +14,7 @@ import re
 from datetime import datetime, date
 from typing import Optional
 
-import httpx
-from bs4 import BeautifulSoup
-
-from app.scrapers.base import BaseScraper, ScrapedEvent, BROWSER_HEADERS
+from app.scrapers.base import BaseScraper, ScrapedEvent
 from app.scrapers.identity import UrlIdentityVerdict
 
 # --- Module-level setup ---
@@ -55,10 +52,7 @@ class CarolinaTheatreScraper(BaseScraper):
         url = self.config.get("url", "https://carolinatheatre.org/events/")
         events = []
 
-        async with httpx.AsyncClient(timeout=30, follow_redirects=True, headers=BROWSER_HEADERS) as client:
-            resp = await client.get(url)
-            resp.raise_for_status()
-            soup = BeautifulSoup(resp.text, "lxml")
+        soup = await self.fetch_soup(url)
 
         # Each event on the listing page is wrapped in a div.eventCard
         for card in soup.select("div.eventCard"):

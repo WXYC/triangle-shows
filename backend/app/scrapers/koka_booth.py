@@ -3,7 +3,7 @@
 Role: Runs as part of the scrape pipeline triggered by POST /api/scrape every 6 hours.
       Supplements the Ticketmaster scraper by fetching events posted directly on the
       venue's own Carbonhouse CMS site (boothamphitheatre.com) that may not appear on TM.
-Requires: BaseScraper (app.scrapers.base), httpx, BeautifulSoup (lxml parser).
+Requires: BaseScraper (app.scrapers.base) for the shared fetch_soup HTTP path.
           Venue config dict must supply a "url" key (defaults to boothamphitheatre.com/events).
 """
 
@@ -15,7 +15,6 @@ from datetime import datetime, date, time
 from typing import Optional
 
 # --- Third-Party Imports ---
-import httpx
 from bs4 import BeautifulSoup
 
 # --- Internal Imports ---
@@ -42,10 +41,11 @@ class KokaBoothScraper(BaseScraper):
         url = self.config.get("url", "https://www.boothamphitheatre.com/events")
         events = []
 
-        async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
-            resp = await client.get(url)
-            resp.raise_for_status()
-            soup = BeautifulSoup(resp.text, "lxml")
+        # Reuse one client for the listing page and any detail-page fetches below.
+        # Routing through fetch_soup also means this scraper now sends the shared
+        # browser headers, which the old bare client omitted.
+        async with self.http_client() as client:
+            soup = await self.fetch_soup(url, client=client)
 
             # Try JSON-LD first — most reliable if the CMS emits structured data
             events.extend(self._extract_jsonld(soup, url))
@@ -76,9 +76,7 @@ class KokaBoothScraper(BaseScraper):
                 # Cap at 20 detail pages to avoid unbounded fetches
                 for detail_url in list(seen)[:20]:
                     try:
-                        d_resp = await client.get(detail_url)
-                        d_resp.raise_for_status()
-                        d_soup = BeautifulSoup(d_resp.text, "lxml")
+                        d_soup = await self.fetch_soup(detail_url, client=client)
                         ld_events = self._extract_jsonld(d_soup, detail_url)
                         events.extend(ld_events)
                     except Exception as e:

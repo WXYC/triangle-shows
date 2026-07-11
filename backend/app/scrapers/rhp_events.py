@@ -15,9 +15,8 @@ from datetime import datetime, date, time
 from typing import Optional
 
 import httpx
-from bs4 import BeautifulSoup
 
-from app.scrapers.base import BaseScraper, ScrapedEvent, BROWSER_HEADERS
+from app.scrapers.base import BaseScraper, ScrapedEvent
 from app.scrapers.identity import UrlIdentityVerdict
 
 # --- Module-level setup ---
@@ -47,22 +46,20 @@ class RHPEventsScraper(BaseScraper):
         page = 1
         max_pages = 10  # Safety cap to avoid infinite pagination loops
 
-        async with httpx.AsyncClient(timeout=30, follow_redirects=True, headers=BROWSER_HEADERS) as client:
+        async with self.http_client() as client:
             while page <= max_pages:
                 # RHP pagination follows /page/N/ URL convention
                 page_url = url if page == 1 else f"{url.rstrip('/')}/page/{page}/"
                 logger.info(f"[RHP] Fetching {page_url}")
 
                 try:
-                    resp = await client.get(page_url)
-                    if resp.status_code == 404:
-                        # 404 means we've gone past the last page
-                        break
-                    resp.raise_for_status()
+                    # Reuse the one client across pages. fetch_soup raises on a
+                    # non-2xx status; a 404 (or any HTTP error) means we've run
+                    # past the last page, so break out of pagination.
+                    soup = await self.fetch_soup(page_url, client=client)
                 except httpx.HTTPStatusError:
                     break
 
-                soup = BeautifulSoup(resp.text, "lxml")
                 # Primary selectors cover the most common RHP Events plugin markup variants
                 wrappers = soup.select(".eventWrapper, .rhp-event, .event-listing, article.event")
 

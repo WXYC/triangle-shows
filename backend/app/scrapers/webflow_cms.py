@@ -11,10 +11,7 @@ import logging
 import re
 from datetime import datetime
 
-import httpx
-from bs4 import BeautifulSoup
-
-from app.scrapers.base import BaseScraper, ScrapedEvent, BROWSER_HEADERS
+from app.scrapers.base import BaseScraper, ScrapedEvent
 from app.scrapers.identity import UrlIdentityVerdict
 
 # --- Module Setup ---
@@ -59,56 +56,53 @@ class WebflowCMSScraper(BaseScraper):
 
         events = []
 
-        async with httpx.AsyncClient(timeout=30, follow_redirects=True, headers=BROWSER_HEADERS) as client:
-            resp = await client.get(url)
-            resp.raise_for_status()
-            soup = BeautifulSoup(resp.text, "lxml")
+        soup = await self.fetch_soup(url)
 
-            # --- Parse Each Event Item ---
-            for item in soup.select(item_sel):
-                name_el = item.select_one(name_sel)
-                date_el = item.select_one(date_sel)
-                slug_el = item.select_one(slug_sel)
+        # --- Parse Each Event Item ---
+        for item in soup.select(item_sel):
+            name_el = item.select_one(name_sel)
+            date_el = item.select_one(date_sel)
+            slug_el = item.select_one(slug_sel)
 
-                # Skip items missing required fields
-                if not name_el or not date_el:
-                    continue
+            # Skip items missing required fields
+            if not name_el or not date_el:
+                continue
 
-                name = name_el.get_text(strip=True)
-                date_str = date_el.get_text(strip=True)
-                # Slug is optional — used only for constructing the ticket URL
-                slug = slug_el.get_text(strip=True) if slug_el else None
+            name = name_el.get_text(strip=True)
+            date_str = date_el.get_text(strip=True)
+            # Slug is optional — used only for constructing the ticket URL
+            slug = slug_el.get_text(strip=True) if slug_el else None
 
-                if not name or not date_str:
-                    continue
+            if not name or not date_str:
+                continue
 
-                try:
-                    event_date = datetime.strptime(date_str, date_fmt).date()
-                except ValueError:
-                    logger.warning(f"[WebflowCMS] Cannot parse date '{date_str}' for {self.venue_slug}")
-                    continue
+            try:
+                event_date = datetime.strptime(date_str, date_fmt).date()
+            except ValueError:
+                logger.warning(f"[WebflowCMS] Cannot parse date '{date_str}' for {self.venue_slug}")
+                continue
 
-                # Build the event detail URL only when both base URL and slug are available
-                ticket_url = f"{base_url}{shows_path}{slug}" if (base_url and slug) else None
+            # Build the event detail URL only when both base URL and slug are available
+            ticket_url = f"{base_url}{shows_path}{slug}" if (base_url and slug) else None
 
-                # Extract age restriction from name prefix like "(18+) Artist Name"
-                age_restriction = None
-                age_match = re.match(r'^\((\d+\+)\)\s*', name)
-                if age_match:
-                    age_restriction = age_match.group(1)
-                    # Strip the age prefix so the stored name is just the artist/show title
-                    name = name[age_match.end():]
+            # Extract age restriction from name prefix like "(18+) Artist Name"
+            age_restriction = None
+            age_match = re.match(r'^\((\d+\+)\)\s*', name)
+            if age_match:
+                age_restriction = age_match.group(1)
+                # Strip the age prefix so the stored name is just the artist/show title
+                name = name[age_match.end():]
 
-                events.append(ScrapedEvent(
-                    name=name,
-                    date=event_date,
-                    venue_slug=self.venue_slug,
-                    source="webflow_cms",
-                    artist=name,
-                    ticket_url=ticket_url,
-                    source_url=ticket_url,
-                    age_restriction=age_restriction,
-                ))
+            events.append(ScrapedEvent(
+                name=name,
+                date=event_date,
+                venue_slug=self.venue_slug,
+                source="webflow_cms",
+                artist=name,
+                ticket_url=ticket_url,
+                source_url=ticket_url,
+                age_restriction=age_restriction,
+            ))
 
         logger.info(f"[WebflowCMS] Found {len(events)} events for {self.venue_slug}")
         return events
