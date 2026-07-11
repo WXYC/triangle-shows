@@ -98,7 +98,6 @@ SCRAPER_REGISTRY: dict[str, tuple[str, str]] = {
     "squarespace": ("app.scrapers.squarespace", "SquarespaceScraper"),
     "eventprime": ("app.scrapers.eventprime", "EventPrimeScraper"),
     "motorco": ("app.scrapers.motorco", "MotorcoScraper"),
-    "carolina_theatre": ("app.scrapers.carolina_theatre", "CarolinaTheatreScraper"),
     "venuepilot": ("app.scrapers.venuepilot", "VenuePilotScraper"),
     "koka_booth": ("app.scrapers.koka_booth", "KokaBoothScraper"),
     "mec": ("app.scrapers.mec", "MECScraper"),
