@@ -56,6 +56,15 @@ class EventResponse(BaseModel):
     venue_id: int
     name: str
     artist: Optional[str] = None
+    # Best-effort cleaned performer (issue #18): the headliner with support acts
+    # ("w/ …", "// …", "feat. …"), leading ticketing tags ("(SOLD OUT)", "(18+)"),
+    # and framing ("An Evening With:", "… Presents:", "Tribute to …") stripped —
+    # taken from structured source data (schema.org Event.performer, Ticketmaster
+    # attractions) when available, else heuristically from the name. Null when no
+    # performer can be extracted (karaoke nights, listening parties) or the row
+    # has not been rescraped since the field was introduced. `name` remains the
+    # full display title and `artist` keeps its historical semantics, unchanged.
+    headliner: Optional[str] = None
     support_artists: Optional[str] = None
     date: date
     doors_time: Optional[time] = None

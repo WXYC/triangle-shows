@@ -33,6 +33,10 @@ def test_openapi_exposes_v1_paths_and_neutral_schemas():
     # source_key is the stable per-event identity contract (issue #8).
     assert "source_key" in schemas["EventResponse"]["properties"]
 
+    # headliner is the best-effort cleaned performer, additive next to the
+    # untouched name/artist (issue #18) — downstream resolvers key on it.
+    assert "headliner" in schemas["EventResponse"]["properties"]
+
     # Internal scraping machinery stays out of the public venue contract.
     assert "scraper_type" not in schemas["VenueResponse"]["properties"]
 

@@ -188,6 +188,11 @@ class MECScraper(BaseScraper):
                     artist = p_name
                 else:
                     support.append(p_name)
+            # The structured first performer (when present) is the clean headliner
+            # source — captured before the title fallback below so the manager only
+            # falls back to heuristic name extraction when the source had none.
+            headliner = artist or None
+
             if not artist:
                 # Fall back to event title when no explicit performer is listed
                 artist = name
@@ -241,6 +246,7 @@ class MECScraper(BaseScraper):
                 venue_slug=self.venue_slug,
                 source="mec",
                 artist=artist,
+                headliner=headliner,
                 support_artists=", ".join(support) if support else None,
                 show_time=show_time,
                 ticket_url=ticket_url or page_url or None,

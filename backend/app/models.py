@@ -67,6 +67,13 @@ class Event(Base):
     venue_id: Mapped[int] = mapped_column(ForeignKey("venues.id"), index=True)
     name: Mapped[str] = mapped_column(String(500))
     artist: Mapped[Optional[str]] = mapped_column(String(300), nullable=True)
+    # Best-effort cleaned performer (issue #18): derived at upsert time from the
+    # source's structured performer data when available, else heuristically from
+    # name (scrapers/headliner.py). Null when nothing performer-like can be
+    # extracted (karaoke nights, framing-only billings) or for rows not rescraped
+    # since the column landed. Unlike artist, this tracks the current name/performer
+    # deterministically — the upsert overwrites it rather than merge-preserving it.
+    headliner: Mapped[Optional[str]] = mapped_column(String(300), nullable=True)
     support_artists: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     date: Mapped[date] = mapped_column(Date, index=True)
     doors_time: Mapped[Optional[time]] = mapped_column(Time, nullable=True)
