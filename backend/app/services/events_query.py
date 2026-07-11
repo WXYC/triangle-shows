@@ -58,8 +58,20 @@ def _dedupe_key(event: Event) -> tuple:
 
 
 def _completeness_score(event: Event) -> int:
-    """How rich an event record is (0–3): prefer entries with art, tickets, and a price."""
-    return bool(event.image_url) + bool(event.ticket_url) + (event.price_min is not None)
+    """How rich an event record is (0–4): prefer entries with art, tickets, a price,
+    and a resolved headliner.
+
+    headliner is a completeness signal (issue #18) so a duplicate carrying a clean
+    structured-performer headliner isn't discarded in favor of a headliner-less row
+    from another venue — the downstream Backend-Service resolver keys off headliner,
+    so a NULL there is a real loss even when the rest of the record is identical.
+    """
+    return (
+        bool(event.image_url)
+        + bool(event.ticket_url)
+        + (event.price_min is not None)
+        + bool(event.headliner)
+    )
 
 
 def _pick_winners(events: Sequence[Event]) -> dict[tuple, Event]:

@@ -50,6 +50,11 @@ MISS_STREAK_MAX_GAP_DAYS = 7
 # 2 shows still records normally.
 MASS_DISAPPEARANCE_MIN = 5
 
+# Max stored headliner length. Sourced from the Event.headliner column
+# (String(300)) so the model stays the single source of truth for the width —
+# the upsert clamps to this before writing.
+HEADLINER_MAX_LEN = Event.__table__.c.headliner.type.length
+
 
 # --- ScrapeManager ---
 
@@ -293,13 +298,21 @@ class ScrapeManager:
         claimed: set[int] = set()
 
         for key, (se, h, norm, demoted) in batch.items():
-            # Best-effort clean performer (issue #18): the scraper's structured
-            # performer when it supplied one, else the billing string, both run
-            # through the same conservative cleanup. Sliced to the column width
-            # (name is String(500), headliner String(300)).
-            headliner = extract_headliner(se.headliner or se.name)
+            # Best-effort clean performer (issue #18). A scraper-supplied structured
+            # performer (schema.org Event.performer, Ticketmaster attractions) is
+            # ALREADY authoritative and clean, so it is trusted VERBATIM — only
+            # whitespace-normalized and width-clamped. Running the billing-string
+            # heuristic over it would mangle a real band whose name happens to match
+            # a strip/null pattern (e.g. "Karaoke From Hell", or a name containing
+            # "feat."/"Presents:"). The heuristic applies ONLY to the raw name
+            # fallback, where there is no structured performer to trust.
+            structured = (se.headliner or "").strip()
+            if structured:
+                headliner = " ".join(structured.split())
+            else:
+                headliner = extract_headliner(se.name)
             if headliner:
-                headliner = headliner[:300]
+                headliner = headliner[:HEADLINER_MAX_LEN]
 
             existing = match(se, h, norm, key)
             if existing is not None and existing.id in claimed:

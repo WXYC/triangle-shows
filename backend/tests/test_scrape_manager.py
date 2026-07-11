@@ -106,6 +106,26 @@ async def test_upsert_prefers_scraper_supplied_performer_over_name(session, make
     assert event.headliner == "Mdou Moctar"
 
 
+async def test_structured_performer_is_stored_verbatim_not_heuristically_mangled(session, make_venue):
+    venue = await make_venue()
+    manager = ScrapeManager(session)
+
+    # A real band whose name matches a null/strip heuristic pattern. Because the
+    # scraper supplied it as a STRUCTURED performer, it is authoritative and must
+    # be stored verbatim — running extract_headliner over it would null it (the
+    # "karaoke" non-performance rule), fabricating a missing headliner.
+    scraped = _scraped(
+        venue.slug,
+        name="Some Event Title",
+        headliner="Karaoke From Hell",
+    )
+    await manager._upsert_events(venue.id, [scraped])
+    await session.commit()
+
+    event = (await session.execute(select(Event))).scalar_one()
+    assert event.headliner == "Karaoke From Hell"
+
+
 async def test_rename_recomputes_headliner_and_can_null_it(session, make_venue):
     venue = await make_venue()
     manager = ScrapeManager(session)
