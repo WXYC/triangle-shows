@@ -6,6 +6,24 @@
 // config.js is the first of the deferred app scripts.
 const API_BASE = window.TRIANGLE_SHOWS_API_BASE || window.location.origin;
 
+// ── localStorage JSON helpers ────────────────────────────────────────────────
+// Shared by the favorites, hidden-shows, hidden-venues, and Spotify getters/setters.
+// readJSON returns the parsed value, or `fallback` when the key is absent or the
+// stored value is not valid JSON. Defined here in config.js (the first app script)
+// so every later script can rely on it.
+function readJSON(key, fallback) {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw === null ? fallback : JSON.parse(raw);
+  } catch {
+    return fallback;
+  }
+}
+
+function writeJSON(key, value) {
+  localStorage.setItem(key, JSON.stringify(value));
+}
+
 // Lower bound for the events request. The calendar loads the full set once and filters
 // client-side, and it renders past shows (styled .ev-past) when the user pages to
 // earlier months. /api/v1/events defaults to today-onward to spare generic API clients

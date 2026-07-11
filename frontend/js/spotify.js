@@ -43,11 +43,7 @@ function isSpotifyConnected() {
 
 function getSpotifyArtists() {
   if (!isSpotifyConnected()) return [];
-  try {
-    return JSON.parse(localStorage.getItem(LS_ARTISTS) || "[]");
-  } catch {
-    return [];
-  }
+  return readJSON(LS_ARTISTS, []);
 }
 
 function connectSpotify() {
@@ -159,7 +155,7 @@ async function fetchAllArtists(token) {
     }
   }
 
-  localStorage.setItem(LS_ARTISTS, JSON.stringify(normalized));
+  writeJSON(LS_ARTISTS, normalized);
   return normalized;
 }
 

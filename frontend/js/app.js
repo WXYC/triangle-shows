@@ -122,21 +122,10 @@ function _updateHiddenChip(date) {
   _setHiddenChip(date, count);
 }
 
-function _updateAllHiddenChips() {
-  const hiddenObj = getHidden();
-  document.querySelectorAll(".day-hidden-chip, .fc-list-hidden-row").forEach((el) => el.remove());
-  if (Object.keys(hiddenObj).length === 0) return;
-  const byDate = {};
-  calendar.getEvents().forEach((ev) => {
-    if (hiddenObj[ev.id]) {
-      const d = ev.extendedProps.date;
-      byDate[d] = (byDate[d] || 0) + 1;
-    }
-  });
-  Object.entries(byDate).forEach(([date, count]) => _setHiddenChip(date, count));
-}
-
-function _updateAllHiddenChipsFromSnapshot(allEvents) {
+// Rebuild every per-day hidden-shows chip from `allEvents` (an array of the
+// adapter's plain event objects, e.g. _allEventsCache). Callers pass the event
+// source explicitly so this works before FullCalendar's event store is populated.
+function _updateAllHiddenChips(allEvents) {
   const hiddenObj = getHidden();
   document.querySelectorAll(".day-hidden-chip, .fc-list-hidden-row").forEach((el) => el.remove());
   if (Object.keys(hiddenObj).length === 0) return;
@@ -262,7 +251,7 @@ document.addEventListener("DOMContentLoaded", function () {
         // Update hidden-show chips after every load (initial + refetch).
         if (_allEventsCache.length > 0) {
           requestAnimationFrame(function () {
-            _updateAllHiddenChipsFromSnapshot(_allEventsCache);
+            _updateAllHiddenChips(_allEventsCache);
           });
         }
       }
