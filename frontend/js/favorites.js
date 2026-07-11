@@ -7,11 +7,10 @@ const HIDDEN_KEY    = "triangle-shows-hidden";
 // ── Favorites ──────────────────────────────────────────────────────────────
 
 function getFavorites() {
-  try { return JSON.parse(localStorage.getItem(FAVORITES_KEY) || "{}"); }
-  catch { return {}; }
+  return readJSON(FAVORITES_KEY, {});
 }
 function saveFavorites(favs) {
-  localStorage.setItem(FAVORITES_KEY, JSON.stringify(favs));
+  writeJSON(FAVORITES_KEY, favs);
 }
 function isFavorited(eventId) { return !!getFavorites()[eventId]; }
 
@@ -38,15 +37,14 @@ function _refreshHeartUI(eventId, hearted) {
 // ── Hidden events ──────────────────────────────────────────────────────────
 
 function getHidden() {
-  try { return JSON.parse(localStorage.getItem(HIDDEN_KEY) || "{}"); }
-  catch { return {}; }
+  return readJSON(HIDDEN_KEY, {});
 }
 function isHidden(eventId) { return !!getHidden()[eventId]; }
 
 function hideEvent(eventId) {
   const hidden = getHidden();
   hidden[eventId] = true;
-  localStorage.setItem(HIDDEN_KEY, JSON.stringify(hidden));
+  writeJSON(HIDDEN_KEY, hidden);
   updateBottomBar();
 }
 
@@ -74,7 +72,7 @@ function unhideForDate(date) {
     }
   });
   if (changed) {
-    localStorage.setItem(HIDDEN_KEY, JSON.stringify(hidden));
+    writeJSON(HIDDEN_KEY, hidden);
     updateBottomBar();
     if (typeof _updateHiddenChip === "function") _updateHiddenChip(date);
     if (typeof applyAllFilters === "function") requestAnimationFrame(applyAllFilters);

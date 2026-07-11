@@ -17,14 +17,13 @@ let _allEventsCache = [];
 const HIDDEN_VENUES_KEY = "triangle-shows-hidden-venues";
 
 function getHiddenVenues() {
-  try { return new Set(JSON.parse(localStorage.getItem(HIDDEN_VENUES_KEY) || "[]")); }
-  catch { return new Set(); }
+  return new Set(readJSON(HIDDEN_VENUES_KEY, []));
 }
 
 function hideVenue(slug) {
   const hidden = getHiddenVenues();
   hidden.add(slug);
-  localStorage.setItem(HIDDEN_VENUES_KEY, JSON.stringify([...hidden]));
+  writeJSON(HIDDEN_VENUES_KEY, [...hidden]);
   const label = document.querySelector(`.venue-checkbox input[data-venue="${slug}"]`)?.closest(".venue-checkbox");
   if (label) label.remove();
   _updateVenueRestoreBtn();
@@ -51,6 +50,13 @@ function _updateVenueRestoreBtn() {
   btn.textContent = `↺ restore hidden (${hidden.size})`;
   btn.addEventListener("click", restoreHiddenVenues);
   container.appendChild(btn);
+}
+
+// ── Venue checkbox accessor ───────────────────────────────────────────────────
+// Single source of truth for the sidebar's venue checkboxes. Returns an array so
+// callers can .forEach / .filter / .includes / spread without re-querying the DOM.
+function _venueCheckboxes() {
+  return [...document.querySelectorAll(".venue-checkbox input[type=checkbox]")];
 }
 
 async function loadVenues(attempt = 0) {
@@ -106,7 +112,7 @@ function renderVenueFilters() {
   // Preserve which venues are currently checked so restoring a hidden venue
   // doesn't reset other venues' selected/unselected state.
   const currentChecked = new Set();
-  document.querySelectorAll(".venue-checkbox input[type=checkbox]").forEach((cb) => {
+  _venueCheckboxes().forEach((cb) => {
     if (cb.checked) currentChecked.add(cb.dataset.venue);
   });
   const hasExistingState = currentChecked.size > 0;
@@ -178,7 +184,7 @@ function toggleForYou() {
 // Generate a webcal:// subscription URL from the currently-checked venues
 // and redirect to it, triggering the native Add Subscription dialog.
 function subscribeToVenues() {
-  const allCbs  = [...document.querySelectorAll(".venue-checkbox input[type=checkbox]")];
+  const allCbs  = _venueCheckboxes();
   const checked = allCbs.filter(cb => cb.checked);
   let path = "/feeds/events.ics";
   if (checked.length > 0 && checked.length < allCbs.length) {
@@ -233,7 +239,7 @@ const GROUPED_VENUE_SLUGS = new Set(["dpac"]);
 // FullCalendar renders them without ever calling setProp on existing EventImpls.
 function _getFilteredEvents() {
   const venueMap = {};
-  document.querySelectorAll(".venue-checkbox input[type=checkbox]").forEach((cb) => {
+  _venueCheckboxes().forEach((cb) => {
     venueMap[cb.dataset.venue] = cb.checked;
   });
   getHiddenVenues().forEach((slug) => { venueMap[slug] = false; });
@@ -307,9 +313,7 @@ function _applyAllFiltersNow() {
 //   • Only that city → click city  → restore all venues.
 //   • Mixed state    → click city  → enable all venues in that city.
 function toggleCity(city) {
-  const allCheckboxes = [
-    ...document.querySelectorAll(".venue-checkbox input[type=checkbox]"),
-  ];
+  const allCheckboxes = _venueCheckboxes();
   if (!allCheckboxes.length) return; // venues not yet loaded
 
   const cityCheckboxes = [
@@ -363,9 +367,7 @@ function updateCityChipStates() {
 // • If only one venue was enabled and user unchecks it → restore all venues.
 // • Otherwise → normal toggle.
 function toggleVenue(slug) {
-  const allCheckboxes = [
-    ...document.querySelectorAll(".venue-checkbox input[type=checkbox]"),
-  ];
+  const allCheckboxes = _venueCheckboxes();
   const cb = document.querySelector(`[data-venue="${slug}"]`);
   const checkedCount = allCheckboxes.filter((c) => c.checked).length;
   const total = allCheckboxes.length;
