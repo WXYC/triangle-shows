@@ -26,6 +26,7 @@ logger = logging.getLogger(__name__)
 #   ticketmaster      Koka Booth Amphitheatre, Red Hat Amphitheater, DPAC, The Ritz
 #   rhp_events        Lincoln Theatre, Cat's Cradle, Cat's Cradle Back Room, Local 506, The Pinhook
 #   motorco           Motorco Music Hall
+#   carolina_theatre  Carolina Theatre
 #   eventprime        Kings
 #   tribe_events      The Cave
 #   venuepilot        Haw River Ballroom, Rubies on Five Points, Stanczyks
@@ -113,6 +114,17 @@ VENUES = [
         "scraper_type": "motorco",
         "scraper_config": {"url": "https://motorcomusic.com/calendar/"},
         "color": "#1a5e76",  # peacock teal (Durham)
+    },
+    {
+        "name": "Carolina Theatre",
+        "slug": "carolina-theatre",
+        "city": "Durham",
+        "capacity": 1015,  # Fletcher Hall, the venue's main auditorium
+        "size_category": "medium",
+        "website": "https://carolinatheatre.org/",
+        "scraper_type": "carolina_theatre",
+        "scraper_config": {"url": "https://carolinatheatre.org/events/"},
+        "color": "#3a5ca8",  # steel azure (Durham)
     },
     {
         "name": "Local 506",
@@ -286,7 +298,7 @@ async def seed_venues():
     await init_db()
     async with async_session() as session:
         # Remove discontinued venues (cascade deletes their events)
-        REMOVED_SLUGS = ["carolina-theatre"]
+        REMOVED_SLUGS: list[str] = []
         for slug in REMOVED_SLUGS:
             result = await session.execute(select(Venue).where(Venue.slug == slug))
             venue = result.scalar_one_or_none()

@@ -105,10 +105,10 @@ def test_strips_framing_prefixes(billing, expected):
         # The honoree is not the performer — with no tribute-act prefix there is
         # no extractable headliner.
         ("Tribute to Duke Ellington", None),
-        ("A Tribute to Tom Petty", None),
+        ("A Tribute to John Coltrane", None),
         # A named tribute act before the framing IS the performer.
-        ("Damn the Torpedoes: A Tribute to Tom Petty", "Damn the Torpedoes"),
-        ("Petty Fest - A Tribute to Tom Petty", "Petty Fest"),
+        ("Giant Steps: A Tribute to John Coltrane", "Giant Steps"),
+        ("Trane Fest - A Tribute to John Coltrane", "Trane Fest"),
     ],
 )
 def test_tribute_framing(billing, expected):
@@ -123,8 +123,8 @@ def test_tribute_framing(billing, expected):
         "WEDNESDAY KARAOKE!",
         "Vinyl Listening Party",
         # Tag-stripping must not rescue a non-performance event into a fake artist:
-        # Gracie Abrams is not performing at her own listening party.
-        "(Record Shop) Gracie Abrams Listening Party",
+        # Cat Power is not performing at her own listening party.
+        "(Record Shop) Cat Power Listening Party",
         "Open Mic Night",
         "Music Trivia",
         "Music Bingo",

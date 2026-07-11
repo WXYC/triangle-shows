@@ -5,7 +5,10 @@ Role: Defines the ScrapedEvent dataclass (the unit of data each scraper returns)
 and BaseScraper ABC (the interface every venue scraper must implement). The scrape
 manager (scrapers/manager.py) imports BaseScraper subclasses, calls their scrape()
 method, and uses ScrapedEvent.hash for deduplication before upserting to PostgreSQL.
-Requires: No env vars or external services — pure Python stdlib only.
+BaseScraper also owns the shared HTML fetch path (fetch_soup) so the HTML scrapers
+don't each re-declare the httpx client config and BeautifulSoup parser.
+Requires: httpx and beautifulsoup4/lxml (for fetch_soup); no env vars or external
+services.
 """
 import hashlib
 import re
@@ -14,6 +17,9 @@ from dataclasses import dataclass, field
 from datetime import date, time, datetime
 from functools import cached_property
 from typing import Optional
+
+import httpx
+from bs4 import BeautifulSoup
 
 from app.scrapers.identity import UrlIdentityVerdict
 
@@ -80,14 +86,22 @@ class ScrapedEvent:
         return hashlib.sha256(raw.encode()).hexdigest()
 
 
-# --- Shared HTTP Headers ---
+# --- Shared HTTP config ---
 
-# Mimic a real browser so venue sites don't block the scraper as a bot
+# Seconds before an HTTP request is abandoned. Shared so every scraper's fetch
+# uses the same budget (a slow venue can't hang a whole scrape cycle).
+HTTP_TIMEOUT = 30
+
+# Mimic a real browser so venue sites don't block the scraper as a bot. Keep the
+# User-Agent on a current Chrome release: a stale UA is a fingerprint some venue
+# WAFs hard-block (a stale Chrome/122 was the root cause of the Carolina Theatre
+# outage), so bump this when Chrome's stable major moves on. A scraper that needs
+# its own UA can pass headers= to fetch_soup rather than editing this shared dict.
 BROWSER_HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
         "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/122.0.0.0 Safari/537.36"
+        "Chrome/137.0.0.0 Safari/537.36"
     ),
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     "Accept-Language": "en-US,en;q=0.5",
@@ -115,6 +129,60 @@ class BaseScraper(ABC):
     async def scrape(self) -> list[ScrapedEvent]:
         """Scrape events and return a list of ScrapedEvent objects."""
         ...
+
+    # --- HTTP Helpers ---
+    # Shared fetch path so the HTML scrapers don't each repeat the httpx client
+    # config + GET + raise_for_status + BeautifulSoup(..., "lxml") boilerplate.
+
+    @staticmethod
+    def http_client(headers: Optional[dict] = None) -> httpx.AsyncClient:
+        """Build the standard browser-mimicking httpx client (caller manages its lifecycle).
+
+        Multi-page scrapers that fetch detail pages open one of these with
+        ``async with self.http_client() as client:`` and pass ``client`` to each
+        ``fetch_soup`` call so a single connection pool is reused. Single-page
+        scrapers don't need this — ``fetch_soup`` opens and closes its own client.
+        Pass ``headers`` to override the shared browser headers (e.g. a venue that
+        needs a bespoke User-Agent); ``None`` uses :data:`BROWSER_HEADERS`.
+        """
+        return httpx.AsyncClient(
+            timeout=HTTP_TIMEOUT,
+            follow_redirects=True,
+            headers=headers if headers is not None else BROWSER_HEADERS,
+        )
+
+    async def fetch_soup(
+        self,
+        url: str,
+        *,
+        client: Optional[httpx.AsyncClient] = None,
+        headers: Optional[dict] = None,
+        parser: str = "lxml",
+    ) -> BeautifulSoup:
+        """GET ``url`` and return its parsed BeautifulSoup tree.
+
+        Encapsulates the client config (timeout, redirects, browser headers), the
+        GET, ``raise_for_status()``, and the BeautifulSoup parse that every HTML
+        scraper otherwise repeats. Raises ``httpx.HTTPStatusError`` on a non-2xx
+        response — a caller that treats some statuses as normal (e.g. a 404 that
+        just means "past the last page") should catch it.
+
+        Pass ``client`` to reuse an existing connection pool for extra fetches
+        (multi-page scrapers); omit it and ``fetch_soup`` opens and closes its own
+        client for the call. ``headers`` overrides the request headers: on an
+        owned client they replace the browser defaults for the whole client; on a
+        passed-in ``client`` they are per-request headers layered over whatever
+        headers that client already carries.
+        """
+        if client is not None:
+            resp = await client.get(url, headers=headers) if headers is not None else await client.get(url)
+            resp.raise_for_status()
+            return BeautifulSoup(resp.text, parser)
+
+        async with self.http_client(headers=headers) as owned_client:
+            resp = await owned_client.get(url)
+            resp.raise_for_status()
+            return BeautifulSoup(resp.text, parser)
 
     # --- Parsing Helpers ---
     # Shared utility methods so individual scrapers don't duplicate price/time logic
@@ -179,6 +247,97 @@ class BaseScraper(ABC):
             h, m = int(match.group(1)), int(match.group(2))
             if 0 <= h <= 23 and 0 <= m <= 59:
                 return time(h, m)
+        return None
+
+    # Default strptime formats tried by parse_date, in precedence order. The
+    # union of what the HTML scrapers (rhp_events, eventprime, koka_booth,
+    # webflow_cms) needed before this was consolidated. Formats that carry a
+    # %Y are tried first; the year-less pair is applied last with the
+    # current-year / roll-forward rule (see parse_date).
+    _DATE_FORMATS_WITH_YEAR = (
+        "%B %d, %Y",       # January 15, 2025
+        "%b %d, %Y",       # Jan 15, 2025
+        "%m/%d/%Y",        # 01/15/2025
+        "%m-%d-%Y",        # 01-15-2025
+        "%Y-%m-%d",        # 2025-01-15
+        "%A, %B %d, %Y",   # Wednesday, January 15, 2025
+        "%a, %b %d, %Y",   # Wed, Jan 15, 2025
+    )
+    _DATE_FORMATS_NO_YEAR = (
+        "%B %d",           # January 15
+        "%b %d",           # Jan 15
+    )
+
+    @staticmethod
+    def parse_date(text: str, formats: Optional[list[str]] = None) -> Optional[date]:
+        """Parse a date from flexible listing-page text.
+
+        Consolidates the date-text parsing previously duplicated across the HTML
+        scrapers. The steps, in order:
+
+        1. Strip a leading weekday name — abbreviated or full ("Fri, ",
+           "Saturday, ", "Thursday, ").
+        2. Strip ordinal suffixes on the day number ("26th" -> "26").
+        3. Walk ``formats`` (defaults to the class format list) and return the
+           first successful ``strptime``.
+        4. For a format that carries no year, assume the current year and roll
+           forward to next year when the resulting date is already well past
+           (more than a week ago) — so a listing that omits the year doesn't
+           back-date an upcoming show.
+
+        Args:
+            text: Raw date text from the page (may be None/blank).
+            formats: Optional explicit strptime format list. When given, it
+                replaces the default with-year list; a format is treated as
+                year-less (and gets the roll-forward rule) when it has no
+                ``%Y``/``%y`` token. When omitted, the default with-year and
+                year-less lists are both tried.
+
+        Returns:
+            A ``date``, or ``None`` if nothing parsed.
+        """
+        if not text:
+            return None
+
+        # Strip a leading weekday name. "(Mon|Tue|...)\w*" matches both the
+        # 3-letter abbreviation and the full name (e.g. "Mon" and "Monday").
+        text = re.sub(
+            r'^(Mon|Tue|Wed|Thu|Fri|Sat|Sun)\w*,?\s*', '', text.strip(), flags=re.IGNORECASE
+        )
+        # Strip ordinal suffixes on the day number ("1st"/"2nd"/"3rd"/"26th").
+        text = re.sub(r'(\d+)(st|nd|rd|th)\b', r'\1', text, flags=re.IGNORECASE)
+        text = text.strip().rstrip(',').strip()
+        if not text:
+            return None
+
+        if formats is not None:
+            # Split the caller's formats: a format is year-less only if it has no
+            # year token (and so gets the current-year / roll-forward rule below).
+            no_year = [f for f in formats if '%Y' not in f and '%y' not in f]
+            with_year = [f for f in formats if f not in no_year]
+        else:
+            with_year = list(BaseScraper._DATE_FORMATS_WITH_YEAR)
+            no_year = list(BaseScraper._DATE_FORMATS_NO_YEAR)
+
+        for fmt in with_year:
+            try:
+                return datetime.strptime(text, fmt).date()
+            except ValueError:
+                continue
+
+        for fmt in no_year:
+            try:
+                parsed = datetime.strptime(text, fmt)
+            except ValueError:
+                continue
+            today = date.today()
+            candidate = parsed.replace(year=today.year).date()
+            # Roll forward when the current-year guess is well past (more than a
+            # week ago) — the next future occurrence is the intended date.
+            if (candidate - today).days < -7:
+                candidate = candidate.replace(year=today.year + 1)
+            return candidate
+
         return None
 
     @staticmethod

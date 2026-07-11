@@ -3,7 +3,8 @@
 Role: Venue scraper invoked by the scrape manager (scrapers/manager.py) during a
 POST /api/scrape cycle. This scraper handles venues that sell tickets through TickPick
 and expose event data as schema.org JSON-LD on their organizer profile page.
-Requires: httpx, beautifulsoup4/lxml; venue config must include an "organizer_id" key.
+Requires: app.scrapers.base (BaseScraper, ScrapedEvent) for the shared fetch_soup HTTP
+path; venue config must include an "organizer_id" key.
 """
 # --- Imports ---
 import json
@@ -11,10 +12,7 @@ import logging
 from datetime import datetime, date
 from typing import Optional
 
-import httpx
-from bs4 import BeautifulSoup
-
-from app.scrapers.base import BaseScraper, ScrapedEvent, BROWSER_HEADERS
+from app.scrapers.base import BaseScraper, ScrapedEvent
 from app.scrapers.identity import UrlIdentityVerdict
 
 # --- Module-level setup ---
@@ -41,10 +39,7 @@ class TickPickOrganizerScraper(BaseScraper):
 
         url = f"https://www.tickpick.com/organizer/o/{organizer_id}"
 
-        async with httpx.AsyncClient(timeout=30, follow_redirects=True, headers=BROWSER_HEADERS) as client:
-            resp = await client.get(url)
-            resp.raise_for_status()
-            soup = BeautifulSoup(resp.text, "lxml")
+        soup = await self.fetch_soup(url)
 
         events = []
         # TickPick embeds event data as one or more <script type="application/ld+json"> blocks
