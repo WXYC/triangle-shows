@@ -10,7 +10,6 @@ Requires: BaseScraper (app.scrapers.base), httpx, BeautifulSoup (lxml parser).
 # --- Standard Library Imports ---
 import json
 import logging
-import re
 from datetime import datetime, date, time
 from typing import Optional
 
@@ -195,14 +194,9 @@ class KokaBoothScraper(BaseScraper):
                     except ValueError:
                         pass
                 if not event_date:
-                    # Strip leading weekday names ("Saturday, June 1, 2024" -> "June 1, 2024")
-                    text = re.sub(r'^(Mon|Tue|Wed|Thu|Fri|Sat|Sun)\w*,?\s*', '', date_el.get_text(strip=True))
-                    for fmt in ["%B %d, %Y", "%b %d, %Y", "%m/%d/%Y"]:
-                        try:
-                            event_date = datetime.strptime(text, fmt).date()
-                            break
-                        except ValueError:
-                            continue
+                    # Display text (e.g. "Saturday, June 1, 2024"): parse_date
+                    # strips the leading weekday name before the format walk.
+                    event_date = self.parse_date(date_el.get_text(strip=True))
 
             # Skip cards where we couldn't determine a date
             if not event_date:

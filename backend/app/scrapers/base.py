@@ -181,6 +181,97 @@ class BaseScraper(ABC):
                 return time(h, m)
         return None
 
+    # Default strptime formats tried by parse_date, in precedence order. The
+    # union of what the HTML scrapers (rhp_events, eventprime, koka_booth,
+    # webflow_cms) needed before this was consolidated. Formats that carry a
+    # %Y are tried first; the year-less pair is applied last with the
+    # current-year / roll-forward rule (see parse_date).
+    _DATE_FORMATS_WITH_YEAR = (
+        "%B %d, %Y",       # January 15, 2025
+        "%b %d, %Y",       # Jan 15, 2025
+        "%m/%d/%Y",        # 01/15/2025
+        "%m-%d-%Y",        # 01-15-2025
+        "%Y-%m-%d",        # 2025-01-15
+        "%A, %B %d, %Y",   # Wednesday, January 15, 2025
+        "%a, %b %d, %Y",   # Wed, Jan 15, 2025
+    )
+    _DATE_FORMATS_NO_YEAR = (
+        "%B %d",           # January 15
+        "%b %d",           # Jan 15
+    )
+
+    @staticmethod
+    def parse_date(text: str, formats: Optional[list[str]] = None) -> Optional[date]:
+        """Parse a date from flexible listing-page text.
+
+        Consolidates the date-text parsing previously duplicated across the HTML
+        scrapers. The steps, in order:
+
+        1. Strip a leading weekday name — abbreviated or full ("Fri, ",
+           "Saturday, ", "Thursday, ").
+        2. Strip ordinal suffixes on the day number ("26th" -> "26").
+        3. Walk ``formats`` (defaults to the class format list) and return the
+           first successful ``strptime``.
+        4. For a format that carries no year, assume the current year and roll
+           forward to next year when the resulting date is already well past
+           (more than a week ago) — so a listing that omits the year doesn't
+           back-date an upcoming show.
+
+        Args:
+            text: Raw date text from the page (may be None/blank).
+            formats: Optional explicit strptime format list. When given, it
+                replaces the default with-year list; a format is treated as
+                year-less (and gets the roll-forward rule) when it has no
+                ``%Y``/``%y`` token. When omitted, the default with-year and
+                year-less lists are both tried.
+
+        Returns:
+            A ``date``, or ``None`` if nothing parsed.
+        """
+        if not text:
+            return None
+
+        # Strip a leading weekday name. "(Mon|Tue|...)\w*" matches both the
+        # 3-letter abbreviation and the full name (e.g. "Mon" and "Monday").
+        text = re.sub(
+            r'^(Mon|Tue|Wed|Thu|Fri|Sat|Sun)\w*,?\s*', '', text.strip(), flags=re.IGNORECASE
+        )
+        # Strip ordinal suffixes on the day number ("1st"/"2nd"/"3rd"/"26th").
+        text = re.sub(r'(\d+)(st|nd|rd|th)\b', r'\1', text, flags=re.IGNORECASE)
+        text = text.strip().rstrip(',').strip()
+        if not text:
+            return None
+
+        if formats is not None:
+            with_year = list(formats)
+            # A caller-supplied format is year-less only if it has no year token.
+            no_year = [f for f in formats if '%Y' not in f and '%y' not in f]
+            with_year = [f for f in formats if f not in no_year]
+        else:
+            with_year = list(BaseScraper._DATE_FORMATS_WITH_YEAR)
+            no_year = list(BaseScraper._DATE_FORMATS_NO_YEAR)
+
+        for fmt in with_year:
+            try:
+                return datetime.strptime(text, fmt).date()
+            except ValueError:
+                continue
+
+        for fmt in no_year:
+            try:
+                parsed = datetime.strptime(text, fmt)
+            except ValueError:
+                continue
+            today = date.today()
+            candidate = parsed.replace(year=today.year).date()
+            # Roll forward when the current-year guess is well past (more than a
+            # week ago) — the next future occurrence is the intended date.
+            if (candidate - today).days < -7:
+                candidate = candidate.replace(year=today.year + 1)
+            return candidate
+
+        return None
+
     @staticmethod
     def normalize_name(name: str) -> str:
         """Normalize event/artist name for comparison."""

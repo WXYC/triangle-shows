@@ -11,7 +11,7 @@ Requires: httpx, beautifulsoup4 (lxml parser), app.scrapers.base.
 # --- Imports ---
 import logging
 import re
-from datetime import datetime, date, time
+from datetime import date
 from typing import Optional
 
 import httpx
@@ -144,7 +144,7 @@ class RHPEventsScraper(BaseScraper):
 
                 if not event_date:
                     date_text = date_el.get_text(strip=True)
-                    event_date = self._parse_date_text(date_text)
+                    event_date = self.parse_date(date_text)
 
             if not event_date:
                 # Without a date the event is unusable — skip it
@@ -244,35 +244,3 @@ class RHPEventsScraper(BaseScraper):
         except Exception as e:
             logger.warning(f"[RHP] Failed to parse event: {e}")
             return None
-
-    # --- Date parsing helper ---
-
-    @staticmethod
-    def _parse_date_text(text: str) -> Optional[date]:
-        """Parse date from various text formats."""
-        text = text.strip()
-        # Clean common prefixes
-        text = re.sub(r'^(Mon|Tue|Wed|Thu|Fri|Sat|Sun)\w*,?\s*', '', text).strip()
-        # Try common formats
-        formats = [
-            "%B %d, %Y",      # January 15, 2025
-            "%b %d, %Y",      # Jan 15, 2025
-            "%m/%d/%Y",        # 01/15/2025
-            "%m-%d-%Y",        # 01-15-2025
-            "%Y-%m-%d",        # 2025-01-15
-            "%A, %B %d, %Y",  # Wednesday, January 15, 2025
-            "%a, %b %d, %Y",  # Wed, Jan 15, 2025
-        ]
-        for fmt in formats:
-            try:
-                return datetime.strptime(text, fmt).date()
-            except ValueError:
-                continue
-        # Try month+day only (no year) — assume current year
-        for fmt in ("%B %d", "%b %d"):
-            try:
-                parsed = datetime.strptime(text, fmt)
-                return parsed.replace(year=datetime.now().year).date()
-            except ValueError:
-                continue
-        return None

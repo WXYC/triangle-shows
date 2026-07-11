@@ -9,7 +9,6 @@ Currently used by: Pour House.
 # --- Imports ---
 import logging
 import re
-from datetime import datetime
 
 import httpx
 from bs4 import BeautifulSoup
@@ -82,9 +81,10 @@ class WebflowCMSScraper(BaseScraper):
                 if not name or not date_str:
                     continue
 
-                try:
-                    event_date = datetime.strptime(date_str, date_fmt).date()
-                except ValueError:
+                # Route through the shared parser using this venue's configured
+                # format; it also tolerates a leading weekday / ordinal suffix.
+                event_date = self.parse_date(date_str, formats=[date_fmt])
+                if not event_date:
                     logger.warning(f"[WebflowCMS] Cannot parse date '{date_str}' for {self.venue_slug}")
                     continue
 
