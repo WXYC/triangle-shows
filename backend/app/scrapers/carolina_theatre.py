@@ -30,6 +30,21 @@ MONTHS = {
     "jul": 7, "aug": 8, "sep": 9, "oct": 10, "nov": 11, "dec": 12,
 }
 
+# The venue's nginx WAF hard-blocks the shared BROWSER_HEADERS User-Agent (the
+# stale Windows/Chrome 122 string) with a 403, while the byte-identical request
+# under a current browser UA returns 200 — the block keys on the UA string, not
+# on request behavior or rate. Override only the User-Agent here (keeping the
+# shared Accept/Accept-Language) so the workaround is scoped to this venue and
+# the other scrapers that share BROWSER_HEADERS are left untouched.
+CAROLINA_HEADERS = {
+    **BROWSER_HEADERS,
+    "User-Agent": (
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/126.0.0.0 Safari/537.36"
+    ),
+}
+
 
 # --- Scraper class ---
 
@@ -55,7 +70,7 @@ class CarolinaTheatreScraper(BaseScraper):
         url = self.config.get("url", "https://carolinatheatre.org/events/")
         events = []
 
-        async with httpx.AsyncClient(timeout=30, follow_redirects=True, headers=BROWSER_HEADERS) as client:
+        async with httpx.AsyncClient(timeout=30, follow_redirects=True, headers=CAROLINA_HEADERS) as client:
             resp = await client.get(url)
             resp.raise_for_status()
             soup = BeautifulSoup(resp.text, "lxml")
