@@ -63,3 +63,69 @@ async def test_rescrape_with_changed_data_bumps_updated_at_and_counter(session, 
     await session.refresh(event)
     assert event.price_min == 15.0
     assert event.updated_at > first_updated_at
+
+
+# --- headliner derivation (issue #18) ---
+# The upsert derives Event.headliner on every pass: from the scraper's structured
+# performer when supplied, else heuristically from the billing string. Unlike the
+# merge-preserved optional fields, it is assigned unconditionally so it tracks the
+# current name — including recomputing to NULL on a rename to a non-performance
+# billing.
+
+
+async def test_upsert_derives_headliner_from_billing_string(session, make_venue):
+    venue = await make_venue()
+    manager = ScrapeManager(session)
+
+    billing = "Juana Molina w/ Truth Club"
+    await manager._upsert_events(venue.id, [_scraped(venue.slug, name=billing, artist=billing)])
+    await session.commit()
+
+    event = (await session.execute(select(Event))).scalar_one()
+    # name and artist keep the full billing — headliner is additive (issue #18).
+    assert event.name == billing
+    assert event.artist == billing
+    assert event.headliner == "Juana Molina"
+
+
+async def test_upsert_prefers_scraper_supplied_performer_over_name(session, make_venue):
+    venue = await make_venue()
+    manager = ScrapeManager(session)
+
+    # A structured performer (JSON-LD Event.performer, TM attractions) beats the
+    # name heuristic — the name here would heuristically yield the full title.
+    scraped = _scraped(
+        venue.slug,
+        name="Mdou Moctar: Village Tour Kickoff",
+        headliner="Mdou Moctar",
+    )
+    await manager._upsert_events(venue.id, [scraped])
+    await session.commit()
+
+    event = (await session.execute(select(Event))).scalar_one()
+    assert event.headliner == "Mdou Moctar"
+
+
+async def test_rename_recomputes_headliner_and_can_null_it(session, make_venue):
+    venue = await make_venue()
+    manager = ScrapeManager(session)
+
+    # ext-keyed identity so the rename reconciles onto the same row.
+    await manager._upsert_events(
+        venue.id,
+        [_scraped(venue.slug, external_id="tm-1", name="Jessica Pratt w/ Weak Signal", artist=None)],
+    )
+    await session.commit()
+    event = (await session.execute(select(Event))).scalar_one()
+    assert event.headliner == "Jessica Pratt"
+
+    # The venue repurposes the listing: derived headliner must follow the new
+    # name, not merge-preserve the stale artist.
+    await manager._upsert_events(
+        venue.id,
+        [_scraped(venue.slug, external_id="tm-1", name="WEDNESDAY KARAOKE!", artist=None)],
+    )
+    await session.commit()
+    await session.refresh(event)
+    assert event.name == "WEDNESDAY KARAOKE!"
+    assert event.headliner is None

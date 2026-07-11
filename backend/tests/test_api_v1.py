@@ -19,6 +19,25 @@ async def test_v1_events_returns_neutral_shape(client, make_event):
         assert presentation_key not in ev
 
 
+async def test_v1_events_expose_headliner_additively(client, make_event):
+    billing = "Acid Mother's Temple w/ Magick Potion"
+    await make_event(name=billing, artist=billing, headliner="Acid Mother's Temple", date=D)
+    ev = (await client.get("/api/v1/events")).json()[0]
+    # The cleaned performer is its own field; name and artist keep the full
+    # billing byte-identical — additive, never a repurpose (issue #18).
+    assert ev["headliner"] == "Acid Mother's Temple"
+    assert ev["name"] == billing
+    assert ev["artist"] == billing
+
+
+async def test_v1_events_headliner_is_null_when_never_derived(client, make_event):
+    # Rows that predate the field (or were never rescraped) carry null — the
+    # field is documented best-effort and consumers fall back themselves.
+    await make_event(artist="Juana Molina", date=D)
+    ev = (await client.get("/api/v1/events")).json()[0]
+    assert ev["headliner"] is None
+
+
 async def test_v1_events_updated_at_carries_utc_offset(client, make_event):
     await make_event(artist="Nilüfer Yanya", date=D)
     ev = (await client.get("/api/v1/events")).json()[0]

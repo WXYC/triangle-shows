@@ -25,6 +25,7 @@ from app.config import settings
 from app.market_time import today_in_triangle
 from app.models import Venue, Event, EventMissState, ScrapeLog
 from app.scrapers.base import BaseScraper, ScrapedEvent
+from app.scrapers.headliner import extract_headliner
 from app.scrapers.identity import (
     UrlIdentityVerdict,
     derive_source_key,
@@ -292,6 +293,14 @@ class ScrapeManager:
         claimed: set[int] = set()
 
         for key, (se, h, norm, demoted) in batch.items():
+            # Best-effort clean performer (issue #18): the scraper's structured
+            # performer when it supplied one, else the billing string, both run
+            # through the same conservative cleanup. Sliced to the column width
+            # (name is String(500), headliner String(300)).
+            headliner = extract_headliner(se.headliner or se.name)
+            if headliner:
+                headliner = headliner[:300]
+
             existing = match(se, h, norm, key)
             if existing is not None and existing.id in claimed:
                 # Two batch identities resolved to one stored row (e.g. an ext-keyed
@@ -309,6 +318,11 @@ class ScrapeManager:
                 existing.price_min = se.price_min
                 existing.price_max = se.price_max
                 existing.status = se.status
+                # headliner is derived data — it tracks the current name/performer
+                # deterministically (assigned unconditionally, unlike the merge-
+                # preserved fields below), so a rename to a non-performance billing
+                # correctly nulls it instead of leaving a stale artist behind.
+                existing.headliner = headliner
                 # Prefer the freshly scraped value but fall back to whatever we already
                 # have stored so we don't accidentally blank out previously-good data.
                 existing.artist = se.artist or existing.artist
@@ -351,6 +365,7 @@ class ScrapeManager:
                     venue_id=venue_id,
                     name=se.name,
                     artist=se.artist,
+                    headliner=headliner,
                     support_artists=se.support_artists,
                     date=se.date,
                     doors_time=se.doors_time,

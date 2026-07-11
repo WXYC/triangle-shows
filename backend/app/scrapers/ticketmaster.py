@@ -253,6 +253,10 @@ class TicketmasterScraper(BaseScraper):
                 source="ticketmaster",
                 external_id=ev.get("id"),
                 artist=artist,
+                # Structured clean performer: TM's first attraction is the headliner
+                # (None when the event has no attractions — the manager then derives
+                # one heuristically from the name).
+                headliner=artist,
                 support_artists=", ".join(support) if support else None,
                 show_time=show_time,
                 ticket_url=ticket_url,

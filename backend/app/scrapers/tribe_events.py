@@ -174,6 +174,11 @@ class TribeEventsScraper(BaseScraper):
                 else:
                     support.append(p_name)
 
+            # The structured first performer (when present) is the clean headliner
+            # source — captured before the name fallback below so the manager only
+            # falls back to heuristic name extraction when the source had none.
+            headliner = artist or None
+
             # Fall back to event name when no performer is listed
             if not artist:
                 artist = name
@@ -225,6 +230,7 @@ class TribeEventsScraper(BaseScraper):
                 venue_slug=self.venue_slug,
                 source="tribe_events",
                 artist=artist,
+                headliner=headliner,
                 support_artists=", ".join(support) if support else None,
                 doors_time=doors_time,
                 show_time=show_time,

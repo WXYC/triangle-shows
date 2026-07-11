@@ -30,6 +30,11 @@ class ScrapedEvent:
     # Optional fields — scrapers fill in what their venue page exposes
     external_id: Optional[str] = None
     artist: Optional[str] = None
+    # Structured clean performer from the source (schema.org Event.performer,
+    # Ticketmaster attractions[0]) when the scraper has one — NOT a copy of the
+    # billing string. The scrape manager derives the stored Event.headliner by
+    # running this (or, when None, the name) through headliner.extract_headliner.
+    headliner: Optional[str] = None
     support_artists: Optional[str] = None
     doors_time: Optional[time] = None
     show_time: Optional[time] = None
