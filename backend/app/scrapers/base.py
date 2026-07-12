@@ -19,6 +19,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import date, time, datetime
 from functools import cached_property
+from html import unescape
 from typing import Optional
 
 import httpx
@@ -36,6 +37,8 @@ from app.scrapers.identity import UrlIdentityVerdict
 # or restyle the page. Everything outside these sets is dropped. Keep this list
 # tight — it is the trust boundary for that innerHTML sink.
 _ALLOWED_TAGS = {"p", "br", "strong", "b", "em", "i", "u", "a", "ul", "ol", "li"}
+# href/title on <a> only. nh3 also permits its default generic attributes (title,
+# lang) on every tag regardless of this map; both are inert, so that is harmless.
 _ALLOWED_ATTRIBUTES = {"a": {"href", "title"}}
 # Tags whose *contents* are dropped too (not just unwrapped). Anything not in
 # _ALLOWED_TAGS is unwrapped with its text kept, which for <script>/<style> would
@@ -46,6 +49,39 @@ _STRIP_CONTENT_TAGS = {"script", "style"}
 # harmless because the sanitizer re-closes tags. (The JSON scrapers additionally
 # pre-truncate, so this is mostly a guard for direct/future callers.)
 _DESCRIPTION_INPUT_LIMIT = 2000
+
+
+def _http_href_only(tag: str, attr: str, value: str) -> Optional[str]:
+    """nh3 ``attribute_filter``: allow only absolute http(s) URLs on ``<a href>``.
+
+    nh3's ``url_schemes`` already drops ``javascript:``/``vbscript:``/``data:``,
+    but a scheme-relative (``//host``) or root-relative (``/path``) href has no
+    scheme for that filter to catch and would render as a navigable off-site link
+    inside the trusted modal. Restrict description links to absolute http/https —
+    the same guard the modal's ticket button uses (``frontend/js/modal.js``) —
+    dropping anything else while leaving the link text intact. Every other
+    attribute (``title``, and nh3's injected ``rel``) passes through unchanged.
+    """
+    if tag == "a" and attr == "href" and not value.lower().startswith(("http://", "https://")):
+        return None
+    return value
+
+
+def _has_renderable_content(cleaned: str) -> bool:
+    """True when sanitized markup has something a reader would see or click.
+
+    Visible text OR a usable link counts. Recovers the visible text by having nh3
+    strip every tag (``tags=set()``) and then decoding entities — a real parser, so
+    it is safe against the unescaped ``<``/``>`` nh3 leaves inside attribute values
+    (a ``<[^>]+>`` regex would mis-split on those and leak attribute text as
+    "visible", while a BeautifulSoup reparse spams ``MarkupResemblesLocatorWarning``
+    on URL-like bodies). A text-less but linked blurb is kept via the href check
+    (case-insensitive: nh3 preserves the scheme's original case) so a lone link
+    isn't discarded as empty.
+    """
+    if unescape(nh3.clean(cleaned, tags=set(), attributes={})).strip():
+        return True
+    return 'href="http' in cleaned.lower()
 
 
 def clean_description(raw, limit: int = _DESCRIPTION_INPUT_LIMIT) -> Optional[str]:
@@ -63,13 +99,17 @@ def clean_description(raw, limit: int = _DESCRIPTION_INPUT_LIMIT) -> Optional[st
     :data:`_STRIP_CONTENT_TAGS` contents entirely — so ``style``,
     ``data-rte-preserve-empty``, ``class``, event handlers, ``<script>``,
     ``<img>``, ``<iframe>``, and ``javascript:`` URLs are all stripped, while the
-    prose survives. ``<a>`` links get ``rel="noopener noreferrer"``.
+    prose survives. ``<a>`` links get ``rel="noopener noreferrer"`` and are held to
+    absolute http/https targets (:func:`_http_href_only`), so a scheme- or
+    root-relative href can't smuggle an off-site link into the modal.
 
     ``ScrapedEvent.__post_init__`` runs this over every scraper's output, so this is
     the single choke point — a new scraper gets sanitized descriptions for free.
     Non-string input (a JSON feed can put a dict/list where a body string belongs)
-    yields ``None`` rather than raising. Markup that carries no visible text
-    (empty/whitespace-only paragraphs) collapses to ``None``.
+    yields ``None`` rather than raising. Markup with nothing a reader would see or
+    click (empty/whitespace-only paragraphs, or an image-only body whose ``<img>``
+    was stripped) collapses to ``None``. Idempotent: re-cleaning an already-cleaned
+    value returns it unchanged, so the deploy-time backfill can run more than once.
     """
     if not isinstance(raw, str) or not raw:
         return None
@@ -78,12 +118,11 @@ def clean_description(raw, limit: int = _DESCRIPTION_INPUT_LIMIT) -> Optional[st
         tags=_ALLOWED_TAGS,
         attributes=_ALLOWED_ATTRIBUTES,
         clean_content_tags=_STRIP_CONTENT_TAGS,
+        attribute_filter=_http_href_only,
     ).strip()
-    if not cleaned:
-        return None
-    # Drop results that sanitize down to markup with no readable text (e.g. a lone
-    # empty <p></p>): they would render as blank space with no content.
-    if not BeautifulSoup(cleaned, "html.parser").get_text(strip=True):
+    if not cleaned or not _has_renderable_content(cleaned):
+        # Nothing a reader would see or click (a lone empty <p></p>, or an
+        # image-only body whose <img> was stripped) — store NULL, not blank markup.
         return None
     return cleaned
 
