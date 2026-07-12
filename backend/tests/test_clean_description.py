@@ -16,6 +16,7 @@ The Boom Club sample below is the real shape that surfaced the bug; the injected
 ``<script>`` and inline ``style`` stand in for hostile markup a feed could carry.
 """
 
+import warnings
 from datetime import date
 
 import pytest
@@ -151,3 +152,71 @@ class TestScrapedEventAppliesSanitizing:
 
     def test_post_init_leaves_plain_text_readable(self):
         assert _text(self._event("Jessica Pratt").description) == "Jessica Pratt"
+
+
+class TestLinkSafety:
+    """Links are held to absolute http/https so a feed can't inject off-site nav."""
+
+    @pytest.mark.parametrize("url", ["https://boom-club.org/e", "http://venue.example/tix"])
+    def test_keeps_absolute_http_and_https(self, url):
+        out = clean_description(f'<p><a href="{url}">tickets</a></p>')
+        assert f'href="{url}"' in out
+        assert 'rel="noopener noreferrer"' in out
+
+    def test_drops_scheme_relative_href_keeps_text(self):
+        # `//host` carries no scheme for nh3's url_schemes to catch; it would
+        # otherwise render as a navigable off-site link inside the trusted modal.
+        out = clean_description('<p><a href="//evil.example/pay">Buy tickets</a></p>')
+        assert "evil.example" not in out
+        assert "href=" not in out              # no usable href survives
+        assert "Buy tickets" in _text(out)     # link text preserved
+
+    def test_drops_root_relative_href(self):
+        out = clean_description('<p><a href="/local/path">here</a></p>')
+        assert "href=" not in out
+        assert "here" in _text(out)
+
+    def test_drops_mailto_and_other_schemes(self):
+        # Consistent with the modal's ticket-button guard (http/https only).
+        out = clean_description('<p><a href="mailto:box@venue.org">email</a></p>')
+        assert "mailto:" not in out
+        assert "email" in _text(out)
+
+
+class TestRenderableContent:
+    """The empty-check keeps anything a reader would see or click, drops the rest."""
+
+    def test_textless_but_linked_blurb_is_preserved(self):
+        # A link with only whitespace text still carries a usable destination, so
+        # it must not be discarded as "empty".
+        out = clean_description('<a href="https://tickets.example">   </a>')
+        assert out is not None
+        assert 'href="https://tickets.example"' in out
+
+    def test_image_only_body_becomes_none(self):
+        # <img> is not allowlisted, so an image-only body has nothing to render.
+        assert clean_description('<p><img src="poster.jpg" alt="show"></p>') is None
+
+    def test_textless_link_preserved_regardless_of_scheme_case(self):
+        # nh3 keeps the scheme's original case, so the "usable link" check must be
+        # case-insensitive or an uppercase-scheme link would be wrongly dropped.
+        out = clean_description('<a href="HTTPS://tickets.example">   </a>')
+        assert out is not None
+        assert "tickets.example" in out
+
+    @pytest.mark.parametrize(
+        "value",
+        ['<p title="foo>bar">   </p>', '<a href="//shop.co" title="50% off >">   </a>'],
+    )
+    def test_empty_body_with_angle_bracket_in_attribute_is_dropped(self, value):
+        # nh3 leaves a literal '>' inside attribute values; the empty-check must use
+        # a real parser (a tag-stripping regex mis-splits on that '>' and leaks the
+        # attribute text as "visible"), so a text-less body is correctly dropped.
+        assert clean_description(value) is None
+
+    def test_url_only_description_does_not_warn(self):
+        # The empty-check must not re-parse with BeautifulSoup, which raises
+        # MarkupResemblesLocatorWarning on URL-like bodies and spams scrape logs.
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            assert clean_description("https://example.com/show") == "https://example.com/show"
