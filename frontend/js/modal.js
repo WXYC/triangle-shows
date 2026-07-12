@@ -132,6 +132,11 @@ function openModal(eventInfo) {
     ? `<a href="${safeUrl}" target="_blank" rel="noopener" class="btn-tickets">Get Tickets</a>`
     : "";
 
+  // Every interpolated field is escaped via _h() EXCEPT props.description, which is
+  // intentionally injected as HTML: the backend sanitizes it to a safe tag/attribute
+  // allowlist (app/scrapers/base.py::clean_description) so blurbs keep their
+  // paragraphs, emphasis, and links. Do not wrap it in _h() (that re-shows the tags)
+  // and do not add other raw-HTML fields here without server-side sanitization.
   el.innerHTML = `
     ${imageHtml}
     <div class="modal-body">
@@ -149,7 +154,7 @@ function openModal(eventInfo) {
       ${priceHtml}
       ${genreHtml}
       ${ageHtml}
-      ${props.description ? `<p class="modal-description">${_h(props.description)}</p>` : ""}
+      ${props.description ? `<div class="modal-description">${props.description}</div>` : ""}
       ${ticketBtn}
     </div>
   `;

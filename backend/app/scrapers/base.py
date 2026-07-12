@@ -6,9 +6,12 @@ and BaseScraper ABC (the interface every venue scraper must implement). The scra
 manager (scrapers/manager.py) imports BaseScraper subclasses, calls their scrape()
 method, and uses ScrapedEvent.hash for deduplication before upserting to PostgreSQL.
 BaseScraper also owns the shared HTML fetch path (fetch_soup) so the HTML scrapers
-don't each re-declare the httpx client config and BeautifulSoup parser.
-Requires: httpx and beautifulsoup4/lxml (for fetch_soup); no env vars or external
-services.
+don't each re-declare the httpx client config and BeautifulSoup parser. This module
+also owns clean_description, which ScrapedEvent.__post_init__ runs over every
+scraper's description to sanitize venue rich-text HTML down to a safe subset before
+it reaches the frontend (which renders that one field as HTML).
+Requires: httpx and beautifulsoup4/lxml (for fetch_soup), nh3 (for description
+sanitization); no env vars or external services.
 """
 import hashlib
 import re
@@ -19,9 +22,70 @@ from functools import cached_property
 from typing import Optional
 
 import httpx
+import nh3
 from bs4 import BeautifulSoup
 
 from app.scrapers.identity import UrlIdentityVerdict
+
+
+# --- Description cleaning ---
+
+# The description is the one scraped field the web modal renders as HTML rather
+# than escaped text (frontend/js/modal.js), so it is sanitized here to a strict
+# allowlist: enough for readable multi-paragraph blurbs, nothing that can script
+# or restyle the page. Everything outside these sets is dropped. Keep this list
+# tight — it is the trust boundary for that innerHTML sink.
+_ALLOWED_TAGS = {"p", "br", "strong", "b", "em", "i", "u", "a", "ul", "ol", "li"}
+_ALLOWED_ATTRIBUTES = {"a": {"href", "title"}}
+# Tags whose *contents* are dropped too (not just unwrapped). Anything not in
+# _ALLOWED_TAGS is unwrapped with its text kept, which for <script>/<style> would
+# leak code as visible text — remove those wholesale instead.
+_STRIP_CONTENT_TAGS = {"script", "style"}
+# Bound on the raw markup handed to the sanitizer: caps stored size and sanitizer
+# work. Generous enough for a full multi-paragraph blurb; a mid-tag cut here is
+# harmless because the sanitizer re-closes tags. (The JSON scrapers additionally
+# pre-truncate, so this is mostly a guard for direct/future callers.)
+_DESCRIPTION_INPUT_LIMIT = 2000
+
+
+def clean_description(raw, limit: int = _DESCRIPTION_INPUT_LIMIT) -> Optional[str]:
+    """Sanitize a scraped description to a safe HTML subset, or ``None`` when empty.
+
+    Venue feeds hand scrapers rich-text HTML — Squarespace's RTE emits
+    ``<p style="white-space:pre-wrap;" data-rte-preserve-empty="true">…</p>`` and
+    the JSON-LD scrapers (tribe_events, mec) copy whatever markup the venue
+    authored. The web modal renders this field as HTML (``frontend/js/modal.js``)
+    so blurbs keep their paragraphs, emphasis, and links, which means the stored
+    value must already be safe: this is the sanitization boundary for that sink.
+
+    ``nh3`` (ammonia) keeps only :data:`_ALLOWED_TAGS`/:data:`_ALLOWED_ATTRIBUTES`,
+    unwraps every other tag (keeping its text), and drops
+    :data:`_STRIP_CONTENT_TAGS` contents entirely — so ``style``,
+    ``data-rte-preserve-empty``, ``class``, event handlers, ``<script>``,
+    ``<img>``, ``<iframe>``, and ``javascript:`` URLs are all stripped, while the
+    prose survives. ``<a>`` links get ``rel="noopener noreferrer"``.
+
+    ``ScrapedEvent.__post_init__`` runs this over every scraper's output, so this is
+    the single choke point — a new scraper gets sanitized descriptions for free.
+    Non-string input (a JSON feed can put a dict/list where a body string belongs)
+    yields ``None`` rather than raising. Markup that carries no visible text
+    (empty/whitespace-only paragraphs) collapses to ``None``.
+    """
+    if not isinstance(raw, str) or not raw:
+        return None
+    cleaned = nh3.clean(
+        raw[:limit],
+        tags=_ALLOWED_TAGS,
+        attributes=_ALLOWED_ATTRIBUTES,
+        clean_content_tags=_STRIP_CONTENT_TAGS,
+    ).strip()
+    if not cleaned:
+        return None
+    # Drop results that sanitize down to markup with no readable text (e.g. a lone
+    # empty <p></p>): they would render as blank space with no content.
+    if not BeautifulSoup(cleaned, "html.parser").get_text(strip=True):
+        return None
+    return cleaned
 
 
 # --- ScrapedEvent Dataclass ---
@@ -68,6 +132,11 @@ class ScrapedEvent:
         # and would fail the varchar column bind — treat it as no URL.
         if self.source_url is not None and not isinstance(self.source_url, str):
             self.source_url = None
+        # Venue feeds put rich-text HTML in the description (Squarespace RTE,
+        # JSON-LD). The frontend renders this field as HTML, so sanitize it to a
+        # safe subset at this single choke point — every scraper's stored
+        # description is then trusted markup.
+        self.description = clean_description(self.description)
 
     @cached_property
     def hash(self) -> str:
