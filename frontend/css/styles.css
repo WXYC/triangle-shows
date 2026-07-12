@@ -902,6 +902,14 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
   color: var(--muted);
   line-height: 1.5;
 }
+/* Server-sanitized rich text: tighten the default block margins so multi-paragraph
+   blurbs read as spaced paragraphs, not double-height gaps, and keep links legible. */
+.modal-description p { margin: 0 0 0.5rem; }
+.modal-description p:last-child { margin-bottom: 0; }
+.modal-description ul,
+.modal-description ol { margin: 0 0 0.5rem; padding-left: 1.25rem; }
+.modal-description a { color: var(--accent); text-decoration: underline; }
+.modal-description a:hover { color: var(--accent-hover); }
 
 /* Badges */
 .badge {
