@@ -42,7 +42,7 @@ test("time formatting is 12-hour with no leading zero on the hour", () => {
 
 test("toFullCalendarEvent produces the exact shape the calendar + modal read", () => {
   const neutral = {
-    id: 42, name: "DOGA release", artist: "Juana Molina", support_artists: "Support Act",
+    id: 42, name: "DOGA release", artist: "Juana Molina", support_artists: ["Support Act"],
     date: "2026-08-01", doors_time: "19:00:00", show_time: "20:00:00",
     ticket_url: "https://tix", price_min: 20, price_max: 25, image_url: "https://img",
     genre: "Rock", subgenre: "Experimental", status: "on_sale", age_restriction: "18+",
@@ -72,6 +72,8 @@ test("toFullCalendarEvent produces the exact shape the calendar + modal read", (
   assert.equal(fc.extendedProps.doors_time, "7:00 PM");
   assert.equal(fc.extendedProps.price, "$20-$25");
   assert.equal(fc.extendedProps.price_min, 20); // raw number preserved alongside the string
+  // support_artists rides through as an array (lossless); the modal joins it for display.
+  assert.deepEqual(fc.extendedProps.support_artists, ["Support Act"]);
 });
 
 test("falls back to name for the title and to the default color when venue_color is absent", () => {
@@ -79,4 +81,7 @@ test("falls back to name for the title and to the default color when venue_color
   assert.equal(fc.title, "Open Mic");
   assert.equal(fc.backgroundColor, "#6366f1");
   assert.equal(fc.extendedProps.venue_color, "#6366f1");
+  // An event with no support_artists key must still surface an array (never undefined),
+  // so the modal's `?.length` guard has a non-null contract to lean on. Locks in `?? []`.
+  assert.deepEqual(fc.extendedProps.support_artists, []);
 });

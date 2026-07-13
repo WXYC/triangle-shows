@@ -97,7 +97,9 @@ async def get_ical_feed(
             # Include full event name when it differs from the headline artist
             desc_parts.append(event.name)
         if event.support_artists:
-            desc_parts.append(f"w/ {event.support_artists}")
+            # support_artists is a list; an empty list is falsy, so the guard above
+            # still skips it. Join the names for human-readable display.
+            desc_parts.append(f"w/ {', '.join(event.support_artists)}")
         if event.doors_time:
             desc_parts.append(f"Doors: {event.doors_time.strftime('%-I:%M %p')}")
         if event.show_time:

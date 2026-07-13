@@ -28,7 +28,7 @@ function _buildEventRow(ev) {
         <span class="modal-group-event-title">${_h(ev.title)}</span>
         ${badge}
       </div>
-      ${p.support_artists ? `<div class="modal-group-support">with ${_h(p.support_artists)}</div>` : ""}
+      ${p.support_artists?.length ? `<div class="modal-group-support">with ${_h(p.support_artists.join(", "))}</div>` : ""}
       ${meta ? `<div class="modal-group-meta">${meta}</div>` : ""}
       ${safeUrl ? `<a href="${safeUrl}" target="_blank" rel="noopener" class="btn-tickets btn-tickets-sm">Get Tickets</a>` : ""}
     </div>`;
@@ -121,9 +121,10 @@ function openModal(eventInfo) {
     ? `<div class="modal-age">${_h(props.age_restriction)}</div>`
     : "";
 
-  // Support
-  const supportHtml = props.support_artists
-    ? `<div class="modal-support">with ${_h(props.support_artists)}</div>`
+  // Support — support_artists is an array; an EMPTY array is truthy in JS, so guard
+  // on length (not the array itself) before rendering "with …", and join for display.
+  const supportHtml = props.support_artists?.length
+    ? `<div class="modal-support">with ${_h(props.support_artists.join(", "))}</div>`
     : "";
 
   // Ticket button — only allow http/https URLs

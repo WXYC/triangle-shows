@@ -126,6 +126,76 @@ async def test_structured_performer_is_stored_verbatim_not_heuristically_mangled
     assert event.headliner == "Karaoke From Hell"
 
 
+# --- support_artists array wire (issue #40) ---
+# ScrapedEvent still carries a comma-joined string in this PR; the upsert splits it
+# into the stored text[] via _split_support. These lock that boundary: a comma string
+# becomes a list, and an empty scrape falls back to the stored list on update.
+
+
+async def test_upsert_splits_support_artists_string_into_list(session, make_venue):
+    venue = await make_venue()
+    manager = ScrapeManager(session)
+
+    await manager._upsert_events(
+        venue.id, [_scraped(venue.slug, support_artists="Truth Club, Weak Signal")]
+    )
+    await session.commit()
+
+    event = (await session.execute(select(Event))).scalar_one()
+    assert event.support_artists == ["Truth Club", "Weak Signal"]
+
+
+async def test_upsert_support_artists_empty_when_none_supplied(session, make_venue):
+    venue = await make_venue()
+    manager = ScrapeManager(session)
+
+    await manager._upsert_events(venue.id, [_scraped(venue.slug)])
+    await session.commit()
+
+    event = (await session.execute(select(Event))).scalar_one()
+    # Never NULL — an absent billing yields the empty list (matches the model default).
+    assert event.support_artists == []
+
+
+async def test_upsert_empty_support_falls_back_to_stored_list(session, make_venue):
+    venue = await make_venue()
+    manager = ScrapeManager(session)
+
+    # ext-keyed identity so the rescrape reconciles onto the same row.
+    await manager._upsert_events(
+        venue.id,
+        [_scraped(venue.slug, external_id="tm-1", support_artists="Truth Club, Weak Signal")],
+    )
+    await session.commit()
+    event = (await session.execute(select(Event))).scalar_one()
+    assert event.support_artists == ["Truth Club", "Weak Signal"]
+
+    # A later scrape with no support names must NOT blank the stored list — an empty
+    # split is falsy, so it falls back, matching the pre-array "or" merge semantics.
+    await manager._upsert_events(
+        venue.id, [_scraped(venue.slug, external_id="tm-1", support_artists=None)]
+    )
+    await session.commit()
+    await session.refresh(event)
+    assert event.support_artists == ["Truth Club", "Weak Signal"]
+
+
+async def test_upsert_preserves_comma_in_a_single_support_name(session, make_venue):
+    venue = await make_venue()
+    manager = ScrapeManager(session)
+
+    # The whole point of the array wire: a name with an internal comma must NOT be
+    # split into fake acts. (In this PR the scraper still hands us a comma-joined
+    # string, so this documents the current best-effort — richer capture is PR-B.)
+    await manager._upsert_events(
+        venue.id, [_scraped(venue.slug, support_artists="Nilüfer Yanya")]
+    )
+    await session.commit()
+
+    event = (await session.execute(select(Event))).scalar_one()
+    assert event.support_artists == ["Nilüfer Yanya"]
+
+
 async def test_rename_recomputes_headliner_and_can_null_it(session, make_venue):
     venue = await make_venue()
     manager = ScrapeManager(session)

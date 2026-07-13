@@ -27,9 +27,20 @@ async def _pre_index_schema(session):
     """Simulate the mid-migration schema: the composite unique index does not
     exist yet when populate/merge run (migration 0004 creates it last), and the
     legacy unique constraint on hash is still PRESENT (it drops after the
-    merge) — the merge must not transiently violate it."""
+    merge) — the merge must not transiently violate it.
+
+    Also revert support_artists to text: identity_backfill.py is frozen at the
+    revision-0004 schema (where the column was text, not the text[] migration 0007
+    introduced), and its frozen table literal binds it as such. The harness builds
+    the schema from the current ORM via create_all, so without this the merge's
+    value round-trip would rebind a text[] value as VARCHAR and fail. Reverting here
+    exercises the frozen backfill against exactly the schema it targets in-chain."""
     await session.execute(text("DROP INDEX uq_events_venue_source_key"))
     await session.execute(text("ALTER TABLE events ADD CONSTRAINT uq_events_hash UNIQUE (hash)"))
+    await session.execute(
+        text("ALTER TABLE events ALTER COLUMN support_artists TYPE text "
+             "USING array_to_string(support_artists, ', ')")
+    )
     await session.commit()
 
 

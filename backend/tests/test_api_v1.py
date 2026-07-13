@@ -38,6 +38,35 @@ async def test_v1_events_headliner_is_null_when_never_derived(client, make_event
     assert ev["headliner"] is None
 
 
+async def test_v1_events_support_artists_serializes_as_array(client, make_event):
+    # support_artists is a lossless list, serialized as a JSON array (issue #40) —
+    # a name with an internal comma stays one element, never split into fake acts.
+    await make_event(artist="Juana Molina", date=D, support_artists=["Truth Club", "Earth, Wind & Fire"])
+    ev = (await client.get("/api/v1/events")).json()[0]
+    assert ev["support_artists"] == ["Truth Club", "Earth, Wind & Fire"]
+
+
+async def test_v1_events_support_artists_empty_is_array_not_null(client, make_event):
+    # No support acts -> empty array, never null, so consumers can .map/.join safely.
+    await make_event(artist="Jessica Pratt", date=D)
+    ev = (await client.get("/api/v1/events")).json()[0]
+    assert ev["support_artists"] == []
+
+
+async def test_deprecated_events_support_artists_serializes_as_array(client, make_event):
+    # The deprecated /api/events surface flips to the array shape too (issue #40) —
+    # uniform with /api/v1/events, zero external consumers to protect.
+    await make_event(artist="Cat Power", date=D, support_artists=["Support Act"])
+    ev = (await client.get("/api/events")).json()["events"][0]
+    assert ev["support_artists"] == ["Support Act"]
+
+
+async def test_v1_event_detail_support_artists_serializes_as_array(client, make_event):
+    e = await make_event(artist="Stereolab", date=D, support_artists=["Opener One", "Opener Two"])
+    detail = (await client.get(f"/api/v1/events/{e.id}")).json()
+    assert detail["support_artists"] == ["Opener One", "Opener Two"]
+
+
 async def test_v1_events_updated_at_carries_utc_offset(client, make_event):
     await make_event(artist="Nilüfer Yanya", date=D)
     ev = (await client.get("/api/v1/events")).json()[0]

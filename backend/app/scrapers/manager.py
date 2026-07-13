@@ -56,6 +56,19 @@ MASS_DISAPPEARANCE_MIN = 5
 HEADLINER_MAX_LEN = Event.__table__.c.headliner.type.length
 
 
+def _split_support(raw: Optional[str]) -> list[str]:
+    """Comma-split a scraper's support-artists string into a list of names.
+
+    Transitional shim: ScrapedEvent.support_artists is still a comma-joined string
+    (the scrapers are unchanged in this PR), while Event.support_artists is now a
+    Postgres text[]. This adapts the string at the Event boundary, splitting on comma
+    and dropping blank/whitespace-only segments — exactly as richly as before, no more.
+    Removed in the follow-on PR that makes support pure-derived (multi-name capture),
+    at which point ScrapedEvent carries a list and this split disappears.
+    """
+    return [s.strip() for s in (raw or "").split(",") if s.strip()]
+
+
 # --- ScrapeManager ---
 
 class ScrapeManager:
@@ -345,7 +358,12 @@ class ScrapeManager:
                 existing.ticket_url = se.ticket_url or existing.ticket_url
                 existing.doors_time = se.doors_time or existing.doors_time
                 existing.show_time = se.show_time or existing.show_time
-                existing.support_artists = se.support_artists or existing.support_artists
+                # Prefer the freshly scraped support list, else keep what's stored:
+                # an empty split (no fresh names) is falsy, so it falls back — matching
+                # the pre-array "or" behavior exactly. (_split_support is the PR's
+                # transitional string->list shim; see its docstring.)
+                new_support = _split_support(se.support_artists)
+                existing.support_artists = new_support or existing.support_artists
                 existing.genre = se.genre or existing.genre
                 existing.subgenre = se.subgenre or existing.subgenre
                 existing.age_restriction = se.age_restriction or existing.age_restriction
@@ -379,7 +397,9 @@ class ScrapeManager:
                     name=se.name,
                     artist=se.artist,
                     headliner=headliner,
-                    support_artists=se.support_artists,
+                    # Transitional string->list shim (see _split_support); the
+                    # scrapers still emit a comma-joined string in this PR.
+                    support_artists=_split_support(se.support_artists),
                     date=se.date,
                     doors_time=se.doors_time,
                     show_time=se.show_time,

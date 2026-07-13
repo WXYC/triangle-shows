@@ -63,7 +63,7 @@ function toFullCalendarEvent(ev) {
       event_id: ev.id,
       name: ev.name,
       artist: ev.artist,
-      support_artists: ev.support_artists,
+      support_artists: ev.support_artists ?? [],
       venue_name: ev.venue_name,
       venue_slug: ev.venue_slug,
       venue_city: ev.venue_city,

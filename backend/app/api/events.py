@@ -51,6 +51,11 @@ async def list_events(
 ) -> EventListResponse:
     """List events with filters and pagination.
 
+    Shape note: `support_artists` serializes as a JSON array of strings here too, not the
+    historical comma-joined string. This deprecated surface flips deliberately alongside
+    `/api/v1/events` — a uniform shape with zero external consumers to protect (see
+    backend/README.md, "API contracts").
+
     Uses the shared query service, so results are cross-venue de-duplicated (matching
     the calendar feed) and `search`/`genre` match substrings literally (LIKE wildcards
     in the input are escaped — an intentional v1.1 change from the historical raw-pattern

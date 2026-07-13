@@ -10,7 +10,7 @@ Requires: models.py (ORM objects are converted via from_attributes=True),
 
 # --- Imports ---
 
-from pydantic import AfterValidator, BaseModel
+from pydantic import AfterValidator, BaseModel, Field
 from datetime import date, time, datetime, timezone
 from typing import Annotated, Optional
 
@@ -65,7 +65,11 @@ class EventResponse(BaseModel):
     # has not been rescraped since the field was introduced. `name` remains the
     # full display title and `artist` keeps its historical semantics, unchanged.
     headliner: Optional[str] = None
-    support_artists: Optional[str] = None
+    # Support/opening acts, one name per element. Serialized as a JSON array on both
+    # /api/v1/events and the deprecated /api/events; an empty array (never null) when
+    # the billing names no support. Lossless — a name containing a comma stays one
+    # element. Joined only for human display (iCal, web modal).
+    support_artists: list[str] = Field(default_factory=list)
     date: date
     doors_time: Optional[time] = None
     show_time: Optional[time] = None

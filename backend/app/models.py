@@ -10,7 +10,7 @@ Requires: app.database (Base), PostgreSQL via asyncpg/SQLAlchemy async.
 
 from datetime import datetime, date, time
 from typing import Optional
-from sqlalchemy import String, Integer, Float, Text, Date, Time, DateTime, ForeignKey, JSON, Index
+from sqlalchemy import ARRAY, String, Integer, Float, Text, Date, Time, DateTime, ForeignKey, JSON, Index, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 import enum
 
@@ -74,7 +74,13 @@ class Event(Base):
     # since the column landed. Unlike artist, this tracks the current name/performer
     # deterministically — the upsert overwrites it rather than merge-preserving it.
     headliner: Mapped[Optional[str]] = mapped_column(String(300), nullable=True)
-    support_artists: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # Support/opening acts as a lossless list, one name per element. Stored as a
+    # Postgres text[] (not a comma-joined string) so names that themselves contain
+    # commas ("Earth, Wind & Fire") survive as a single element instead of splitting
+    # into fake acts. Empty list (never NULL) when the billing names no support.
+    support_artists: Mapped[list[str]] = mapped_column(
+        ARRAY(Text), nullable=False, server_default=text("'{}'"), default=list
+    )
     date: Mapped[date] = mapped_column(Date, index=True)
     doors_time: Mapped[Optional[time]] = mapped_column(Time, nullable=True)
     show_time: Mapped[Optional[time]] = mapped_column(Time, nullable=True)
