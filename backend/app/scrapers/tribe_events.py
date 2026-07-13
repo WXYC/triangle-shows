@@ -164,7 +164,7 @@ class TribeEventsScraper(BaseScraper):
             elif isinstance(performers, dict):
                 performers = [performers]
             for i, p in enumerate(performers):
-                p_name = p.get("name", "")
+                p_name = p.get("name") or ""
                 if i == 0:
                     artist = p_name
                 else:
@@ -227,7 +227,9 @@ class TribeEventsScraper(BaseScraper):
                 source="tribe_events",
                 artist=artist,
                 headliner=headliner,
-                support_artists=", ".join(support) if support else None,
+                # Trailing schema.org performers, already a list — pass atomic names
+                # (empty list when none); the manager unions + dedupes.
+                support_artists=support,
                 doors_time=doors_time,
                 show_time=show_time,
                 ticket_url=ticket_url or source_url,

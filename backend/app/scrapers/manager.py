@@ -25,7 +25,7 @@ from app.config import settings
 from app.market_time import today_in_triangle
 from app.models import Venue, Event, EventMissState, ScrapeLog
 from app.scrapers.base import BaseScraper, ScrapedEvent
-from app.scrapers.headliner import extract_headliner
+from app.scrapers.headliner import merge_support, parse_billing
 from app.scrapers.identity import (
     UrlIdentityVerdict,
     derive_source_key,
@@ -54,19 +54,6 @@ MASS_DISAPPEARANCE_MIN = 5
 # (String(300)) so the model stays the single source of truth for the width —
 # the upsert clamps to this before writing.
 HEADLINER_MAX_LEN = Event.__table__.c.headliner.type.length
-
-
-def _split_support(raw: Optional[str]) -> list[str]:
-    """Comma-split a scraper's support-artists string into a list of names.
-
-    Transitional shim: ScrapedEvent.support_artists is still a comma-joined string
-    (the scrapers are unchanged in this PR), while Event.support_artists is now a
-    Postgres text[]. This adapts the string at the Event boundary, splitting on comma
-    and dropping blank/whitespace-only segments — exactly as richly as before, no more.
-    Removed in the follow-on PR that makes support pure-derived (multi-name capture),
-    at which point ScrapedEvent carries a list and this split disappears.
-    """
-    return [s.strip() for s in (raw or "").split(",") if s.strip()]
 
 
 # --- ScrapeManager ---
@@ -321,11 +308,25 @@ class ScrapeManager:
             # fallback, where there is no structured performer to trust.
             structured = (se.headliner or "").strip()
             if structured:
+                # Trusted structured performer (schema.org / TM attraction) — only
+                # whitespace-normalized, never re-derived. Its billing tail is still
+                # harvested below for openers.
                 headliner = " ".join(structured.split())
+                tail = parse_billing(se.name)[1]
             else:
-                headliner = extract_headliner(se.name)
+                # No structured performer: a single parse_billing over the name yields
+                # BOTH the heuristic headliner and the support tail (extract_headliner is
+                # exactly parse_billing(...)[0], so this avoids parsing the name twice).
+                headliner, tail = parse_billing(se.name)
             if headliner:
                 headliner = headliner[:HEADLINER_MAX_LEN]
+
+            # Support acts (issue #41), derived + assigned unconditionally, twin to
+            # headliner. merge_support unions the scraper's structured performer list with
+            # the billing tail ("… w/ Booster Club, Field Day"), casefold-dedupes, and
+            # excludes the headliner. No width clamp — support_artists is an unbounded
+            # text[]; only the headliner column is String(300)-bounded.
+            support = merge_support(se.support_artists, tail, headliner)
 
             existing = match(se, h, norm, key)
             if existing is not None and existing.id in claimed:
@@ -358,12 +359,12 @@ class ScrapeManager:
                 existing.ticket_url = se.ticket_url or existing.ticket_url
                 existing.doors_time = se.doors_time or existing.doors_time
                 existing.show_time = se.show_time or existing.show_time
-                # Prefer the freshly scraped support list, else keep what's stored:
-                # an empty split (no fresh names) is falsy, so it falls back — matching
-                # the pre-array "or" behavior exactly. (_split_support is the PR's
-                # transitional string->list shim; see its docstring.)
-                new_support = _split_support(se.support_artists)
-                existing.support_artists = new_support or existing.support_artists
+                # support_artists is derived data (issue #41), assigned unconditionally
+                # like headliner — NO "or existing" fallback. A rename that drops the
+                # openers must recompute support to [] rather than leave stale acts
+                # behind; an identical re-scrape recomputes byte-identically (stable
+                # order, no dupes) so is_modified stays false and updated_at doesn't churn.
+                existing.support_artists = support
                 existing.genre = se.genre or existing.genre
                 existing.subgenre = se.subgenre or existing.subgenre
                 existing.age_restriction = se.age_restriction or existing.age_restriction
@@ -397,9 +398,9 @@ class ScrapeManager:
                     name=se.name,
                     artist=se.artist,
                     headliner=headliner,
-                    # Transitional string->list shim (see _split_support); the
-                    # scrapers still emit a comma-joined string in this PR.
-                    support_artists=_split_support(se.support_artists),
+                    # Derived support (issue #41): structured performers ∪ billing tail,
+                    # deduped, headliner excluded — see the derivation above.
+                    support_artists=support,
                     date=se.date,
                     doors_time=se.doors_time,
                     show_time=se.show_time,

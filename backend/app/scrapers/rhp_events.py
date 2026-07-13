@@ -228,7 +228,9 @@ class RHPEventsScraper(BaseScraper):
                 venue_slug=self.venue_slug,
                 source="rhp_events",
                 artist=name,
-                support_artists=support,
+                # .eventSupport is one opaque DOM blob (e.g. "A, B") — pass it as a
+                # single verbatim element, NOT comma-split; blob-splitting is deferred.
+                support_artists=[support] if support else [],
                 doors_time=doors_time,
                 show_time=show_time,
                 ticket_url=ticket_url,

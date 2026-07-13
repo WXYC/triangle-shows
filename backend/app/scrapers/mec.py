@@ -179,7 +179,7 @@ class MECScraper(BaseScraper):
             elif not isinstance(performers, list):
                 performers = []
             for i, p in enumerate(performers):
-                p_name = p.get("name", "")
+                p_name = p.get("name") or ""
                 if i == 0:
                     artist = p_name
                 else:
@@ -243,7 +243,9 @@ class MECScraper(BaseScraper):
                 source="mec",
                 artist=artist,
                 headliner=headliner,
-                support_artists=", ".join(support) if support else None,
+                # Trailing schema.org performers, already a list — pass atomic names
+                # (empty list when none); the manager unions + dedupes.
+                support_artists=support,
                 show_time=show_time,
                 ticket_url=ticket_url or page_url or None,
                 price_min=price_min,

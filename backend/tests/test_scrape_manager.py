@@ -126,23 +126,89 @@ async def test_structured_performer_is_stored_verbatim_not_heuristically_mangled
     assert event.headliner == "Karaoke From Hell"
 
 
-# --- support_artists array wire (issue #40) ---
-# ScrapedEvent still carries a comma-joined string in this PR; the upsert splits it
-# into the stored text[] via _split_support. These lock that boundary: a comma string
-# becomes a list, and an empty scrape falls back to the stored list on update.
+# --- support_artists derivation (issue #41) ---
+# support_artists is now pure-derived every scrape: dedupe(structured ∪ billing tail)
+# with the headliner excluded, assigned UNCONDITIONALLY (twin to headliner). ScrapedEvent
+# carries a list of structured performers; the manager unions it with parse_billing's
+# tail. These lock the union, casefold dedupe, headliner exclusion, recompute-to-[] on a
+# rename that drops openers, and byte-identical idempotence.
 
 
-async def test_upsert_splits_support_artists_string_into_list(session, make_venue):
+async def test_upsert_recovers_support_from_billing_tail(session, make_venue):
     venue = await make_venue()
     manager = ScrapeManager(session)
 
+    # No structured performers — the openers live only in the name's billing tail.
+    billing = "King Serpent w/ Booster Club, Field Day"
+    await manager._upsert_events(venue.id, [_scraped(venue.slug, name=billing, artist=billing)])
+    await session.commit()
+
+    event = (await session.execute(select(Event))).scalar_one()
+    assert event.headliner == "King Serpent"
+    assert event.support_artists == ["Booster Club", "Field Day"]
+
+
+async def test_upsert_unions_structured_performers_with_billing_tail(session, make_venue):
+    venue = await make_venue()
+    manager = ScrapeManager(session)
+
+    # Structured performers come first (source order), then the billing tail — the
+    # tail runs even though a structured headliner is present.
     await manager._upsert_events(
-        venue.id, [_scraped(venue.slug, support_artists="Truth Club, Weak Signal")]
+        venue.id,
+        [_scraped(
+            venue.slug,
+            name="King Serpent w/ Field Day",
+            headliner="King Serpent",
+            support_artists=["Booster Club"],
+        )],
     )
     await session.commit()
 
     event = (await session.execute(select(Event))).scalar_one()
-    assert event.support_artists == ["Truth Club", "Weak Signal"]
+    assert event.support_artists == ["Booster Club", "Field Day"]
+
+
+async def test_upsert_casefold_dedupes_structured_and_tail(session, make_venue):
+    venue = await make_venue()
+    manager = ScrapeManager(session)
+
+    # Structured "Booster Club" and a tail "booster club" are the same act by casefold;
+    # the structured rendering wins the tie and the tail dupe is dropped.
+    await manager._upsert_events(
+        venue.id,
+        [_scraped(
+            venue.slug,
+            name="King Serpent w/ booster club, Field Day",
+            headliner="King Serpent",
+            support_artists=["Booster Club"],
+        )],
+    )
+    await session.commit()
+
+    event = (await session.execute(select(Event))).scalar_one()
+    assert event.support_artists == ["Booster Club", "Field Day"]
+
+
+async def test_upsert_excludes_headliner_from_support(session, make_venue):
+    venue = await make_venue()
+    manager = ScrapeManager(session)
+
+    # A structured support entry equal to the headliner by casefold is dropped — the
+    # headliner is never its own support act.
+    await manager._upsert_events(
+        venue.id,
+        [_scraped(
+            venue.slug,
+            name="King Serpent",
+            headliner="King Serpent",
+            support_artists=["king serpent", "Booster Club"],
+        )],
+    )
+    await session.commit()
+
+    event = (await session.execute(select(Event))).scalar_one()
+    assert event.support_artists == ["Booster Club"]
 
 
 async def test_upsert_support_artists_empty_when_none_supplied(session, make_venue):
@@ -153,47 +219,94 @@ async def test_upsert_support_artists_empty_when_none_supplied(session, make_ven
     await session.commit()
 
     event = (await session.execute(select(Event))).scalar_one()
-    # Never NULL — an absent billing yields the empty list (matches the model default).
+    # Never NULL — no structured performers and no billing tail yields the empty list.
     assert event.support_artists == []
 
 
-async def test_upsert_empty_support_falls_back_to_stored_list(session, make_venue):
+async def test_upsert_preserves_comma_in_a_single_structured_support_name(session, make_venue):
     venue = await make_venue()
     manager = ScrapeManager(session)
 
-    # ext-keyed identity so the rescrape reconciles onto the same row.
+    # A structured name that itself contains a comma stays ONE atomic element — never
+    # split into fake acts (the point of the array wire).
+    await manager._upsert_events(
+        venue.id, [_scraped(venue.slug, support_artists=["Earth, Wind & Fire"])]
+    )
+    await session.commit()
+
+    event = (await session.execute(select(Event))).scalar_one()
+    assert event.support_artists == ["Earth, Wind & Fire"]
+
+
+async def test_upsert_tm_multi_attraction_headliner_and_support(session, make_venue):
+    venue = await make_venue()
+    manager = ScrapeManager(session)
+
+    # Ticketmaster shape: attractions[0] is the structured headliner, the rest are
+    # structured support — stored verbatim (the name here has no billing tail).
     await manager._upsert_events(
         venue.id,
-        [_scraped(venue.slug, external_id="tm-1", support_artists="Truth Club, Weak Signal")],
+        [_scraped(
+            venue.slug,
+            name="King Serpent, Booster Club, Field Day",
+            headliner="King Serpent",
+            support_artists=["Booster Club", "Field Day"],
+        )],
+    )
+    await session.commit()
+
+    event = (await session.execute(select(Event))).scalar_one()
+    assert event.headliner == "King Serpent"
+    assert event.support_artists == ["Booster Club", "Field Day"]
+
+
+async def test_rename_that_drops_openers_recomputes_support_to_empty(session, make_venue):
+    venue = await make_venue()
+    manager = ScrapeManager(session)
+
+    # ext-keyed identity so the rename reconciles onto the same row.
+    await manager._upsert_events(
+        venue.id,
+        [_scraped(venue.slug, external_id="tm-1", name="King Serpent w/ Booster Club", artist=None)],
     )
     await session.commit()
     event = (await session.execute(select(Event))).scalar_one()
-    assert event.support_artists == ["Truth Club", "Weak Signal"]
+    assert event.support_artists == ["Booster Club"]
 
-    # A later scrape with no support names must NOT blank the stored list — an empty
-    # split is falsy, so it falls back, matching the pre-array "or" merge semantics.
+    # A later scrape whose billing drops the opener must recompute support to [] —
+    # NO "or existing" fallback that would leave the stale act behind.
     await manager._upsert_events(
-        venue.id, [_scraped(venue.slug, external_id="tm-1", support_artists=None)]
+        venue.id,
+        [_scraped(venue.slug, external_id="tm-1", name="King Serpent", artist=None)],
     )
     await session.commit()
     await session.refresh(event)
-    assert event.support_artists == ["Truth Club", "Weak Signal"]
+    assert event.support_artists == []
 
 
-async def test_upsert_preserves_comma_in_a_single_support_name(session, make_venue):
+async def test_rescrape_identical_support_does_not_stamp_updated_at(session, make_venue):
     venue = await make_venue()
     manager = ScrapeManager(session)
 
-    # The whole point of the array wire: a name with an internal comma must NOT be
-    # split into fake acts. (In this PR the scraper still hands us a comma-joined
-    # string, so this documents the current best-effort — richer capture is PR-B.)
+    billing = "King Serpent w/ Booster Club, Field Day"
     await manager._upsert_events(
-        venue.id, [_scraped(venue.slug, support_artists="Nilüfer Yanya")]
+        venue.id, [_scraped(venue.slug, external_id="tm-1", name=billing, artist=billing)]
     )
     await session.commit()
-
     event = (await session.execute(select(Event))).scalar_one()
-    assert event.support_artists == ["Nilüfer Yanya"]
+    assert event.support_artists == ["Booster Club", "Field Day"]
+    first_updated_at = event.updated_at
+
+    # Re-scraping the identical source recomputes byte-identical support (stable order,
+    # no dupes), so the row is not modified and updated_at does not move.
+    _, updated = await manager._upsert_events(
+        venue.id, [_scraped(venue.slug, external_id="tm-1", name=billing, artist=billing)]
+    )
+    await session.commit()
+    assert updated == 0
+    await session.refresh(event)
+    assert event.support_artists == ["Booster Club", "Field Day"]
+    assert event.updated_at == first_updated_at
 
 
 async def test_rename_recomputes_headliner_and_can_null_it(session, make_venue):
@@ -219,3 +332,46 @@ async def test_rename_recomputes_headliner_and_can_null_it(session, make_venue):
     await session.refresh(event)
     assert event.name == "WEDNESDAY KARAOKE!"
     assert event.headliner is None
+
+
+async def test_upsert_drops_blank_structured_support_names(session, make_venue):
+    venue = await make_venue()
+    manager = ScrapeManager(session)
+
+    # A scraper (mec/tribe from a schema.org performer with a missing/blank name) can
+    # leak an empty entry into the structured support list; it must be dropped, not
+    # stored as a blank opener (the old comma-join + split path dropped it).
+    await manager._upsert_events(
+        venue.id, [_scraped(venue.slug, support_artists=["", "Booster Club", "   "])]
+    )
+    await session.commit()
+
+    event = (await session.execute(select(Event))).scalar_one()
+    assert event.support_artists == ["Booster Club"]
+
+
+async def test_rescrape_identical_structured_support_does_not_stamp_updated_at(session, make_venue):
+    venue = await make_venue()
+    manager = ScrapeManager(session)
+
+    # Idempotence on the STRUCTURED-support path (the tail-derived path is covered above):
+    # re-scraping the same structured performer list recomputes byte-identical support, so
+    # the row is not modified and updated_at does not move.
+    def scraped():
+        return _scraped(
+            venue.slug, external_id="tm-1", name="King Serpent",
+            headliner="King Serpent", support_artists=["Booster Club", "Field Day"],
+        )
+
+    await manager._upsert_events(venue.id, [scraped()])
+    await session.commit()
+    event = (await session.execute(select(Event))).scalar_one()
+    assert event.support_artists == ["Booster Club", "Field Day"]
+    first_updated_at = event.updated_at
+
+    created, updated = await manager._upsert_events(venue.id, [scraped()])
+    await session.commit()
+    # Re-scrape matches the existing row (created == 0) and changes nothing (updated == 0).
+    assert (created, updated) == (0, 0)
+    await session.refresh(event)
+    assert event.updated_at == first_updated_at

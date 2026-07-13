@@ -257,7 +257,9 @@ class TicketmasterScraper(BaseScraper):
                 # (None when the event has no attractions — the manager then derives
                 # one heuristically from the name).
                 headliner=artist,
-                support_artists=", ".join(support) if support else None,
+                # attractions[1:] are the support acts, already a list — pass atomic
+                # names (empty list when none); the manager unions + dedupes.
+                support_artists=support,
                 show_time=show_time,
                 ticket_url=ticket_url,
                 price_min=price_min,

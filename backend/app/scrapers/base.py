@@ -144,7 +144,12 @@ class ScrapedEvent:
     # billing string. The scrape manager derives the stored Event.headliner by
     # running this (or, when None, the name) through headliner.extract_headliner.
     headliner: Optional[str] = None
-    support_artists: Optional[str] = None
+    # Structured support/opening acts the scraper pulled from source data (schema.org
+    # Event.performer[1:], Ticketmaster attractions[1:]) — one atomic name per element,
+    # NOT comma-joined. Opaque-string scrapers (rhp .eventSupport, VenuePilot) pass a
+    # 1-element list verbatim. The scrape manager unions this with the billing tail
+    # (headliner.parse_billing) and dedupes to derive the stored Event.support_artists.
+    support_artists: list[str] = field(default_factory=list)
     doors_time: Optional[time] = None
     show_time: Optional[time] = None
     ticket_url: Optional[str] = None

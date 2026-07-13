@@ -124,7 +124,9 @@ class VenuePilotScraper(BaseScraper):
                 source="venuepilot",
                 external_id=external_id,
                 artist=name,
-                support_artists=support,
+                # VenuePilot's `support` is one opaque platform string — pass it as a
+                # single verbatim element (empty list when absent), never comma-split.
+                support_artists=[support] if support else [],
                 doors_time=doors_time,
                 show_time=show_time,
                 ticket_url=ticket_url,
