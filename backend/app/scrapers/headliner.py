@@ -11,7 +11,7 @@ structured performer data through (ScrapedEvent.headliner).
 Requires: pure Python stdlib (re) only.
 
 Philosophy: conservative — prefer under-stripping. The downstream consumer (WXYC
-Backend-Service's touring-events resolver, WXYC/Backend-Service#1604) exact-matches
+Backend-Service's on-tour resolver, WXYC/Backend-Service#1604) exact-matches
 this string against a music-library catalog, so a missed strip merely fails to
 match while an over-strip fabricates a wrong artist. Concretely:
 
