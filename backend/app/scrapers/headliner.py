@@ -79,9 +79,16 @@ _NON_PERFORMANCE_RE = re.compile(
 )
 
 # "X: A Tribute to Y" — the honoree Y is not playing; the tribute act X (when
-# named) is. Only the explicit "tribute to" phrasing is handled.
-_TRIBUTE_RE = re.compile(
-    r"^(?P<act>.*?)(?:\s*[:\-–—]\s*)?\b(?:an?\s+)?(?:live\s+)?tribute to\b",
+# named) is. Only the explicit "tribute to" phrasing is handled, and an act is
+# only recovered when the billing explicitly delimits it from the framing: a
+# separator ("Giant Steps: A Tribute to…") and/or the framing's own article
+# ("The Petty Breakers a Tribute to…"). With neither, the prefix is as likely
+# the honoree as an act — "REM Tribute to Lifes Rich Pageant" honors R.E.M.'s
+# album; extracting "REM" fabricated the honoree as the performer — so any
+# other "tribute to" billing yields no headliner at all.
+_TRIBUTE_FRAMING_RE = re.compile(r"\btribute to\b", re.IGNORECASE)
+_TRIBUTE_ACT_RE = re.compile(
+    r"^(?P<act>.*?)(?:\s*[:\-–—]\s*(?:an?\s+)?|\s+an?\s+)(?:live\s+)?tribute to\b",
     re.IGNORECASE,
 )
 
@@ -143,8 +150,9 @@ def parse_billing(billing: Optional[str]) -> tuple[Optional[str], list[str]]:
     4. Build the tail: split each support segment on commas (commas split ONLY inside
        tails, never the headliner prefix), strip each name, drop empties, left to right.
     5. Derive the headliner from the prefix: a non-performance framing (karaoke,
-       listening party) or a bare "Tribute to Y" nulls it, then a tribute act before
-       the framing is recovered, then a final edge-punctuation tidy. May be ``None``.
+       listening party) nulls it; "tribute to" framing recovers the act only when a
+       separator and/or article delimits it (else null — never the honoree); then a
+       final edge-punctuation tidy. May be ``None``.
 
     Support is DECOUPLED from a null headliner: a cleanly delimited act is independently
     billed and performing, so "Cat Power Listening Party w/ DJ X" -> ``(None, ["DJ X"])``.
@@ -189,11 +197,14 @@ def parse_billing(billing: Optional[str]) -> tuple[Optional[str], list[str]]:
     if _NON_PERFORMANCE_RE.search(headliner_prefix):
         return None, tail_support
 
-    # Tribute framing: the act before "…: A Tribute to Y" is the performer; a bare
-    # "Tribute to Y" names nobody who is actually playing.
-    tribute = _TRIBUTE_RE.match(headliner_prefix)
-    if tribute:
-        headliner_prefix = tribute.group("act")
+    # Tribute framing: only an act explicitly delimited from the framing — by a
+    # separator and/or the framing's article — is the performer. Any other
+    # "tribute to" billing names nobody extractable: a bare "Tribute to Y" has
+    # no act, and an undelimited prefix is as likely the honoree as an act, so
+    # a null beats fabricating the honoree (see _TRIBUTE_ACT_RE).
+    if _TRIBUTE_FRAMING_RE.search(headliner_prefix):
+        act = _TRIBUTE_ACT_RE.match(headliner_prefix)
+        headliner_prefix = act.group("act") if act else ""
 
     # Final tidy: drop whitespace and any delimiter left dangling by a strip. The
     # strip set is punctuation-only-at-the-edges — symbol names like "Sunn O)))"
@@ -208,7 +219,7 @@ def extract_headliner(billing: Optional[str]) -> Optional[str]:
     Returns the performer with leading noise tags, framing prefixes, support-act
     tails, and tribute framing stripped. Returns None when nothing performer-like
     remains: blank input, tag-only billings, non-performance events (karaoke,
-    listening parties, ...), or a "Tribute to X" with no named tribute act.
+    listening parties, ...), or a "Tribute to X" with no delimited tribute act.
     A string with nothing to strip is returned as-is (whitespace-collapsed).
 
     Thin projection of :func:`parse_billing` — one shared grammar, so this field and

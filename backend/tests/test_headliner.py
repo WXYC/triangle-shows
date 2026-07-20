@@ -106,9 +106,22 @@ def test_strips_framing_prefixes(billing, expected):
         # no extractable headliner.
         ("Tribute to Duke Ellington", None),
         ("A Tribute to John Coltrane", None),
-        # A named tribute act before the framing IS the performer.
+        # A named tribute act before the framing IS the performer — when the
+        # billing delimits it with a separator and/or the framing's article.
         ("Giant Steps: A Tribute to John Coltrane", "Giant Steps"),
         ("Trane Fest - A Tribute to John Coltrane", "Trane Fest"),
+        ("Mostley Crue – A Tribute to Motley Crue", "Mostley Crue"),
+        ("Caligula Blushed: A Tribute to The Smiths and Morrissey", "Caligula Blushed"),
+        # The article alone (no separator) still marks where the framing starts.
+        ("The Petty Breakers a Tribute to Tom Petty", "The Petty Breakers"),
+        # Honoree-first: with NO separator and NO article, the prefix is as
+        # likely the honoree as an act — extracting it fabricates the honoree
+        # as the performer (the Stanczyks "REM" mislabel, resolved downstream
+        # to the real R.E.M.). Nobody extractable → None.
+        ("REM Tribute to Lifes Rich Pageant", None),
+        # A descriptor between the separator and the framing defeats clean
+        # extraction; a null beats "Billy and the Jets: An electrifying".
+        ("Billy and the Jets: An electrifying tribute to Billy Joel and Elton John", None),
     ],
 )
 def test_tribute_framing(billing, expected):
