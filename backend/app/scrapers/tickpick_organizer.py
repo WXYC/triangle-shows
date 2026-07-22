@@ -107,15 +107,9 @@ class TickPickOrganizerScraper(BaseScraper):
 
             ticket_url = data.get("url")
 
-            # Image — schema.org's `image` may be a bare URL string, a list of
-            # URL strings (take the first), or an ImageObject dict (`{"url": ...}`).
-            # Degrade to None rather than raise if the shape is unrecognized.
-            image = data.get("image")
-            if isinstance(image, list):
-                image = image[0] if image else None
-            if isinstance(image, dict):
-                image = image.get("url")
-            image_url = image if isinstance(image, str) else None
+            # schema.org's `image` is polymorphic (bare URL, list, ImageObject);
+            # BaseScraper.extract_schema_image normalizes it to a URL or None.
+            image_url = self.extract_schema_image(data.get("image"))
 
             return ScrapedEvent(
                 name=name,

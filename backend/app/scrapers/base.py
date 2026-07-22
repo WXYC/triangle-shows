@@ -454,6 +454,29 @@ class BaseScraper(ABC):
         return None
 
     @staticmethod
+    def extract_schema_image(image) -> Optional[str]:
+        """Normalize a schema.org ``image`` value to a single URL string or ``None``.
+
+        schema.org's ``image`` property is polymorphic: it may be a bare URL
+        string, a list of those (the first is taken), an ImageObject dict
+        (``{"url": ...}``), or a list of ImageObject dicts. The single choke
+        point the JSON-LD scrapers (tickpick_organizer, mec, koka_booth) share
+        so each doesn't re-derive the shape handling — pass ``data.get("image")``
+        straight in. An empty or whitespace-only string, a missing ``url``, or
+        any unrecognized shape (a number, a nested list, a dict without a string
+        ``url``) degrades to ``None`` rather than raising, so a malformed feed
+        can't crash the per-event parse or persist a blank ``<img src>``.
+        """
+        if isinstance(image, list):
+            image = image[0] if image else None
+        if isinstance(image, dict):
+            image = image.get("url")
+        if isinstance(image, str):
+            image = image.strip()
+            return image or None
+        return None
+
+    @staticmethod
     def normalize_name(name: str) -> str:
         """Normalize event/artist name for comparison."""
         return re.sub(r'\s+', ' ', name.strip())

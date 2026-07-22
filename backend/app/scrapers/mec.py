@@ -214,13 +214,8 @@ class MECScraper(BaseScraper):
                     price_max = float(raw_max)
                 ticket_url = offers.get("url")
 
-            # Image
-            image = data.get("image", "")
-            if isinstance(image, list):
-                image = image[0] if image else ""
-            if isinstance(image, dict):
-                image = image.get("url", "")
-            image_url = image or None
+            # Image — see BaseScraper.extract_schema_image for the shape handling.
+            image_url = self.extract_schema_image(data.get("image"))
 
             # Description
             description = data.get("description", "") or None

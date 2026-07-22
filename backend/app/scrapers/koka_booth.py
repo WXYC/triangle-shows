@@ -132,10 +132,8 @@ class KokaBoothScraper(BaseScraper):
                 event_date = date.fromisoformat(start[:10])
                 show_time = None
 
-            # image can be a URL string, a list of URLs, or an ImageObject dict
-            image = item.get("image", "")
-            if isinstance(image, (list, dict)):
-                image = image[0] if isinstance(image, list) else image.get("url", "")
+            # image — see BaseScraper.extract_schema_image for the shape handling.
+            image_url = self.extract_schema_image(item.get("image"))
 
             # offers can be a single Offer dict or a list; grab the first ticket URL
             offers = item.get("offers", {})
@@ -152,7 +150,7 @@ class KokaBoothScraper(BaseScraper):
 
                 show_time=show_time,
                 ticket_url=ticket_url or page_url,
-                image_url=image or None,
+                image_url=image_url,
                 # Identity: only the event's own JSON-LD url. page_url is the shared
                 # listing page — as source_url it would alias every event on the
                 # page under one identity (issue #8); it stays a ticket fallback only.
