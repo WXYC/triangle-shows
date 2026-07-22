@@ -97,3 +97,50 @@ def test_parse_event_defaults_image_url_to_none():
     )
     assert parsed is not None
     assert parsed.image_url is None
+
+
+# A single event whose title carries a JS string escape, exactly as WordPress
+# `esc_js` emits it inside the single-quoted `title:` value: a literal apostrophe
+# becomes a backslash-apostrophe (`\'`). On the live calendar (fetched 2026-07-21)
+# 61 of 625 titles carried such an escape — e.g. "This Tour Won't Save You". The
+# `\\'` below is one backslash + one apostrophe in the JS source. The extractor
+# must capture the whole title (not truncate at the backslash, which would break
+# artist matching downstream) and collapse the escape back to a real apostrophe.
+def _escaped_apostrophe_js() -> str:
+    d = (date.today() + timedelta(days=45)).isoformat()
+    return (
+        "events: [{"
+        "title: 'Wednesday : It\\'s Fine',"
+        f"start: '{d} 20:00',"
+        "url: 'https://motorcomusic.com/event/wednesday/',"
+        "classNames: 'tcec-event-',"
+        "backgroundImage: 'https://motorcomusic.com/wp-content/uploads/wednesday.jpg'"
+        "}],"
+    )
+
+
+def test_extract_events_preserves_escaped_apostrophe_in_title():
+    events = _scraper()._extract_events(_escaped_apostrophe_js(), date.today())
+    assert len(events) == 1
+    event = events[0]
+    # Full title, apostrophe restored, no truncation and no stray backslash.
+    assert event.name == "Wednesday : It's Fine"
+    assert event.artist == "Wednesday : It's Fine"
+    assert "\\" not in event.name
+    # The rest of the block still parses (the escape did not derail start/url/image).
+    assert event.ticket_url == "https://motorcomusic.com/event/wednesday/"
+    assert event.image_url == (
+        "https://motorcomusic.com/wp-content/uploads/wednesday.jpg"
+    )
+
+
+def test_parse_event_unescapes_js_string_escapes():
+    parsed = _scraper()._parse_event(
+        # Raw string as the extractor hands it over: backslash escapes intact.
+        'This Tour Won\\\'t Save \\"You\\"',
+        (date.today() + timedelta(days=10)).strftime("%Y-%m-%d %H:%M"),
+        "https://motorcomusic.com/event/anthony-green/",
+        date.today(),
+    )
+    assert parsed is not None
+    assert parsed.name == 'This Tour Won\'t Save "You"'

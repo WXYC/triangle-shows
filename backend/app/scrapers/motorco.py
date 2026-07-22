@@ -34,10 +34,25 @@ logger = logging.getLogger(__name__)
 # field out of a block independently by key — a reordered or newly-added key
 # doesn't require touching this pattern.
 _EVENT_OBJECT_PATTERN = re.compile(r"\{[^{}]*\}", re.S)
-_TITLE_PATTERN = re.compile(r"title\s*:\s*['\"](.+?)['\"]", re.S)
+# Title is free text, so it must be matched as a proper JS string literal:
+# WordPress `esc_js` backslash-escapes any apostrophe in the single-quoted value
+# (a live fetch on 2026-07-21 showed 61 of 625 titles carrying a `\'`), and a
+# naive `(.+?)['"]` terminates at that escaped quote — truncating e.g. "This Tour
+# Won't Save You" to "This Tour Won\". Match the opening quote, then a run of
+# escaped chars (`\\.`) or non-quote chars, up to the matching closing quote; the
+# captured `val` still holds the backslashes, which `_parse_event` unescapes.
+_TITLE_PATTERN = re.compile(
+    r"title\s*:\s*(?P<q>['\"])(?P<val>(?:\\.|(?!(?P=q)).)*)(?P=q)", re.S
+)
+# start/url/backgroundImage values never contain a quote, so the simpler
+# stop-at-first-quote form is sufficient (and clearer) for them.
 _START_PATTERN = re.compile(r"start\s*:\s*['\"](\d{4}-\d{2}-\d{2}[^'\"]*)['\"]", re.S)
 _URL_PATTERN = re.compile(r"\burl\s*:\s*['\"]([^'\"]+)['\"]", re.S)
 _IMAGE_PATTERN = re.compile(r"backgroundImage\s*:\s*['\"]([^'\"]+)['\"]", re.S)
+# JS string escape: a backslash followed by any single character (`\'`, `\"`,
+# `\\`, `\/`). `re.sub` collapses each to the escaped character. esc_js only ever
+# emits a backslash as an escape introducer, so this never eats a literal one.
+_JS_ESCAPE_PATTERN = re.compile(r"\\(.)")
 
 
 # --- Scraper class ---
@@ -76,8 +91,9 @@ class MotorcoScraper(BaseScraper):
         Splits the page into flat `{...}` object blocks and reads title/start/
         url/backgroundImage out of each block independently by key (see the
         module-level comment above the patterns). Deduplicates by (title,
-        start) — the object-block regex can still produce overlapping matches
-        when blocks share similar surrounding HTML context.
+        start) as a cheap guard against a page that lists the same event object
+        more than once (e.g. across calendar views); `finditer` matches are
+        already non-overlapping, so this only collapses genuine repeats.
         """
         events: list[ScrapedEvent] = []
         seen = set()
@@ -89,7 +105,8 @@ class MotorcoScraper(BaseScraper):
             if not (title_m and start_m and url_m):
                 continue  # not an event block (or missing a required field)
 
-            raw_title, raw_start, raw_url = title_m.group(1), start_m.group(1), url_m.group(1)
+            raw_title = title_m.group("val")
+            raw_start, raw_url = start_m.group(1), url_m.group(1)
 
             key = (raw_title, raw_start)
             if key in seen:
@@ -117,6 +134,11 @@ class MotorcoScraper(BaseScraper):
         try:
             # Unescape HTML entities in title
             title = title.replace("&#038;", "&").replace("&amp;", "&").replace("&#8217;", "'")
+
+            # Collapse JS string escapes the extractor preserved (esc_js turns an
+            # apostrophe into \' inside the single-quoted title). Independent of
+            # the entity pass above — escapes carry backslashes, entities don't.
+            title = _JS_ESCAPE_PATTERN.sub(r"\1", title)
 
             # Parse datetime — format is "2026-04-03 21:00" or "2026-04-03"
             dt = None
