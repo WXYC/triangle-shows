@@ -11,6 +11,8 @@ Currently used by: Pour House.
 import logging
 import re
 
+from bs4 import BeautifulSoup
+
 from app.scrapers.base import BaseScraper, ScrapedEvent
 from app.scrapers.identity import UrlIdentityVerdict
 
@@ -61,7 +63,7 @@ class WebflowCMSScraper(BaseScraper):
         logger.info(f"[WebflowCMS] Found {len(events)} events for {self.venue_slug}")
         return events
 
-    def _parse_soup(self, soup) -> list[ScrapedEvent]:
+    def _parse_soup(self, soup: BeautifulSoup) -> list[ScrapedEvent]:
         """Extract events from a fetched (or test-constructed) page soup."""
         # Pull selector/format overrides from config, falling back to Pour House defaults
         base_url = self.config.get("base_url", "").rstrip("/")
@@ -133,7 +135,7 @@ class WebflowCMSScraper(BaseScraper):
         return events
 
     @staticmethod
-    def _build_image_map(soup, shows_path: str, image_sel: str) -> dict[str, str]:
+    def _build_image_map(soup: BeautifulSoup, shows_path: str, image_sel: str) -> dict[str, str]:
         """Map each show's slug to its flyer image URL from the Webflow grid list.
 
         The grid list is a separate `.uui-layout88_item-2 w-dyn-item` collection

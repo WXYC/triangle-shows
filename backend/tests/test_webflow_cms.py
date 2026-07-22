@@ -100,3 +100,128 @@ def test_parse_soup_no_exception_when_grid_tab_entirely_absent():
     events = _scraper()._parse_soup(_soup(_CALENDAR_TAB_HTML))
     assert len(events) == 2
     assert all(e.image_url is None for e in events)
+
+
+# --- The join must be by slug, never by list position ---
+# The two lists are independent Webflow collections with no guaranteed shared
+# order or 1:1 cardinality (a show can appear in one tab but not the other).
+# Both shows below appear in the grid tab, but in the REVERSE order of the
+# calendar tab, with distinct flyer images. A positional/zip pairing would cross
+# the two images; the slug keys keep them straight.
+_CALENDAR_TWO_HTML = """
+<div class="w-dyn-list">
+  <div role="list" class="show-collection-list w-dyn-items">
+    <div role="listitem" class="show-collection-item w-dyn-item">
+      <div class="show-name">Juana Molina</div>
+      <div class="show-start-date">September 3, 2026</div>
+      <div class="show-slug">juana-molina-03-sep</div>
+    </div>
+    <div role="listitem" class="show-collection-item w-dyn-item">
+      <div class="show-name">Jessica Pratt</div>
+      <div class="show-start-date">September 5, 2026</div>
+      <div class="show-slug">jessica-pratt-05-sep</div>
+    </div>
+  </div>
+</div>
+"""
+
+_JUANA_IMG = "https://cdn.prod.website-files.com/68f7b7271d0ad608b3ca1008/aaa_juana-molina.jpeg"
+_JESSICA_IMG = "https://cdn.prod.website-files.com/68f7b7271d0ad608b3ca1008/bbb_jessica-pratt.jpeg"
+
+_GRID_TWO_REVERSED_HTML = f"""
+<div class="uui-padding-vertical-large-3 w-dyn-list">
+  <div role="list" class="uui-layout88_list w-dyn-items">
+    <div role="listitem" class="uui-layout88_item-2 w-dyn-item">
+      <a href="/shows/jessica-pratt-05-sep" class="link-block-2 w-inline-block">
+        <div class="show-image-wrapper">
+          <img loading="lazy" alt="" class="image-48" src="{_JESSICA_IMG}"/>
+        </div>
+      </a>
+    </div>
+    <div role="listitem" class="uui-layout88_item-2 w-dyn-item">
+      <a href="/shows/juana-molina-03-sep" class="link-block-2 w-inline-block">
+        <div class="show-image-wrapper">
+          <img loading="lazy" alt="" class="image-48" src="{_JUANA_IMG}"/>
+        </div>
+      </a>
+    </div>
+  </div>
+</div>
+"""
+
+
+def test_parse_soup_joins_by_slug_not_by_position():
+    html = f"<html><body>{_CALENDAR_TWO_HTML}{_GRID_TWO_REVERSED_HTML}</body></html>"
+    events = _scraper()._parse_soup(_soup(html))
+    by_name = {e.name: e for e in events}
+    # If the join were positional (zip), the reversed grid would swap these two.
+    assert by_name["Juana Molina"].image_url == _JUANA_IMG
+    assert by_name["Jessica Pratt"].image_url == _JESSICA_IMG
+
+
+def test_parse_soup_reads_lazy_loaded_flyer_from_data_src():
+    # Webflow lazy-loads: some renders carry the real flyer URL in data-src with
+    # no plain src attribute. Extraction must fall back to data-src, not drop it.
+    data_src = "https://cdn.prod.website-files.com/68f7b7271d0ad608b3ca1008/ccc_lazy.jpeg"
+    grid = f"""
+    <div class="uui-padding-vertical-large-3 w-dyn-list">
+      <div role="list" class="uui-layout88_list w-dyn-items">
+        <div role="listitem" class="uui-layout88_item-2 w-dyn-item">
+          <a href="/shows/chuquimamani-condori-14-aug" class="link-block-2 w-inline-block">
+            <img loading="lazy" alt="" class="image-48" data-src="{data_src}"/>
+          </a>
+        </div>
+      </div>
+    </div>
+    """
+    html = f"<html><body>{_CALENDAR_TAB_HTML}{grid}</body></html>"
+    events = _scraper()._parse_soup(_soup(html))
+    chuqui = next(e for e in events if e.name == "Chuquimamani-Condori")
+    assert chuqui.image_url == data_src
+
+
+def test_parse_soup_join_tolerates_trailing_slash_on_grid_href():
+    # A detail-page link rendered with a trailing slash (/shows/<slug>/) must
+    # still join to the calendar slug, which carries no slash.
+    img = "https://cdn.prod.website-files.com/68f7b7271d0ad608b3ca1008/ddd_slash.jpeg"
+    grid = f"""
+    <div class="uui-padding-vertical-large-3 w-dyn-list">
+      <div role="list" class="uui-layout88_list w-dyn-items">
+        <div role="listitem" class="uui-layout88_item-2 w-dyn-item">
+          <a href="/shows/chuquimamani-condori-14-aug/" class="link-block-2 w-inline-block">
+            <img loading="lazy" alt="" class="image-48" src="{img}"/>
+          </a>
+        </div>
+      </div>
+    </div>
+    """
+    html = f"<html><body>{_CALENDAR_TAB_HTML}{grid}</body></html>"
+    events = _scraper()._parse_soup(_soup(html))
+    chuqui = next(e for e in events if e.name == "Chuquimamani-Condori")
+    assert chuqui.image_url == img
+
+
+def test_build_image_map_keeps_first_flyer_on_duplicate_slug():
+    # The grid can render a show twice (e.g. a "featured" duplicate). First entry
+    # in document order wins, deterministically — never the later one.
+    first = "https://cdn.prod.website-files.com/68f7b7271d0ad608b3ca1008/eee_first.jpeg"
+    second = "https://cdn.prod.website-files.com/68f7b7271d0ad608b3ca1008/fff_second.jpeg"
+    grid = f"""
+    <div class="uui-padding-vertical-large-3 w-dyn-list">
+      <div role="list" class="uui-layout88_list w-dyn-items">
+        <div role="listitem" class="uui-layout88_item-2 w-dyn-item">
+          <a href="/shows/chuquimamani-condori-14-aug" class="link-block-2 w-inline-block">
+            <img loading="lazy" alt="" class="image-48" src="{first}"/>
+          </a>
+        </div>
+        <div role="listitem" class="uui-layout88_item-2 w-dyn-item">
+          <a href="/shows/chuquimamani-condori-14-aug" class="link-block-2 w-inline-block">
+            <img loading="lazy" alt="" class="image-48" src="{second}"/>
+          </a>
+        </div>
+      </div>
+    </div>
+    """
+    soup = _soup(f"<html><body>{grid}</body></html>")
+    image_by_slug = WebflowCMSScraper._build_image_map(soup, "/shows/", "img")
+    assert image_by_slug["chuquimamani-condori-14-aug"] == first
