@@ -23,6 +23,22 @@ from app.scrapers.identity import UrlIdentityVerdict
 
 logger = logging.getLogger(__name__)
 
+# Each JS event object in the FullCalendar init array is a flat (non-nested)
+# block like:
+#   { title: 'Name', start: '2026-04-03 21:00', end: '2026-04-03 22:00',
+#     url: 'https://...', classNames: '...', backgroundImage: 'https://...' }
+# (a live fetch of https://motorcomusic.com/calendar/ on 2026-07-21 showed every
+# event carrying `end` and `backgroundImage`, neither mentioned by the WordPress
+# plugin's own inline comment.) Rather than chase key order with one long ordered
+# regex, split the source into individual `{...}` blocks first, then pull each
+# field out of a block independently by key — a reordered or newly-added key
+# doesn't require touching this pattern.
+_EVENT_OBJECT_PATTERN = re.compile(r"\{[^{}]*\}", re.S)
+_TITLE_PATTERN = re.compile(r"title\s*:\s*['\"](.+?)['\"]", re.S)
+_START_PATTERN = re.compile(r"start\s*:\s*['\"](\d{4}-\d{2}-\d{2}[^'\"]*)['\"]", re.S)
+_URL_PATTERN = re.compile(r"\burl\s*:\s*['\"]([^'\"]+)['\"]", re.S)
+_IMAGE_PATTERN = re.compile(r"backgroundImage\s*:\s*['\"]([^'\"]+)['\"]", re.S)
+
 
 # --- Scraper class ---
 
@@ -42,7 +58,6 @@ class MotorcoScraper(BaseScraper):
     async def scrape(self) -> list[ScrapedEvent]:
         """Fetch the Motorco calendar page and return upcoming ScrapedEvent objects."""
         url = self.config.get("url", "https://motorcomusic.com/calendar/")
-        events = []
         today = date.today()
 
         async with httpx.AsyncClient(timeout=30, follow_redirects=True, headers=BROWSER_HEADERS) as client:
@@ -50,36 +65,54 @@ class MotorcoScraper(BaseScraper):
             resp.raise_for_status()
             html = resp.text
 
-        # Each JS event object looks like:
-        #   { title: 'Name', start: '2026-04-03 21:00', url: 'https://...', classNames: '...' }
-        # Extract title, start, and url per event block.
-        pattern = re.compile(
-            r'\{[^{}]*?title\s*:\s*[\'"](.+?)[\'"]'
-            r'[^{}]*?start\s*:\s*[\'"](\d{4}-\d{2}-\d{2}[^\'\"]*)[\'"]'
-            r'[^{}]*?url\s*:\s*[\'"]([^\'\"]+)[\'"]',
-            re.S,
-        )
+        events = self._extract_events(html, today)
 
-        # Deduplicate by (title, start) — the regex can produce overlapping matches
-        # when event objects share similar surrounding HTML context.
+        logger.info(f"[Motorco] Found {len(events)} upcoming events for {self.venue_slug}")
+        return events
+
+    def _extract_events(self, html: str, today: date) -> list[ScrapedEvent]:
+        """Parse the FullCalendar init JS embedded in the calendar page HTML.
+
+        Splits the page into flat `{...}` object blocks and reads title/start/
+        url/backgroundImage out of each block independently by key (see the
+        module-level comment above the patterns). Deduplicates by (title,
+        start) — the object-block regex can still produce overlapping matches
+        when blocks share similar surrounding HTML context.
+        """
+        events: list[ScrapedEvent] = []
         seen = set()
-        for m in pattern.finditer(html):
-            raw_title, raw_start, raw_url = m.group(1), m.group(2), m.group(3)
+        for block_match in _EVENT_OBJECT_PATTERN.finditer(html):
+            block = block_match.group(0)
+            title_m = _TITLE_PATTERN.search(block)
+            start_m = _START_PATTERN.search(block)
+            url_m = _URL_PATTERN.search(block)
+            if not (title_m and start_m and url_m):
+                continue  # not an event block (or missing a required field)
 
-            # Skip duplicates (the regex can match overlapping regions)
+            raw_title, raw_start, raw_url = title_m.group(1), start_m.group(1), url_m.group(1)
+
             key = (raw_title, raw_start)
             if key in seen:
                 continue
             seen.add(key)
 
-            parsed = self._parse_event(raw_title, raw_start, raw_url, today)
+            image_m = _IMAGE_PATTERN.search(block)
+            raw_image = image_m.group(1) if image_m else None
+
+            parsed = self._parse_event(raw_title, raw_start, raw_url, today, raw_image)
             if parsed:
                 events.append(parsed)
 
-        logger.info(f"[Motorco] Found {len(events)} upcoming events for {self.venue_slug}")
         return events
 
-    def _parse_event(self, title: str, start_str: str, url: str, today: date) -> Optional[ScrapedEvent]:
+    def _parse_event(
+        self,
+        title: str,
+        start_str: str,
+        url: str,
+        today: date,
+        image_url: Optional[str] = None,
+    ) -> Optional[ScrapedEvent]:
         """Parse raw JS-extracted strings into a ScrapedEvent, or return None on failure."""
         try:
             # Unescape HTML entities in title
@@ -112,6 +145,7 @@ class MotorcoScraper(BaseScraper):
                 artist=title,
                 show_time=show_time,
                 ticket_url=url,
+                image_url=image_url,
                 source_url=url,
             )
         except Exception as e:
