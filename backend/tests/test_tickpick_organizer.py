@@ -80,6 +80,19 @@ def test_parse_event_extracts_url_from_image_object():
     assert parsed.image_url == "https://static-o.tickpick.com/poster.jpg"
 
 
+def test_parse_event_extracts_url_from_list_of_image_objects():
+    data = {
+        **_BASE_EVENT,
+        "image": [
+            {"@type": "ImageObject", "url": "https://static-o.tickpick.com/poster-1.jpg"},
+            {"@type": "ImageObject", "url": "https://static-o.tickpick.com/poster-2.jpg"},
+        ],
+    }
+    parsed = _scraper()._parse_event(data)
+    assert parsed is not None
+    assert parsed.image_url == "https://static-o.tickpick.com/poster-1.jpg"
+
+
 def test_parse_event_image_absent_is_none_and_does_not_raise():
     # This is the real live shape as of 2026-07-21 — every Chapel of Bones
     # event currently omits `image` entirely.
@@ -93,3 +106,13 @@ def test_parse_event_empty_image_list_is_none():
     parsed = _scraper()._parse_event(data)
     assert parsed is not None
     assert parsed.image_url is None
+
+
+def test_parse_event_blank_image_string_is_none():
+    # An empty or whitespace-only `image` must not persist as a broken <img src>;
+    # it normalizes to None like every other scraper's `... or None`.
+    for blank in ("", "   ", "\n\t"):
+        data = {**_BASE_EVENT, "image": blank}
+        parsed = _scraper()._parse_event(data)
+        assert parsed is not None
+        assert parsed.image_url is None
