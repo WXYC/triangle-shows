@@ -26,14 +26,24 @@ class WebflowCMSScraper(BaseScraper):
     Used by: Pour House
 
     Config keys:
-        url            - calendar page URL
-        base_url       - base URL for constructing event links
-        item_selector  - CSS selector for each event item (default: .show-collection-item)
-        name_selector  - CSS selector for event name within item (default: .show-name)
-        date_selector  - CSS selector for event date within item (default: .show-start-date)
-        slug_selector  - CSS selector for slug within item (default: .show-slug)
-        shows_path     - path prefix for event pages (default: /shows/)
-        date_format    - strptime format string (default: %B %d, %Y)
+        url             - calendar page URL
+        base_url        - base URL for constructing event links
+        item_selector   - CSS selector for each event item (default: .show-collection-item)
+        name_selector   - CSS selector for event name within item (default: .show-name)
+        date_selector   - CSS selector for event date within item (default: .show-start-date)
+        slug_selector   - CSS selector for slug within item (default: .show-slug)
+        shows_path      - path prefix for event pages (default: /shows/)
+        date_format     - strptime format string (default: %B %d, %Y)
+        image_selector  - CSS selector for the <img> within an event's detail-page
+                           link (default: img)
+
+    Image note (issue #56): the live Pour House page renders every show twice —
+    once in the `.show-collection-item` list this scraper otherwise parses (name/
+    date/slug only, confirmed to carry no image), and again in a separate Webflow
+    "grid" list whose entries wrap an `<a href="{shows_path}<slug>">` around the
+    show-flyer `<img>`. There is no image inside item_selector's own elements, so
+    extraction cross-references the two lists by slug rather than doing a plain
+    `item.select_one(image_selector)`.
     """
 
     # Audit (issue #8): source_url is the ticket link, which is not guaranteed event-unique across a venue's listings.
@@ -45,6 +55,14 @@ class WebflowCMSScraper(BaseScraper):
         if not url:
             raise ValueError(f"No URL configured for {self.venue_slug}")
 
+        soup = await self.fetch_soup(url)
+        events = self._parse_soup(soup)
+
+        logger.info(f"[WebflowCMS] Found {len(events)} events for {self.venue_slug}")
+        return events
+
+    def _parse_soup(self, soup) -> list[ScrapedEvent]:
+        """Extract events from a fetched (or test-constructed) page soup."""
         # Pull selector/format overrides from config, falling back to Pour House defaults
         base_url = self.config.get("base_url", "").rstrip("/")
         item_sel = self.config.get("item_selector", ".show-collection-item")
@@ -53,10 +71,11 @@ class WebflowCMSScraper(BaseScraper):
         slug_sel = self.config.get("slug_selector", ".show-slug")
         shows_path = self.config.get("shows_path", "/shows/")
         date_fmt = self.config.get("date_format", "%B %d, %Y")
+        image_sel = self.config.get("image_selector", "img")
 
         events = []
 
-        soup = await self.fetch_soup(url)
+        image_by_slug = self._build_image_map(soup, shows_path, image_sel)
 
         # --- Parse Each Event Item ---
         for item in soup.select(item_sel):
@@ -94,6 +113,11 @@ class WebflowCMSScraper(BaseScraper):
                 # Strip the age prefix so the stored name is just the artist/show title
                 name = name[age_match.end():]
 
+            # Best-effort only: a slug with no counterpart in the grid list (markup
+            # drift, a show pulled from the grid but not the calendar, etc.) just
+            # yields None — never raises, never drops the event (issue #56).
+            image_url = image_by_slug.get(slug) if slug else None
+
             events.append(ScrapedEvent(
                 name=name,
                 date=event_date,
@@ -103,7 +127,38 @@ class WebflowCMSScraper(BaseScraper):
                 ticket_url=ticket_url,
                 source_url=ticket_url,
                 age_restriction=age_restriction,
+                image_url=image_url,
             ))
 
-        logger.info(f"[WebflowCMS] Found {len(events)} events for {self.venue_slug}")
         return events
+
+    @staticmethod
+    def _build_image_map(soup, shows_path: str, image_sel: str) -> dict[str, str]:
+        """Map each show's slug to its flyer image URL from the Webflow grid list.
+
+        The grid list is a separate `.uui-layout88_item-2 w-dyn-item` collection
+        elsewhere on the same page; each entry wraps an `<a href="{shows_path}
+        <slug>">` around the flyer `<img>`. Scoping by `a[href^=shows_path]`
+        (rather than hardcoding the grid list's own auto-generated Webflow class)
+        keeps this resilient to a page redesign that renames the grid wrapper but
+        keeps the shows_path link convention.
+        """
+        image_by_slug: dict[str, str] = {}
+        if not shows_path:
+            return image_by_slug
+
+        for link_el in soup.select(f"a[href^='{shows_path}']"):
+            href = link_el.get("href") or ""
+            slug = href.rstrip("/").rsplit("/", 1)[-1]
+            if not slug:
+                continue
+
+            img_el = link_el.select_one(image_sel)
+            if not img_el:
+                continue
+
+            src = img_el.get("src") or img_el.get("data-src")
+            if src and slug not in image_by_slug:
+                image_by_slug[slug] = src
+
+        return image_by_slug
