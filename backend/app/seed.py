@@ -274,6 +274,11 @@ VENUES = [
         "scraper_config": {
             "url": "https://www.pourhouseraleigh.com/calendar",
             "base_url": "https://www.pourhouseraleigh.com",
+            # Show-flyer <img> lives inside each detail-page link in the page's
+            # separate Webflow "grid" list, not inside .show-collection-item
+            # (issue #56) — see WebflowCMSScraper's docstring for the cross-
+            # referencing logic this selector feeds.
+            "image_selector": "img",
         },
         "color": "#6a3828",  # warm brick (Raleigh)
     },
