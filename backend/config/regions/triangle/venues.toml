@@ -1,0 +1,324 @@
+# Triangle region venue pack.
+#
+# All 22 Triangle-area venues, translated verbatim from the former app/seed.py
+# Python literal (region-pack epic, issue #62/#63). Loaded by
+# app.site_config.load_venue_config(); app.seed derives its VENUES/REMOVED_SLUGS
+# from this file so seeding stays a pure DB-upsert operation over declarative data.
+#
+# removed_slugs lists discontinued venues to delete on next seed (cascades to their
+# events). Triangle currently removes nothing; the mechanism is exercised by the
+# region-pack test fixtures instead.
+#
+# scraper_type selects the scraper class via app.scrapers.identity.SCRAPER_REGISTRY;
+# scraper_config passes venue-specific options (URL, filters, account IDs) to that
+# scraper. color is the hex used by the frontend to distinguish venues on the
+# calendar.
+#
+# Scraper -> venue mapping (as of 2026-06-29 — update when venues are added/changed):
+#   ticketmaster      Koka Booth Amphitheatre, Red Hat Amphitheater, DPAC, The Ritz
+#   rhp_events        Lincoln Theatre, Cat's Cradle, Cat's Cradle Back Room, Local 506, The Pinhook
+#   motorco           Motorco Music Hall
+#   carolina_theatre  Carolina Theatre
+#   eventprime        Kings
+#   tribe_events      The Cave
+#   venuepilot        Haw River Ballroom, Rubies on Five Points, Stanczyks
+#   squarespace       Neptune's Parlour, Boom Club
+#   mec               Shadowbox Studio, Slim's
+#   tickpick_organizer Chapel of Bones
+#   webflow_cms       Pour House
+
+removed_slugs = []
+
+# --- Phase 1 (original seed.py comment): Ticketmaster venues ---
+
+[[venue]]
+name = "Koka Booth Amphitheatre"
+slug = "koka-booth"
+city = "Cary"
+capacity = 7000
+size_category = "large"
+website = "https://www.boothamphitheatre.com/"
+ticketmaster_venue_id = "KovZpZAIAnkA"
+scraper_type = "ticketmaster"
+color = "#5a2892"  # amethyst
+
+[[venue]]
+name = "Red Hat Amphitheater"
+slug = "red-hat"
+city = "Raleigh"
+capacity = 6000
+size_category = "large"
+website = "https://redhatamphitheater.com/"
+ticketmaster_venue_id = "KovZpZAdEEvA"
+scraper_type = "ticketmaster"
+color = "#8b2d3c"  # ruby (Raleigh)
+
+[[venue]]
+name = "DPAC"
+slug = "dpac"
+city = "Durham"
+capacity = 2700
+size_category = "large"
+website = "https://www.dpacnc.com/"
+ticketmaster_venue_id = "KovZpa2X8e"
+scraper_type = "ticketmaster"
+color = "#1e428a"  # sapphire (Durham)
+
+[[venue]]
+name = "The Ritz"
+slug = "the-ritz"
+city = "Raleigh"
+capacity = 1150
+size_category = "medium"
+website = "https://www.rfraleigh.com/the-ritz/"
+ticketmaster_venue_id = "KovZpZAJIedA"
+scraper_type = "ticketmaster"
+color = "#8c3820"  # garnet (Raleigh)
+
+# --- Phase 2 (original seed.py comment): Indie venues ---
+
+[[venue]]
+name = "Lincoln Theatre"
+slug = "lincoln-theatre"
+city = "Raleigh"
+capacity = 750
+size_category = "medium"
+website = "https://www.lincolntheatre.com/"
+scraper_type = "rhp_events"
+color = "#7a2040"  # deep crimson (Raleigh)
+
+[venue.scraper_config]
+url = "https://www.lincolntheatre.com/events/"
+
+[[venue]]
+name = "Cat's Cradle"
+slug = "cats-cradle"
+city = "Carrboro"
+capacity = 750
+size_category = "medium"
+website = "https://catscradle.com/"
+scraper_type = "rhp_events"
+color = "#1e5c3c"  # emerald (Carrboro)
+
+# venue_filter/venue_filter_not split the shared events page into main room vs. back room
+[venue.scraper_config]
+url = "https://catscradle.com/events/"
+venue_filter = "Cat's Cradle"
+venue_filter_not = "Back Room"
+
+[[venue]]
+name = "Motorco Music Hall"
+slug = "motorco"
+city = "Durham"
+capacity = 450
+size_category = "medium"
+website = "https://www.motorcomusic.com/"
+scraper_type = "motorco"
+color = "#1a5e76"  # peacock teal (Durham)
+
+[venue.scraper_config]
+url = "https://motorcomusic.com/calendar/"
+
+[[venue]]
+name = "Carolina Theatre"
+slug = "carolina-theatre"
+city = "Durham"
+capacity = 1015  # Fletcher Hall, the venue's main auditorium
+size_category = "medium"
+website = "https://carolinatheatre.org/"
+scraper_type = "carolina_theatre"
+color = "#3a5ca8"  # steel azure (Durham)
+
+[venue.scraper_config]
+url = "https://carolinatheatre.org/events/"
+
+[[venue]]
+name = "Local 506"
+slug = "local-506"
+city = "Chapel Hill"
+capacity = 250
+size_category = "small"
+website = "https://local506.com/"
+scraper_type = "rhp_events"
+color = "#1a5e50"  # jade (Chapel Hill)
+
+[venue.scraper_config]
+url = "https://local506.com/events/"
+
+[[venue]]
+name = "The Pinhook"
+slug = "the-pinhook"
+city = "Durham"
+capacity = 250
+size_category = "small"
+website = "https://www.thepinhook.com/"
+scraper_type = "rhp_events"
+color = "#2a5494"  # cornflower sapphire (Durham)
+
+[venue.scraper_config]
+url = "https://www.thepinhook.com/events/"
+
+[[venue]]
+name = "Kings"
+slug = "kings"
+city = "Raleigh"
+capacity = 250
+size_category = "small"
+website = "https://www.kingsraleigh.com/"
+scraper_type = "eventprime"
+color = "#7a4230"  # warm garnet (Raleigh)
+
+[venue.scraper_config]
+url = "https://www.kingsraleigh.com/"
+
+[[venue]]
+name = "Cat's Cradle Back Room"
+slug = "cats-cradle-back-room"
+city = "Carrboro"
+# capacity omitted — unknown, matches historical `"capacity": None`
+size_category = "small"
+website = "https://catscradle.com/"
+scraper_type = "rhp_events"
+color = "#1f6b47"  # lighter emerald (Carrboro)
+
+# Shares a page with the main Cat's Cradle; venue_filter isolates back-room shows
+[venue.scraper_config]
+url = "https://catscradle.com/events/"
+venue_filter = "Back Room"
+
+[[venue]]
+name = "The Cave"
+slug = "the-cave"
+city = "Chapel Hill"
+capacity = 100
+size_category = "small"
+website = "https://www.caverntavern.com/"
+scraper_type = "tribe_events"
+color = "#1e4c38"  # forest jade (Chapel Hill)
+
+[venue.scraper_config]
+url = "https://caverntavern.com/"
+
+[[venue]]
+name = "Haw River Ballroom"
+slug = "haw-river-ballroom"
+city = "Saxapahaw"
+capacity = 600
+size_category = "medium"
+website = "https://www.hawriverballroom.com/"
+scraper_type = "venuepilot"
+color = "#72268c"  # deep orchid (Saxapahaw)
+
+[venue.scraper_config]
+account_id = 477
+
+[[venue]]
+name = "Neptune's Parlour"
+slug = "neptunes-parlour"
+city = "Raleigh"
+# capacity omitted — unknown, matches historical `"capacity": None`
+size_category = "small"
+website = "https://neptunesraleigh.com/"
+scraper_type = "squarespace"
+color = "#6e2040"  # deep rose (Raleigh)
+
+[venue.scraper_config]
+url = "https://neptunesraleigh.com/events?format=json"
+
+[[venue]]
+name = "Shadowbox Studio"
+slug = "shadowbox-studio"
+city = "Durham"
+# capacity omitted — unknown, matches historical `"capacity": None`
+size_category = "small"
+website = "https://shadowboxstudio.org/"
+scraper_type = "mec"
+color = "#2a4e88"  # denim sapphire (Durham)
+
+[venue.scraper_config]
+url = "https://shadowboxstudio.org/events/"
+
+[[venue]]
+name = "Rubies on Five Points"
+slug = "rubies"
+city = "Durham"
+capacity = 150
+size_category = "small"
+website = "https://rubiesnc.com/"
+scraper_type = "venuepilot"
+color = "#7a1e3c"  # deep ruby (Durham)
+
+[venue.scraper_config]
+account_id = 3095
+
+[[venue]]
+name = "Stanczyks"
+slug = "stancyks"
+city = "Durham"
+capacity = 100
+size_category = "small"
+website = "https://www.stanczyksdurham.com/"
+scraper_type = "venuepilot"
+color = "#5a3a20"  # warm espresso (Durham)
+
+[venue.scraper_config]
+account_id = 3433
+
+[[venue]]
+name = "Boom Club"
+slug = "boom-club"
+city = "Durham"
+# capacity omitted — unknown, matches historical `"capacity": None`
+size_category = "small"
+website = "https://www.boom-club.org/"
+scraper_type = "squarespace"
+color = "#3a1e6e"  # deep violet (Durham)
+
+# Exclude recurring non-concert events that would clutter the calendar
+[venue.scraper_config]
+url = "https://www.boom-club.org/events?format=json"
+exclude_titles = ["Synth Library open", "Synth Library closed"]
+
+[[venue]]
+name = "Chapel of Bones"
+slug = "chapel-of-bones"
+city = "Raleigh"
+# capacity omitted — unknown, matches historical `"capacity": None`
+size_category = "small"
+website = "https://chapelofbones.com/"
+scraper_type = "tickpick_organizer"
+color = "#2a2840"  # dark ash (Raleigh)
+
+[venue.scraper_config]
+organizer_id = "chapel-of-bones"
+
+[[venue]]
+name = "Pour House"
+slug = "pour-house"
+city = "Raleigh"
+# capacity omitted — unknown, matches historical `"capacity": None`
+size_category = "small"
+website = "https://www.pourhouseraleigh.com/"
+scraper_type = "webflow_cms"
+color = "#6a3828"  # warm brick (Raleigh)
+
+# Show-flyer <img> lives inside each detail-page link in the page's separate
+# Webflow "grid" list, not inside .show-collection-item (issue #56) — see
+# WebflowCMSScraper's docstring for the cross-referencing logic this selector feeds.
+[venue.scraper_config]
+url = "https://www.pourhouseraleigh.com/calendar"
+base_url = "https://www.pourhouseraleigh.com"
+image_selector = "img"
+
+[[venue]]
+name = "Slim's"
+slug = "slims"
+city = "Raleigh"
+capacity = 200
+size_category = "small"
+website = "https://slimsdivebar.com/"
+scraper_type = "mec"
+color = "#4a3a6a"  # deep plum (Raleigh)
+
+[venue.scraper_config]
+url = "https://slimsdivebar.com/music-and-events/"

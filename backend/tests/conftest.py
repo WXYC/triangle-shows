@@ -174,6 +174,27 @@ async def client(_sessionmaker):
         app.dependency_overrides.pop(get_session, None)
 
 
+@pytest.fixture
+def venue_config_env(monkeypatch):
+    """Point VENUES_CONFIG_PATH at a fixture pack and reset the app.site_config
+    cache before and after, so a test can load an arbitrary venues.toml without
+    leaking into other tests (region-pack epic decision 5 — the config singleton is
+    lazy and resettable, not loaded once at import).
+
+    Usage: ``venue_config_env(some_path)`` inside a test, then call
+    ``app.site_config.load_venue_config()``.
+    """
+    from app import site_config
+
+    def _point_at(path) -> None:
+        monkeypatch.setenv("VENUES_CONFIG_PATH", str(path))
+        site_config.reset_venue_config_cache()
+
+    site_config.reset_venue_config_cache()
+    yield _point_at
+    site_config.reset_venue_config_cache()
+
+
 @pytest_asyncio.fixture
 async def make_venue(session):
     """Factory that inserts and commits a Venue, returning the persisted row.

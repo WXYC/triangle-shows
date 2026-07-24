@@ -1,10 +1,14 @@
 """
-Idempotently inserts or updates all 21 Triangle-area venues into the database.
+Idempotently inserts or updates every venue in the active region's venue pack into
+the database.
 
 Role: Called once at application startup (from main.py) before the scheduler
-begins. Runs after init_db() so the schema is guaranteed to exist. Also
-removable discontinued venues so stale data doesn't accumulate.
-Requires: DATABASE_URL env var (via config.py), app.database, app.models.
+begins. Runs after init_db() so the schema is guaranteed to exist. Also removes
+discontinued venues so stale data doesn't accumulate. The venue roster itself is
+declarative config, not a Python literal — see app.site_config.load_venue_config()
+and backend/config/regions/<REGION>/venues.toml (region-pack epic, issue #62/#63).
+Requires: DATABASE_URL env var (via config.py), app.database, app.models,
+app.site_config.
 """
 
 # --- Imports ---
@@ -13,297 +17,28 @@ import logging
 from sqlalchemy import select
 from app.database import async_session, init_db
 from app.models import Venue
+from app.site_config import load_venue_config
 
 logger = logging.getLogger(__name__)
 
 # --- Venue Definitions ---
-# Each dict maps directly to Venue model columns.
-# scraper_type determines which scraper class handles the venue.
-# scraper_config passes venue-specific options (URL, filters, account IDs) to that scraper.
-# color is the hex used by the FullCalendar frontend to distinguish venues by city.
-#
-# Scraper → venue mapping (as of 2026-06-29 — update when venues are added/changed):
-#   ticketmaster      Koka Booth Amphitheatre, Red Hat Amphitheater, DPAC, The Ritz
-#   rhp_events        Lincoln Theatre, Cat's Cradle, Cat's Cradle Back Room, Local 506, The Pinhook
-#   motorco           Motorco Music Hall
-#   carolina_theatre  Carolina Theatre
-#   eventprime        Kings
-#   tribe_events      The Cave
-#   venuepilot        Haw River Ballroom, Rubies on Five Points, Stanczyks
-#   squarespace       Neptune's Parlour, Boom Club
-#   mec               Shadowbox Studio, Slim's
-#   tickpick_organizer Chapel of Bones
-#   webflow_cms       Pour House
-VENUES = [
-    # Phase 1: Ticketmaster venues
-    {
-        "name": "Koka Booth Amphitheatre",
-        "slug": "koka-booth",
-        "city": "Cary",
-        "capacity": 7000,
-        "size_category": "large",
-        "website": "https://www.boothamphitheatre.com/",
-        "ticketmaster_venue_id": "KovZpZAIAnkA",
-        "scraper_type": "ticketmaster",
-        "color": "#5a2892",  # amethyst
-    },
-    {
-        "name": "Red Hat Amphitheater",
-        "slug": "red-hat",
-        "city": "Raleigh",
-        "capacity": 6000,
-        "size_category": "large",
-        "website": "https://redhatamphitheater.com/",
-        "ticketmaster_venue_id": "KovZpZAdEEvA",
-        "scraper_type": "ticketmaster",
-        "color": "#8b2d3c",  # ruby (Raleigh)
-    },
-    {
-        "name": "DPAC",
-        "slug": "dpac",
-        "city": "Durham",
-        "capacity": 2700,
-        "size_category": "large",
-        "website": "https://www.dpacnc.com/",
-        "ticketmaster_venue_id": "KovZpa2X8e",
-        "scraper_type": "ticketmaster",
-        "color": "#1e428a",  # sapphire (Durham)
-    },
-    {
-        "name": "The Ritz",
-        "slug": "the-ritz",
-        "city": "Raleigh",
-        "capacity": 1150,
-        "size_category": "medium",
-        "website": "https://www.rfraleigh.com/the-ritz/",
-        "ticketmaster_venue_id": "KovZpZAJIedA",
-        "scraper_type": "ticketmaster",
-        "color": "#8c3820",  # garnet (Raleigh)
-    },
-    # Phase 2: Indie venues
-    {
-        "name": "Lincoln Theatre",
-        "slug": "lincoln-theatre",
-        "city": "Raleigh",
-        "capacity": 750,
-        "size_category": "medium",
-        "website": "https://www.lincolntheatre.com/",
-        "scraper_type": "rhp_events",
-        "scraper_config": {"url": "https://www.lincolntheatre.com/events/"},
-        "color": "#7a2040",  # deep crimson (Raleigh)
-    },
-    {
-        "name": "Cat's Cradle",
-        "slug": "cats-cradle",
-        "city": "Carrboro",
-        "capacity": 750,
-        "size_category": "medium",
-        "website": "https://catscradle.com/",
-        "scraper_type": "rhp_events",
-        # venue_filter/venue_filter_not split the shared events page into main room vs. back room
-        "scraper_config": {"url": "https://catscradle.com/events/", "venue_filter": "Cat's Cradle", "venue_filter_not": "Back Room"},
-        "color": "#1e5c3c",  # emerald (Carrboro)
-    },
-    {
-        "name": "Motorco Music Hall",
-        "slug": "motorco",
-        "city": "Durham",
-        "capacity": 450,
-        "size_category": "medium",
-        "website": "https://www.motorcomusic.com/",
-        "scraper_type": "motorco",
-        "scraper_config": {"url": "https://motorcomusic.com/calendar/"},
-        "color": "#1a5e76",  # peacock teal (Durham)
-    },
-    {
-        "name": "Carolina Theatre",
-        "slug": "carolina-theatre",
-        "city": "Durham",
-        "capacity": 1015,  # Fletcher Hall, the venue's main auditorium
-        "size_category": "medium",
-        "website": "https://carolinatheatre.org/",
-        "scraper_type": "carolina_theatre",
-        "scraper_config": {"url": "https://carolinatheatre.org/events/"},
-        "color": "#3a5ca8",  # steel azure (Durham)
-    },
-    {
-        "name": "Local 506",
-        "slug": "local-506",
-        "city": "Chapel Hill",
-        "capacity": 250,
-        "size_category": "small",
-        "website": "https://local506.com/",
-        "scraper_type": "rhp_events",
-        "scraper_config": {"url": "https://local506.com/events/"},
-        "color": "#1a5e50",  # jade (Chapel Hill)
-    },
-    {
-        "name": "The Pinhook",
-        "slug": "the-pinhook",
-        "city": "Durham",
-        "capacity": 250,
-        "size_category": "small",
-        "website": "https://www.thepinhook.com/",
-        "scraper_type": "rhp_events",
-        "scraper_config": {"url": "https://www.thepinhook.com/events/"},
-        "color": "#2a5494",  # cornflower sapphire (Durham)
-    },
-    {
-        "name": "Kings",
-        "slug": "kings",
-        "city": "Raleigh",
-        "capacity": 250,
-        "size_category": "small",
-        "website": "https://www.kingsraleigh.com/",
-        "scraper_type": "eventprime",
-        "scraper_config": {"url": "https://www.kingsraleigh.com/"},
-        "color": "#7a4230",  # warm garnet (Raleigh)
-    },
-    {
-        "name": "Cat's Cradle Back Room",
-        "slug": "cats-cradle-back-room",
-        "city": "Carrboro",
-        "capacity": None,
-        "size_category": "small",
-        "website": "https://catscradle.com/",
-        "scraper_type": "rhp_events",
-        # Shares a page with the main Cat's Cradle; venue_filter isolates back-room shows
-        "scraper_config": {"url": "https://catscradle.com/events/", "venue_filter": "Back Room"},
-        "color": "#1f6b47",  # lighter emerald (Carrboro)
-    },
-    {
-        "name": "The Cave",
-        "slug": "the-cave",
-        "city": "Chapel Hill",
-        "capacity": 100,
-        "size_category": "small",
-        "website": "https://www.caverntavern.com/",
-        "scraper_type": "tribe_events",
-        "scraper_config": {"url": "https://caverntavern.com/"},
-        "color": "#1e4c38",  # forest jade (Chapel Hill)
-    },
-    {
-        "name": "Haw River Ballroom",
-        "slug": "haw-river-ballroom",
-        "city": "Saxapahaw",
-        "capacity": 600,
-        "size_category": "medium",
-        "website": "https://www.hawriverballroom.com/",
-        "scraper_type": "venuepilot",
-        "scraper_config": {"account_id": 477},
-        "color": "#72268c",  # deep orchid (Saxapahaw)
-    },
-    {
-        "name": "Neptune's Parlour",
-        "slug": "neptunes-parlour",
-        "city": "Raleigh",
-        "capacity": None,
-        "size_category": "small",
-        "website": "https://neptunesraleigh.com/",
-        "scraper_type": "squarespace",
-        "scraper_config": {"url": "https://neptunesraleigh.com/events?format=json"},
-        "color": "#6e2040",  # deep rose (Raleigh)
-    },
-    {
-        "name": "Shadowbox Studio",
-        "slug": "shadowbox-studio",
-        "city": "Durham",
-        "capacity": None,
-        "size_category": "small",
-        "website": "https://shadowboxstudio.org/",
-        "scraper_type": "mec",
-        "scraper_config": {"url": "https://shadowboxstudio.org/events/"},
-        "color": "#2a4e88",  # denim sapphire (Durham)
-    },
-    {
-        "name": "Rubies on Five Points",
-        "slug": "rubies",
-        "city": "Durham",
-        "capacity": 150,
-        "size_category": "small",
-        "website": "https://rubiesnc.com/",
-        "scraper_type": "venuepilot",
-        "scraper_config": {"account_id": 3095},
-        "color": "#7a1e3c",  # deep ruby (Durham)
-    },
-    {
-        "name": "Stanczyks",
-        "slug": "stancyks",
-        "city": "Durham",
-        "capacity": 100,
-        "size_category": "small",
-        "website": "https://www.stanczyksdurham.com/",
-        "scraper_type": "venuepilot",
-        "scraper_config": {"account_id": 3433},
-        "color": "#5a3a20",  # warm espresso (Durham)
-    },
-    {
-        "name": "Boom Club",
-        "slug": "boom-club",
-        "city": "Durham",
-        "capacity": None,
-        "size_category": "small",
-        "website": "https://www.boom-club.org/",
-        "scraper_type": "squarespace",
-        "scraper_config": {
-            "url": "https://www.boom-club.org/events?format=json",
-            # Exclude recurring non-concert events that would clutter the calendar
-            "exclude_titles": ["Synth Library open", "Synth Library closed"],
-        },
-        "color": "#3a1e6e",  # deep violet (Durham)
-    },
-    {
-        "name": "Chapel of Bones",
-        "slug": "chapel-of-bones",
-        "city": "Raleigh",
-        "capacity": None,
-        "size_category": "small",
-        "website": "https://chapelofbones.com/",
-        "scraper_type": "tickpick_organizer",
-        "scraper_config": {"organizer_id": "chapel-of-bones"},
-        "color": "#2a2840",  # dark ash (Raleigh)
-    },
-    {
-        "name": "Pour House",
-        "slug": "pour-house",
-        "city": "Raleigh",
-        "capacity": None,
-        "size_category": "small",
-        "website": "https://www.pourhouseraleigh.com/",
-        "scraper_type": "webflow_cms",
-        "scraper_config": {
-            "url": "https://www.pourhouseraleigh.com/calendar",
-            "base_url": "https://www.pourhouseraleigh.com",
-            # Show-flyer <img> lives inside each detail-page link in the page's
-            # separate Webflow "grid" list, not inside .show-collection-item
-            # (issue #56) — see WebflowCMSScraper's docstring for the cross-
-            # referencing logic this selector feeds.
-            "image_selector": "img",
-        },
-        "color": "#6a3828",  # warm brick (Raleigh)
-    },
-    {
-        "name": "Slim's",
-        "slug": "slims",
-        "city": "Raleigh",
-        "capacity": 200,
-        "size_category": "small",
-        "website": "https://slimsdivebar.com/",
-        "scraper_type": "mec",
-        "scraper_config": {"url": "https://slimsdivebar.com/music-and-events/"},
-        "color": "#4a3a6a",  # deep plum (Raleigh)
-    },
-]
+# Sourced from the active region's venues.toml (see app.site_config), not a Python
+# literal. Each dict maps directly to Venue model columns; scraper_type determines
+# which scraper class handles the venue and scraper_config passes venue-specific
+# options (URL, filters, account IDs) to it — see venues.toml for the full
+# scraper -> venue mapping and per-venue comments.
+_venue_config = load_venue_config()
+VENUES = [v.to_venue_dict() for v in _venue_config.venue]
+REMOVED_SLUGS: list[str] = _venue_config.removed_slugs
 
 
 # --- Seed Function ---
 
 async def seed_venues():
-    """Insert or update all venues."""
+    """Insert or update all venues from the active region's venue pack."""
     await init_db()
     async with async_session() as session:
         # Remove discontinued venues (cascade deletes their events)
-        REMOVED_SLUGS: list[str] = []
         for slug in REMOVED_SLUGS:
             result = await session.execute(select(Venue).where(Venue.slug == slug))
             venue = result.scalar_one_or_none()

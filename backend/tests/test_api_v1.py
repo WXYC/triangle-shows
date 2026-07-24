@@ -1,5 +1,6 @@
 """Tests for the surface-neutral /api/v1 API."""
 
+import contextlib
 from datetime import date, datetime, timedelta
 
 from conftest import DEFAULT_EVENT_DATE as D  # shared with the make_event factory default
@@ -208,6 +209,30 @@ async def test_v1_venues_ordered_by_city(client, make_venue):
     assert [v["city"] for v in data] == ["Carrboro", "Chapel Hill"]
     # Internal scraping details stay out of the public contract.
     assert all("scraper_type" not in v for v in data)
+
+
+# Characterization pin (region-pack epic, issue #62/#63): today's shipped venue
+# roster, end to end through the real seed path and the v1 API. Must stay green
+# unmodified through Phases 1-3.
+async def test_v1_venues_returns_all_22_shipped_venues_with_real_municipalities(client, session, monkeypatch):
+    from app.seed import seed_venues
+
+    @contextlib.asynccontextmanager
+    async def _session_cm():
+        yield session
+
+    async def _noop_init_db():
+        pass
+
+    monkeypatch.setattr("app.seed.init_db", _noop_init_db)
+    monkeypatch.setattr("app.seed.async_session", _session_cm)
+    await seed_venues()
+
+    data = (await client.get("/api/v1/venues")).json()
+    assert len(data) == 22
+    assert {v["city"] for v in data} == {
+        "Raleigh", "Durham", "Chapel Hill", "Carrboro", "Cary", "Saxapahaw",
+    }
 
 
 async def test_v1_health_matches_unversioned_alias(client, make_event):

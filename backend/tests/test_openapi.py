@@ -41,6 +41,15 @@ def test_openapi_exposes_v1_paths_and_neutral_schemas():
     assert "scraper_type" not in schemas["VenueResponse"]["properties"]
 
 
+def test_openapi_title_is_pinned():
+    # Characterization pin (region-pack epic, issue #62/#63): the FastAPI title is
+    # Triangle-branded today; Phase 2 moves it to the site manifest. This test must
+    # stay green unmodified through Phases 1-3, proving the eventual
+    # manifest-driven title reproduces today's exact bytes.
+    spec = app.openapi()
+    assert spec["info"]["title"] == "Triangle Shows API"
+
+
 def test_openapi_marks_legacy_aliases_deprecated():
     spec = app.openapi()
     paths = spec["paths"]
