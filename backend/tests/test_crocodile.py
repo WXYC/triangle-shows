@@ -116,7 +116,13 @@ def test_parse_item_no_time_specified_leaves_show_time_none():
     """
     item = BeautifulSoup(html, "lxml").select_one("div.uui-layout88_item")
     future = (date.today() + timedelta(days=60)).strftime("%b %d, %Y")
-    item.select_one(".cal-start-date").string = future
+    # `_parse_item` reads the date from the detail link's (second <a>)
+    # `.cal-start-date`, so both occurrences must move into the future —
+    # rewriting only the first (outbound-link) match would leave the detail
+    # link's hardcoded "Sep 29, 2026" to eventually go stale and start
+    # tripping the "skip past events" branch.
+    for el in item.select(".cal-start-date"):
+        el.string = future
     parsed = _scraper()._parse_item(item, date.today())
     assert parsed is not None
     assert parsed.show_time is None
