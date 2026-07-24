@@ -22,7 +22,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.market_time import today_in_triangle
+from app.market_time import today_in_market
 from app.models import Venue, Event, EventMissState, ScrapeLog
 from app.scrapers.base import BaseScraper, ScrapedEvent
 from app.scrapers.headliner import merge_support, parse_billing
@@ -454,7 +454,7 @@ class ScrapeManager:
         if not scraped_events:
             return 0, 0
 
-        today = today_in_triangle()
+        today = today_in_market()
         snapshot_hashes = {se.hash for se in scraped_events}
         # Horizon guard: only events strictly before this scrape's max seen date are
         # candidates. Exclusive on purpose: item-capped listings can cut mid-date,

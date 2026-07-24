@@ -1,0 +1,195 @@
+# Triangle region site manifest (region-pack epic, issue #62/#64).
+#
+# Branding/identity for the Triangle deployment: FastAPI title, iCal
+# PRODID/CALNAME/CALDESC/timezone/UID host, city grouping, and the frontend
+# presentation data served by GET /api/v1/site (palettes, links, subdomains).
+# Loaded by app.site_config.load_site_config(); nothing else should read this
+# file directly. Values here were transcribed verbatim from the former
+# frontend literals (index.html, js/config.js, js/app.js) so Phase 2 reproduces
+# today's exact bytes — see backend/tests/test_site_config.py and the
+# characterization pins in test_feeds.py / test_openapi.py.
+
+[site]
+name          = "Triangle Shows"
+domain        = "triangle-shows.net"
+uid_host      = "triangle-shows.org"  # historical iCal UID host; distinct from domain (decision 8)
+title         = "triangle-shows"
+tagline       = "live music across the triangle on one calendar"
+description   = "Live music events across Raleigh, Durham, Chapel Hill, Carrboro, and Cary"
+calendar_description = "Live music across the Triangle — triangle-shows.net"  # iCal X-WR-CALDESC (api/feeds.py)
+timezone      = "America/New_York"
+region_code   = "NC"
+favicon_color = "#f0922e"
+default_palette = "amber"
+ascii_art = """   __       _                   __               __                                    __
+  / /______(_)___ _____  ____ _/ /__       _____/ /_  ____ _      _______  ____  ___  / /_
+ / __/ ___/ / __ `/ __ \\/ __ `/ / _ \\_____/ ___/ __ \\/ __ \\ | /| / / ___/ / __ \\/ _ \\/ __/
+/ /_/ /  / / /_/ / / / / /_/ / /  __/_____\\__ / / / / /_/ / |/ |/ /\\__ / / / / /  __/ /_
+\\__/_/  /_/\\__,_/_/ /_/\\__, /_/\\___/    /____/_/ /_/\\____/|__/|__/____(_)_/ /_/\\___/\\__/
+                      /____/                                                                """
+
+[integrations]
+google_analytics_id = "G-S37F3PHK0R"
+spotify_client_id   = ""
+kofi_url            = "https://ko-fi.com/ty_fi"
+kofi_pitches        = [
+  "help me pay for this domain",
+  "keep the scrapers alive",
+  "offset my caffeine dependency",
+  "buy me a beer at Motorco",
+  "cheaper than a ticket stub",
+  "fuel for the scraper",
+  "better than a StubHub fee",
+  "helping you find your next show",
+  "the server bill is real",
+  "support local show-going",
+]
+
+[credit]
+label    = "@tyfi"
+url      = "http://bsky.app/profile/tyfi.bsky.social"
+repo_url = "https://github.com/ty-fi/triangle-shows"
+
+[[link]]
+label = "Naveypedia"
+url   = "https://www.instagram.com/naveypedia/"
+
+[[link]]
+label = "The Fuzzy Needle"
+url   = "https://www.instagram.com/fuzzy_needle/"
+
+[[link]]
+label = "Perfect Lovers Cafe"
+url   = "https://www.instagram.com/___perfectlovers___/"
+
+[[link]]
+label = "Weirs"
+url   = "https://www.instagram.com/weirs.ig/"
+
+[[link]]
+label = "Sluice"
+url   = "https://www.instagram.com/sluice.ig/"
+
+[[link]]
+label = "Fust"
+url   = "https://www.instagram.com/for_fust/"
+
+[[link]]
+label = "All Day Records"
+url   = "https://www.instagram.com/alldayrecords/"
+
+[[link]]
+label = "Field Guide · Indy Week"
+url   = "https://indyweek.com/newsletters/choose-your-indy-newsletters/"
+
+[city_groups]
+"Chapel Hill-Carrboro" = ["Chapel Hill", "Carrboro"]
+
+[cities."Raleigh"]
+border    = "#a83850"
+active_bg = "rgba(168,56,80,0.16)"
+
+[cities."Cary"]
+border    = "#b08030"
+active_bg = "rgba(176,128,48,0.16)"
+
+[cities."Durham"]
+border    = "#2a6098"
+active_bg = "rgba(42,96,152,0.16)"
+
+[cities."Chapel Hill-Carrboro"]
+border    = "#2a7a50"
+active_bg = "rgba(42,122,80,0.16)"
+
+[cities."Saxapahaw"]
+border    = "#8a30a8"
+active_bg = "rgba(138,48,168,0.16)"
+
+[palettes.amber]
+label  = "Amber"
+accent = "#c87941"
+[palettes.amber.vars]
+"--bg" = "#1a1008"
+"--surface" = "#241609"
+"--surface2" = "#2e1d0c"
+"--border" = "#3d2a12"
+"--text" = "#e8d5b0"
+"--muted" = "#9a7a50"
+"--dim" = "#5a4020"
+"--accent" = "#c87941"
+"--accent-hover" = "#e09050"
+"--accent-bg" = "rgba(200,121,65,0.10)"
+"--today-bg" = "rgba(200,121,65,0.05)"
+
+[palettes.phosphor]
+label  = "Phosphor"
+accent = "#44c754"
+[palettes.phosphor.vars]
+"--bg" = "#060d07"
+"--surface" = "#0c1a0d"
+"--surface2" = "#122014"
+"--border" = "#1e3820"
+"--text" = "#a8d8ac"
+"--muted" = "#4e8858"
+"--dim" = "#28502e"
+"--accent" = "#44c754"
+"--accent-hover" = "#68e078"
+"--accent-bg" = "rgba(68,199,84,0.10)"
+"--today-bg" = "rgba(68,199,84,0.05)"
+
+[palettes.midnight]
+label  = "Midnight"
+accent = "#4888e8"
+[palettes.midnight.vars]
+"--bg" = "#050810"
+"--surface" = "#0a0f20"
+"--surface2" = "#101828"
+"--border" = "#1a2640"
+"--text" = "#c0cce0"
+"--muted" = "#4868a0"
+"--dim" = "#1a2e50"
+"--accent" = "#4888e8"
+"--accent-hover" = "#68a8ff"
+"--accent-bg" = "rgba(72,136,232,0.12)"
+"--today-bg" = "rgba(72,136,232,0.05)"
+
+[palettes.wisteria]
+label  = "Wisteria"
+accent = "#c060d0"
+[palettes.wisteria.vars]
+"--bg" = "#0e0810"
+"--surface" = "#180e1c"
+"--surface2" = "#201428"
+"--border" = "#361e40"
+"--text" = "#e0c8e8"
+"--muted" = "#906898"
+"--dim" = "#4a2858"
+"--accent" = "#c060d0"
+"--accent-hover" = "#d880e8"
+"--accent-bg" = "rgba(192,96,208,0.12)"
+"--today-bg" = "rgba(192,96,208,0.05)"
+
+[palettes.durham]
+label  = "Durham"
+accent = "#bf6a28"
+[palettes.durham.vars]
+"--bg" = "#030d22"
+"--surface" = "#081a30"
+"--surface2" = "#0e2340"
+"--border" = "#1c3a6a"
+"--text" = "#d8e4f4"
+"--muted" = "#4878b8"
+"--dim" = "#1c3868"
+"--accent" = "#bf6a28"
+"--accent-hover" = "#f0a050"
+"--accent-bg" = "rgba(191,106,40,0.14)"
+"--today-bg" = "rgba(191,106,40,0.06)"
+
+[[subdomain]]
+host_prefix = "durm"
+city        = "Durham"
+title       = "durm-shows"
+subtitle    = """live music <s>across the triangle</s> in durham on one calendar. see the rest of the triangle <a href="https://triangle-shows.net" style="color: var(--accent-hover)">here</a>."""
+palette     = "durham"
+ascii_art   = """      __                               __                                    __ \\n  ___/ /_  ___________ ___       _____/ /_  ____ _      _______  ____  ___  / /_\\n / _  / / / / ___/ __ '__ \\\\_____/ ___/ __ \\\\/ __ \\\\ | /| / / ___/ / __ \\\\/ _ \\\\/ __/\\n/ // / /_/ / /  / / / / / /_____\\\\__ / / / / /_/ / |/ |/ /\\\\__ / / / / /  __/ /_  \\n\\\\___/\\\\____/_/  /_/ /_/ /_/    /____/_/ /_/\\\\____/|__/|__/____(_)_/ /_/\\\\___/\\\\__/ """
+

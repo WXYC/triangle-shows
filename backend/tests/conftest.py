@@ -195,6 +195,33 @@ def venue_config_env(monkeypatch):
     site_config.reset_venue_config_cache()
 
 
+@pytest.fixture
+def site_config_env(monkeypatch):
+    """Point SITE_CONFIG_PATH at a fixture pack and reset the app.site_config +
+    app.market_time caches before and after, so a test can load an arbitrary
+    site.toml without leaking into other tests (region-pack epic decision 5 —
+    same lazy/resettable pattern as venue_config_env above). market_time's zone
+    cache is reset alongside site_config's, since it derives from the same
+    singleton (app.market_time.market_tz()).
+
+    Usage: ``site_config_env(some_path)`` inside a test, then call
+    ``app.site_config.load_site_config()`` (directly, or indirectly via any
+    endpoint/helper that reads it).
+    """
+    from app import market_time, site_config
+
+    def _point_at(path) -> None:
+        monkeypatch.setenv("SITE_CONFIG_PATH", str(path))
+        site_config.reset_site_config_cache()
+        market_time.reset_market_tz_cache()
+
+    site_config.reset_site_config_cache()
+    market_time.reset_market_tz_cache()
+    yield _point_at
+    site_config.reset_site_config_cache()
+    market_time.reset_market_tz_cache()
+
+
 @pytest_asyncio.fixture
 async def make_venue(session):
     """Factory that inserts and commits a Venue, returning the persisted row.
