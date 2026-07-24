@@ -209,3 +209,107 @@ def test_region_dir_is_anchored_on_the_backend_root_not_cwd(monkeypatch):
 def test_region_dir_honors_the_region_env_var(monkeypatch):
     monkeypatch.setenv("REGION", "some-other-region")
     assert site_config.region_dir().name == "some-other-region"
+
+
+# --- SiteConfig: the shipped Triangle pack (region-pack epic Phase 2, issue #64) ---
+
+
+def test_shipped_triangle_site_pack_parses():
+    config = site_config.load_site_config()
+    assert config.site.name == "Triangle Shows"
+    assert config.site.domain == "triangle-shows.net"
+    assert config.site.timezone == "America/New_York"
+    assert config.site.region_code == "NC"
+
+
+def test_shipped_triangle_site_pack_pins_a_uid_host_distinct_from_domain():
+    # decision 8: the historical iCal UID host (.org) diverges from the site
+    # domain (.net) — Triangle pins uid_host explicitly rather than inheriting.
+    config = site_config.load_site_config()
+    assert config.site.uid_host == "triangle-shows.org"
+    assert config.site.uid_host != config.site.domain
+
+
+def test_shipped_triangle_site_pack_city_groups_expand_chapel_hill_carrboro():
+    config = site_config.load_site_config()
+    assert config.city_groups == {"Chapel Hill-Carrboro": ["Chapel Hill", "Carrboro"]}
+
+
+def test_shipped_triangle_site_pack_carries_five_palettes():
+    config = site_config.load_site_config()
+    assert set(config.palettes) == {"amber", "phosphor", "midnight", "wisteria", "durham"}
+
+
+def test_shipped_triangle_site_pack_carries_the_durm_subdomain():
+    config = site_config.load_site_config()
+    assert len(config.subdomains) == 1
+    assert config.subdomains[0].host_prefix == "durm"
+    assert config.subdomains[0].city == "Durham"
+    # ascii_art must be a real multi-line banner, not one physical line of literal \n escapes (#64 review regression guard)
+    ascii_art = config.subdomains[0].ascii_art
+    assert "\\n" not in ascii_art, "durm ascii_art holds literal backslash-n escapes instead of real newlines"
+    assert "\\\\" not in ascii_art, "durm ascii_art has doubled backslashes instead of single"
+    assert ascii_art.count("\n") == 4, "durm ascii_art should be a 5-line banner with real newlines"
+    assert "___/ /_  ___________" in ascii_art  # a distinctive banner row survives verbatim
+
+
+def test_uid_host_defaults_to_domain_when_omitted(tmp_path, site_config_env):
+    path = tmp_path / "site.toml"
+    path.write_text(
+        """
+        [site]
+        name = "Fixture Region"
+        domain = "fixture.example"
+        title = "fixture-shows"
+        tagline = "fixture tagline"
+        description = "fixture description"
+        calendar_description = "fixture calendar description"
+        timezone = "America/Los_Angeles"
+        region_code = "WA"
+        favicon_color = "#123456"
+        default_palette = "amber"
+        ascii_art = "fixture"
+
+        [credit]
+        label = "fixture"
+        url = "https://example.com"
+        repo_url = "https://example.com/repo"
+        """
+    )
+    site_config_env(path)
+    config = site_config.load_site_config()
+    assert config.site.uid_host == "fixture.example"
+
+
+def test_invalid_timezone_raises(tmp_path, site_config_env):
+    path = tmp_path / "site.toml"
+    path.write_text(
+        """
+        [site]
+        name = "Fixture Region"
+        domain = "fixture.example"
+        title = "fixture-shows"
+        tagline = "fixture tagline"
+        description = "fixture description"
+        calendar_description = "fixture calendar description"
+        timezone = "Not/A_Real_Zone"
+        region_code = "WA"
+        favicon_color = "#123456"
+        default_palette = "amber"
+        ascii_art = "fixture"
+
+        [credit]
+        label = "fixture"
+        url = "https://example.com"
+        repo_url = "https://example.com/repo"
+        """
+    )
+    site_config_env(path)
+    with pytest.raises(ValidationError, match="not a canonical IANA zone"):
+        site_config.load_site_config()
+
+
+def test_missing_site_pack_raises_os_error(tmp_path, site_config_env):
+    site_config_env(tmp_path / "does-not-exist.toml")
+    with pytest.raises(OSError):
+        site_config.load_site_config()

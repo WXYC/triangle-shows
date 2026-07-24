@@ -29,28 +29,31 @@ from app.api.common import (
     health_check,
     list_venues,
     split_csv,
-    today_in_triangle,
+    today_in_market,
 )
 from app.database import get_session
 from app.models import EventStatus
 from app.schemas import EventResponse, HealthResponse, VenueResponse
 from app.services.events_query import query_events
+from app.site_config import SiteConfig, load_site_config
 
 # --- Router ---
 
 router = APIRouter(prefix="/api/v1", tags=["v1"])
 
-# "Chapel Hill-Carrboro" is a display grouping, not a municipality — venues.city holds
-# real towns. The v1 city param keeps accepting the grouping as an alias for both
-# municipalities so pre-existing links keep working. Expansion happens per CSV token
-# and only at this surface; stored rows never carry the grouping label.
-CITY_ALIASES = {"Chapel Hill-Carrboro": ("Chapel Hill", "Carrboro")}
-
 
 def _expand_city_aliases(cities: Optional[list[str]]) -> Optional[list[str]]:
+    """Expand a display grouping (e.g. "Chapel Hill-Carrboro") into its member
+    municipalities. venues.city holds real towns, never a grouping label; the
+    grouping is a query-time alias sourced from the active region's
+    site.toml [city_groups] (region-pack epic decision 9 — replaces the former
+    CITY_ALIASES literal), so pre-existing links keep working across regions
+    without a code change.
+    """
     if cities is None:
         return None
-    return [c for token in cities for c in CITY_ALIASES.get(token, (token,))]
+    city_groups = load_site_config().city_groups
+    return [c for token in cities for c in city_groups.get(token, (token,))]
 
 
 # --- Endpoints ---
@@ -61,7 +64,7 @@ def _expand_city_aliases(cities: Optional[list[str]]) -> Optional[list[str]]:
     summary="List de-duplicated events for a date window",
 )
 async def list_events(
-    start: Optional[date] = Query(None, description="ISO date (YYYY-MM-DD), inclusive lower bound. Defaults to today (America/New_York) when end is also omitted; pass an explicit value to query history."),
+    start: Optional[date] = Query(None, description="ISO date (YYYY-MM-DD), inclusive lower bound. Defaults to today in the region's market timezone when end is also omitted; pass an explicit value to query history."),
     end: Optional[date] = Query(None, description="ISO date (YYYY-MM-DD), inclusive upper bound"),
     city: Optional[str] = Query(None, description="Comma-separated city names"),
     size: Optional[str] = Query(None, description="Comma-separated size categories"),
@@ -77,13 +80,13 @@ async def list_events(
 
     Returns the full matching set (no pagination) — the calendar loads a whole window and
     filters client-side. When neither bound is given, `start` defaults to today in the
-    venues' timezone so a bare request returns upcoming events rather than the entire
-    history; an explicit `start` (or an `end` on its own) queries history. Malformed
+    region's market timezone so a bare request returns upcoming events rather than the
+    entire history; an explicit `start` (or an `end` on its own) queries history. Malformed
     dates are rejected with a 422. De-duplication semantics live in
     app.services.events_query.query_events; pass `dedup=false` to see every stored row.
     """
     if start is None and end is None:
-        start = today_in_triangle()
+        start = today_in_market()
     events = await query_events(
         session,
         start=start,
@@ -124,3 +127,18 @@ router.add_api_route(
     response_model=HealthResponse,
     summary="Service status and data freshness",
 )
+
+
+@router.get(
+    "/site",
+    response_model=SiteConfig,
+    response_model_by_alias=False,
+    summary="Region site manifest (branding, identity, presentation config)",
+)
+async def get_site() -> SiteConfig:
+    """The active region's site manifest — branding, iCal/head identity, city
+    grouping, and frontend presentation config (palettes, links, subdomains),
+    as declared in the region's site.toml (region-pack epic, issue #62/#64).
+    Additive to the v1 contract: no existing endpoint's response shape changes.
+    """
+    return load_site_config()

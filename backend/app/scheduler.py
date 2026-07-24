@@ -19,6 +19,7 @@ from sqlalchemy import delete
 from app.database import async_session
 from app.models import Event
 from app.scrapers.manager import ScrapeManager
+from app.site_config import load_site_config
 
 # --- Module-level setup ---
 
@@ -71,27 +72,35 @@ async def cleanup_past_events_job():
 # --- Scheduler configuration ---
 
 def configure_scheduler():
-    """Add all scheduled jobs."""
-    # Ticketmaster: 6 AM + 6 PM ET
+    """Add all scheduled jobs.
+
+    Cron hours are wall-clock in the region's market timezone (site.timezone),
+    not a fixed literal — Triangle's pack pins "America/New_York", the canonical
+    IANA id "US/Eastern" used to hardcode (same zone; the alias is converged to
+    its canonical form, behavior-identical — region-pack epic decision 10).
+    """
+    tz = load_site_config().site.timezone
+
+    # Ticketmaster: 6 AM + 6 PM local
     scheduler.add_job(
         scrape_ticketmaster_job,
-        CronTrigger(hour="6,18", timezone="US/Eastern"),
+        CronTrigger(hour="6,18", timezone=tz),
         id="scrape_ticketmaster",
         replace_existing=True,  # safe to call multiple times (e.g., on hot reload)
     )
 
-    # Indie venues: 6 AM + 12 PM + 6 PM ET
+    # Indie venues: 6 AM + 12 PM + 6 PM local
     scheduler.add_job(
         scrape_indie_job,
-        CronTrigger(hour="6,12,18", timezone="US/Eastern"),
+        CronTrigger(hour="6,12,18", timezone=tz),
         id="scrape_indie",
         replace_existing=True,
     )
 
-    # Past event cleanup: 3 AM ET
+    # Past event cleanup: 3 AM local
     scheduler.add_job(
         cleanup_past_events_job,
-        CronTrigger(hour=3, timezone="US/Eastern"),
+        CronTrigger(hour=3, timezone=tz),
         id="cleanup_past_events",
         replace_existing=True,
     )

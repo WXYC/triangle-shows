@@ -53,7 +53,7 @@ def scrape(session, monkeypatch):
 
     async def _scrape(venue, events, *, on_day, error=None):
         monkeypatch.setattr(ScrapeManager, "_get_scraper", lambda self, v: _StubScraper(events, error))
-        monkeypatch.setattr("app.scrapers.manager.today_in_triangle", lambda: on_day)
+        monkeypatch.setattr("app.scrapers.manager.today_in_market", lambda: on_day)
         return await ScrapeManager(session).scrape_venue(venue)
 
     return _scrape
