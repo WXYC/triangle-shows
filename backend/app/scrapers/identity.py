@@ -104,6 +104,7 @@ SCRAPER_REGISTRY: dict[str, tuple[str, str]] = {
     "mec": ("app.scrapers.mec", "MECScraper"),
     "webflow_cms": ("app.scrapers.webflow_cms", "WebflowCMSScraper"),
     "tickpick_organizer": ("app.scrapers.tickpick_organizer", "TickPickOrganizerScraper"),
+    "ticketweb": ("app.scrapers.ticketweb", "TicketWebScraper"),
 }
 
 
