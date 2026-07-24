@@ -35,6 +35,7 @@ Each scraper class declares a machine-readable verdict, `URL_IDENTITY` (see `app
 | `squarespace` | HASH_FALLBACK | `fullUrl` is regenerated from the title on rename — not rename-stable |
 | `webflow_cms` | HASH_FALLBACK | `source_url` is the ticket link, not guaranteed event-unique |
 | `tickpick_organizer` | HASH_FALLBACK | TickPick ticket page; event-uniqueness across an organizer's listings is unverified |
+| `eventbrite` | HASH_FALLBACK | `source_url` is the per-event Eventbrite page; the title-derived slug is not confirmed rename-stable; identity comes from `external_id`, the numeric id trailing the URL |
 
 A new scraper must declare its own verdict — `tests/test_identity.py` fails if one is missing from the registry or relies on an inherited default. When in doubt, declare `HASH_FALLBACK`: it preserves today's content-hash behavior, while a wrong `TRUSTED` can merge distinct events into one row.
 
