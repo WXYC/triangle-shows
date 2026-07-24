@@ -245,6 +245,12 @@ def test_shipped_triangle_site_pack_carries_the_durm_subdomain():
     assert len(config.subdomains) == 1
     assert config.subdomains[0].host_prefix == "durm"
     assert config.subdomains[0].city == "Durham"
+    # ascii_art must be a real multi-line banner, not one physical line of literal \n escapes (#64 review regression guard)
+    ascii_art = config.subdomains[0].ascii_art
+    assert "\\n" not in ascii_art, "durm ascii_art holds literal backslash-n escapes instead of real newlines"
+    assert "\\\\" not in ascii_art, "durm ascii_art has doubled backslashes instead of single"
+    assert ascii_art.count("\n") == 4, "durm ascii_art should be a 5-line banner with real newlines"
+    assert "___/ /_  ___________" in ascii_art  # a distinctive banner row survives verbatim
 
 
 def test_uid_host_defaults_to_domain_when_omitted(tmp_path, site_config_env):
