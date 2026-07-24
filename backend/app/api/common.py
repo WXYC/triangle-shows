@@ -22,7 +22,7 @@ from sqlalchemy.orm import joinedload
 from app.database import get_session
 # Re-exported for the API layer: routes and feeds import these from here, keeping
 # app.market_time an implementation detail shared with the scrape manager.
-from app.market_time import TRIANGLE_TZ, today_in_triangle  # noqa: F401
+from app.market_time import market_tz, today_in_market  # noqa: F401
 from app.models import Event, ScrapeLog, Venue
 from app.schemas import EventResponse, HealthResponse
 
@@ -129,5 +129,5 @@ async def health_check(session: AsyncSession = Depends(get_session)) -> HealthRe
         event_count=event_count,
         venue_count=venue_count,
         last_scrape=last_scrape,
-        version=os.environ.get("GIT_COMMIT", "unknown"),  # set by Cloud Build at image build time
+        version=os.environ.get("GIT_COMMIT", "unknown"),  # set via the Dockerfile's GIT_COMMIT build ARG, not Cloud Build (Railway builds this Dockerfile)
     )

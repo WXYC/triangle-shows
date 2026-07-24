@@ -19,9 +19,10 @@ from icalendar import Calendar, Event as ICalEvent, vText
 from sqlalchemy.ext.asyncio import AsyncSession
 
 # --- Internal imports ---
-from app.api.common import TRIANGLE_TZ, split_csv, today_in_triangle
+from app.api.common import market_tz, split_csv, today_in_market
 from app.database import get_session
 from app.services.events_query import query_events
+from app.site_config import load_site_config
 
 # --- Router setup ---
 router = APIRouter(prefix="/feeds", tags=["feeds"])
@@ -37,13 +38,15 @@ async def get_ical_feed(
     """Live iCal subscription feed. Add to Apple Calendar, Google Calendar, or Outlook once;
     new shows appear automatically as the scraper finds them."""
 
+    site = load_site_config().site
+
     # Only upcoming events (no historical clutter in subscribers' calendars), via the
     # shared query service. dedup=False: the feed lists every venue's own offering,
     # including cross-venue duplicate listings the calendar collapses. "Today" is the
-    # Triangle's calendar date, not the (UTC) server's.
+    # market's calendar date (site.timezone), not the (UTC) server's.
     events = await query_events(
         session,
-        start=today_in_triangle(),
+        start=today_in_market(),
         venue_slugs=split_csv(venue),
         dedup=False,
     )
@@ -51,13 +54,16 @@ async def get_ical_feed(
     # --- Build the iCal Calendar object ---
 
     cal = Calendar()
-    cal.add("prodid", "-//triangle-shows.net//EN")
+    # Server PRODID format is domain-only (region-pack epic decision 11); the
+    # client "download my shows" export (favorites.js) uses a distinct
+    # name+domain form and is not touched here.
+    cal.add("prodid", f"-//{site.domain}//EN")
     cal.add("version", "2.0")
     cal.add("calscale", "GREGORIAN")
     cal.add("method", "PUBLISH")
-    cal.add("x-wr-calname", vText("Triangle Shows"))
-    cal.add("x-wr-caldesc", vText("Live music across the Triangle — triangle-shows.net"))
-    cal.add("x-wr-timezone", vText("America/New_York"))
+    cal.add("x-wr-calname", vText(site.name))
+    cal.add("x-wr-caldesc", vText(site.calendar_description))
+    cal.add("x-wr-timezone", vText(site.timezone))
     # Suggest clients refresh every 6 hours (matches scraper cadence)
     cal.add("refresh-interval;value=duration", "PT6H")
     cal.add("x-published-ttl", "PT6H")
@@ -70,7 +76,9 @@ async def get_ical_feed(
         venue_obj = event.venue
         iev = ICalEvent()
 
-        iev.add("uid",     vText(f"{event.id}@triangle-shows.org"))
+        # uid_host defaults to domain but Triangle pins a historically-divergent
+        # value (decision 8) — subscribers' event UIDs must never change.
+        iev.add("uid",     vText(f"{event.id}@{site.uid_host}"))
         iev.add("dtstamp", now)
 
         # Summary: prefer artist name, fall back to event name
@@ -79,7 +87,7 @@ async def get_ical_feed(
 
         # All-day or timed event — iCal uses DATE vs DATETIME depending on whether time is known
         if event.show_time:
-            start = datetime.combine(event.date, event.show_time, tzinfo=TRIANGLE_TZ)
+            start = datetime.combine(event.date, event.show_time, tzinfo=market_tz())
             iev.add("dtstart", start)
             # Assume 3-hour show duration when no end time is scraped
             iev.add("dtend",   start + timedelta(hours=3))
@@ -89,7 +97,7 @@ async def get_ical_feed(
 
         # Location
         if venue_obj:
-            iev.add("location", vText(f"{venue_obj.name}, {venue_obj.city}, NC"))
+            iev.add("location", vText(f"{venue_obj.name}, {venue_obj.city}, {site.region_code}"))
 
         # Description — pack in the useful bits
         desc_parts = []
@@ -132,7 +140,7 @@ async def get_ical_feed(
         content=ical_bytes,
         media_type="text/calendar; charset=utf-8",
         headers={
-            "Content-Disposition": 'attachment; filename="triangle-shows.ics"',
+            "Content-Disposition": f'attachment; filename="{site.title}.ics"',
             # Cache for 1 hour on CDN/proxies; scraper runs every 6 hours so this is safe
             "Cache-Control": "public, max-age=3600",
         },

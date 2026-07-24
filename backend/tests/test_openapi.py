@@ -6,17 +6,18 @@ pure in-memory document, so no HTTP client or database is needed.
 """
 
 from app.main import app
+from app.site_config import load_site_config
 
 
 def test_openapi_exposes_v1_paths_and_neutral_schemas():
     spec = app.openapi()
 
     paths = spec["paths"]
-    for expected in ("/api/v1/events", "/api/v1/events/{event_id}", "/api/v1/venues", "/api/v1/health"):
+    for expected in ("/api/v1/events", "/api/v1/events/{event_id}", "/api/v1/venues", "/api/v1/health", "/api/v1/site"):
         assert expected in paths, f"missing path {expected}"
 
     schemas = spec["components"]["schemas"]
-    for expected in ("EventResponse", "VenueResponse", "HealthResponse"):
+    for expected in ("EventResponse", "VenueResponse", "HealthResponse", "SiteConfig"):
         assert expected in schemas, f"missing schema {expected}"
 
     # updated_at is part of the neutral event contract (used by an incremental sync).
@@ -42,12 +43,14 @@ def test_openapi_exposes_v1_paths_and_neutral_schemas():
 
 
 def test_openapi_title_is_pinned():
-    # Characterization pin (region-pack epic, issue #62/#63): the FastAPI title is
-    # Triangle-branded today; Phase 2 moves it to the site manifest. This test must
-    # stay green unmodified through Phases 1-3, proving the eventual
-    # manifest-driven title reproduces today's exact bytes.
+    # Characterization pin (region-pack epic, issue #62/#63/#64): the FastAPI title
+    # is now manifest-driven (Phase 2, issue #64) — this re-derives the same
+    # assertion from the shipped Triangle site.toml alongside the original literal,
+    # proving the manifest reproduces today's exact bytes.
     spec = app.openapi()
+    site = load_site_config().site
     assert spec["info"]["title"] == "Triangle Shows API"
+    assert spec["info"]["title"] == f"{site.name} API"
 
 
 def test_openapi_marks_legacy_aliases_deprecated():
@@ -57,6 +60,6 @@ def test_openapi_marks_legacy_aliases_deprecated():
     assert paths["/api/events"]["get"]["deprecated"] is True
     assert paths["/api/venues"]["get"]["deprecated"] is True
     assert paths["/api/health"]["get"]["deprecated"] is True
-    # ...while the v1 surface is not deprecated.
-    for v1_path in ("/api/v1/events", "/api/v1/venues", "/api/v1/health"):
+    # ...while the v1 surface (including the new site manifest) is not deprecated.
+    for v1_path in ("/api/v1/events", "/api/v1/venues", "/api/v1/health", "/api/v1/site"):
         assert paths[v1_path]["get"].get("deprecated", False) is False

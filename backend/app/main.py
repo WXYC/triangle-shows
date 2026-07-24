@@ -23,6 +23,7 @@ from app.config import settings
 from app.database import async_session
 from app.seed import seed_venues
 from app.scheduler import scheduler, configure_scheduler
+from app.site_config import load_site_config
 from app.api import events, venues, health, feeds, v1
 
 # --- Logging setup ---
@@ -67,7 +68,7 @@ async def _startup_scrape():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup and shutdown logic."""
-    logger.info("Starting Triangle Shows API...")
+    logger.info(f"Starting {_site.name} API...")
 
     # Apply any pending Alembic migrations — creates tables on fresh DBs, updates schema on existing ones
     await asyncio.to_thread(_run_migrations)
@@ -111,10 +112,18 @@ async def lifespan(app: FastAPI):
 
 # --- App instantiation ---
 
+# Loaded at import time (not lifespan): the FastAPI title/description are static
+# attributes set once at construction, and httpx's ASGITransport (the test
+# `client` fixture) never drives the app lifespan anyway (tests/conftest.py) — so
+# this doubles as the "REGION=triangle boot fails loudly on a bad/missing pack"
+# fail-fast (region-pack epic decision 5): importing app.main dies immediately on
+# a malformed or missing site.toml, same as any deploy that imports this module.
+_site = load_site_config().site
+
 app = FastAPI(
-    title="Triangle Shows API",
+    title=f"{_site.name} API",
     description=(
-        "Surface-neutral API for Triangle-area live-music events and venues. "
+        f"Surface-neutral API for {_site.name}'s live-music events and venues. "
         "The versioned /api/v1 endpoints are the canonical, client-agnostic contract "
         "(consumed by the web calendar and other clients); the unversioned /api/events, "
         "/api/venues, and /api/health endpoints are deprecated aliases."
