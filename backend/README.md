@@ -37,6 +37,7 @@ Each scraper class declares a machine-readable verdict, `URL_IDENTITY` (see `app
 | `tickpick_organizer` | HASH_FALLBACK | TickPick ticket page; event-uniqueness across an organizer's listings is unverified |
 | `eventbrite` | HASH_FALLBACK | `source_url` is the per-event Eventbrite page; the title-derived slug is not confirmed rename-stable; identity comes from `external_id`, the numeric id trailing the URL |
 | `crocodile` | TRUSTED | venue's own `/shows/<slug>` detail page, always present; slug is assigned once per Webflow CMS item, independent of the title/date fields, and Webflow enforces per-collection slug uniqueness — the outbound ticketer link (~6 heterogeneous platforms, sometimes absent) is not |
+| `aeg_venue` | HASH_FALLBACK | `source_url` is the venue site's own per-event detail page (never the shared listing); it embeds the same numeric AXS id used as `external_id`, a promising rename/reschedule-stability signal, but that's inferred from URL shape on a single snapshot with no observed rename/reschedule to confirm it — identity in practice is already `ext:`-tier (the AXS event id) whenever a card carries a ticket link |
 
 A new scraper must declare its own verdict — `tests/test_identity.py` fails if one is missing from the registry or relies on an inherited default. When in doubt, declare `HASH_FALLBACK`: it preserves today's content-hash behavior, while a wrong `TRUSTED` can merge distinct events into one row.
 
