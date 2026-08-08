@@ -59,6 +59,10 @@ TEST_DATABASE_URL = _resolve_test_db_url()
 os.environ["DATABASE_URL"] = TEST_DATABASE_URL
 os.environ.setdefault("RUN_STARTUP_SCRAPE", "false")
 os.environ.setdefault("ENABLE_SCHEDULER", "false")
+# A fixed, non-empty salt so the suite exercises the salted feed-telemetry path
+# (app.api.feeds.record_feed_fetch no-ops when this is empty). Tests that need the
+# unsalted behavior monkeypatch settings.TELEMETRY_SALT themselves.
+os.environ.setdefault("TELEMETRY_SALT", "test-telemetry-salt")
 
 import pytest  # noqa: E402
 import pytest_asyncio  # noqa: E402
@@ -70,7 +74,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 # so schema creation doesn't silently depend on which modules the routers happen to
 # import.
 from app.database import Base, get_session  # noqa: E402
-from app.models import Event, EventMissState, Venue  # noqa: E402, F401
+from app.models import Event, EventMissState, FeedFetch, Venue  # noqa: E402, F401
 from app.main import app  # noqa: E402
 
 

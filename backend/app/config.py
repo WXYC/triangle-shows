@@ -24,8 +24,9 @@ class Settings(BaseSettings):
     APP_ENV: str = "development"
     LOG_LEVEL: str = "INFO"
     # Per-deployment secret salting feed_fetches.client_hash (app.api.feeds.record_feed_fetch).
-    # Default "" lets dev/tests run bare; outside development an empty salt makes the
-    # recorder no-op (an unsalted hash of ip|ua is brute-forceable back to a source IP).
+    # Empty (the default) disables feed telemetry entirely, on every deployment: an
+    # unsalted hash of ip|ua is brute-forceable back to a source IP, so no salt means
+    # no rows rather than privacy-degraded rows. Set it to any random secret to opt in.
     TELEMETRY_SALT: str = ""
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}

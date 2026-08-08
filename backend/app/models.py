@@ -180,8 +180,10 @@ class FeedFetch(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     fetched_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     client_hash: Mapped[str] = mapped_column(String(16))
-    # Raw ?venue= query param verbatim; NULL when absent (distinguishes full-calendar
-    # subscribers from per-venue ones).
+    # The parsed ?venue= filter, comma-joined in sorted order; NULL whenever the full
+    # calendar was served (param absent, or present with no usable slugs). Normalized
+    # rather than raw so the NULL/non-NULL split and any GROUP BY describe the feed
+    # that was actually served, not the spelling the client happened to use.
     venue_filter: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     __table_args__ = (Index("ix_feed_fetches_fetched_at_client_hash", "fetched_at", "client_hash"),)

@@ -15,6 +15,7 @@ Requires: PostgreSQL (via app.database), the shared events query service
 import hashlib
 import logging
 from datetime import datetime, timedelta, timezone
+from functools import lru_cache
 from typing import Optional
 
 # --- Third-party imports ---
@@ -39,16 +40,39 @@ router = APIRouter(prefix="/feeds", tags=["feeds"])
 
 # --- Feed telemetry ---
 
-async def record_feed_fetch(session: AsyncSession, request: Request, venue_param: Optional[str]) -> None:
+@lru_cache(maxsize=1)
+def _warn_telemetry_salt_missing() -> None:
+    """Log the unset-salt warning once per process.
+
+    /feeds/events.ics is the highest-frequency endpoint in the app — calendar clients
+    poll it unattended on their own schedule — while a missing TELEMETRY_SALT is a
+    static property of the deployment. Warning per request would emit one line per
+    poll, forever, for a condition an operator can only fix once.
+    """
+    logger.warning("TELEMETRY_SALT is unset; feed telemetry disabled (no feed_fetches rows will be written)")
+
+
+async def record_feed_fetch(
+    session: AsyncSession, request: Request, venue_slugs: Optional[list[str]]
+) -> None:
     """Best-effort telemetry write: one feed_fetches row per successfully served fetch.
 
     Never allowed to break the feed response — any failure is caught, the session
     rolled back, and a warning logged; the caller's response is unaffected either way.
-    Outside development, an empty TELEMETRY_SALT makes this a no-op (plus a warning)
-    rather than accumulate a client_hash that's brute-forceable back to a source IP.
+
+    The salt is required unconditionally: an empty TELEMETRY_SALT makes this a no-op
+    (plus a one-time warning) rather than accumulate a client_hash that's
+    brute-forceable back to a source IP. Deliberately not gated on APP_ENV or any
+    other environment variable — the deploy path sets no env vars, so an env-gated
+    check would default to the permissive branch in exactly the deployment that
+    needs the strict one.
+
+    ``venue_slugs`` is the *parsed* filter (what query_events was actually given),
+    not the raw ?venue= string, so the recorded value can never describe a feed
+    different from the one served.
     """
-    if settings.APP_ENV != "development" and not settings.TELEMETRY_SALT:
-        logger.warning("TELEMETRY_SALT is unset outside development; skipping feed_fetches write")
+    if not settings.TELEMETRY_SALT:
+        _warn_telemetry_salt_missing()
         return
     try:
         # Railway's Envoy edge appends the downstream address to any inbound
@@ -66,7 +90,10 @@ async def record_feed_fetch(session: AsyncSession, request: Request, venue_param
             client_ip = ""
         user_agent = request.headers.get("user-agent", "")
         digest = hashlib.sha256(f"{settings.TELEMETRY_SALT}{client_ip}|{user_agent}".encode()).hexdigest()
-        session.add(FeedFetch(client_hash=digest[:16], venue_filter=venue_param))
+        # Sorted so "a,b" and "b,a" — which serve the same feed, and which the filter
+        # UI emits in click order — land in one bucket rather than two.
+        venue_filter = ",".join(sorted(venue_slugs)) if venue_slugs else None
+        session.add(FeedFetch(client_hash=digest[:16], venue_filter=venue_filter))
         await session.commit()
     except Exception as exc:
         await session.rollback()
@@ -86,6 +113,10 @@ async def get_ical_feed(
 
     site = load_site_config().site
 
+    # Parsed once and reused for both the query and the telemetry row, so what gets
+    # recorded can't drift from what got served.
+    venue_slugs = split_csv(venue)
+
     # Only upcoming events (no historical clutter in subscribers' calendars), via the
     # shared query service. dedup=False: the feed lists every venue's own offering,
     # including cross-venue duplicate listings the calendar collapses. "Today" is the
@@ -93,7 +124,7 @@ async def get_ical_feed(
     events = await query_events(
         session,
         start=today_in_market(),
-        venue_slugs=split_csv(venue),
+        venue_slugs=venue_slugs,
         dedup=False,
     )
 
@@ -186,7 +217,7 @@ async def get_ical_feed(
     # Recorded after serialization succeeds, immediately before the response returns:
     # an INSERT rejected at the DB can't poison the events read, and only successfully
     # served feeds are counted.
-    await record_feed_fetch(session, request, venue)
+    await record_feed_fetch(session, request, venue_slugs)
 
     return Response(
         content=ical_bytes,

@@ -23,7 +23,10 @@ TICKETMASTER_API_KEY=your_key_here   # <-- fill this in
 ENABLE_SCHEDULER=false
 APP_ENV=development
 LOG_LEVEL=INFO
+TELEMETRY_SALT=
 ```
+
+`TELEMETRY_SALT` salts the hashed client identifier recorded for each `.ics` feed fetch. Leave it empty and feed telemetry is switched off entirely — nothing is recorded. Set it to any random secret to turn it on; the salt is what keeps a stored hash from being brute-forced back to a source IP, so pick a value you keep private and don't change it unless you want the history to become uncorrelatable.
 
 ## Start the app
 
