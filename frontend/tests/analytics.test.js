@@ -12,7 +12,7 @@
 
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
-const { ticketAnchorAttrs, ticketClickPayload, _onTicketClick } = require("../js/analytics.js");
+const { ticketAnchorAttrs, ticketClickPayload, _onTicketClick, TICKET_ANCHOR_SELECTOR } = require("../js/analytics.js");
 
 test("ticketClickPayload maps a full dataset to the gtag event tuple", () => {
   const [name, params] = ticketClickPayload({ venueSlug: "cats-cradle", eventId: "42" });
@@ -86,7 +86,16 @@ test("_onTicketClick emits ticket_click with the anchor's dataset for a.btn-tick
   globalThis.gtag = (...args) => calls.push(args);
   try {
     const anchor = { dataset: { venueSlug: "cats-cradle", eventId: "42" } };
-    _onTicketClick({ target: { closest: () => anchor } });
+    const closestArgs = [];
+    const closest = (selector) => {
+      closestArgs.push(selector);
+      return anchor;
+    };
+    _onTicketClick({ target: { closest } });
+    // Ties the handler to the exported constant, not just to whatever `closest` was
+    // stubbed to return — a delegated selector that drifted from TICKET_ANCHOR_SELECTOR
+    // would still pass every other assertion here.
+    assert.deepEqual(closestArgs, [TICKET_ANCHOR_SELECTOR]);
     assert.deepEqual(calls, [["event", "ticket_click", { venue_slug: "cats-cradle", event_id: "42" }]]);
   } finally {
     delete globalThis.gtag;
