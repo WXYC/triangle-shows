@@ -24,7 +24,7 @@ async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit
 # --- ORM Base ---
 
 class Base(DeclarativeBase):
-    """Shared declarative base for all ORM models (Venue, Event, ScrapeLog)."""
+    """Shared declarative base for all ORM models (Venue, Event, EventMissState, ScrapeLog, FeedFetch)."""
     pass
 
 
