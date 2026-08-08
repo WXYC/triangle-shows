@@ -15,6 +15,12 @@ function _escapeAttr(s) {
     .replace(/'/g, "&#39;");
 }
 
+// The delegated click listener's target selector, shared with the tests so the
+// selector and what the modal.js render sites actually emit stay provably coupled
+// (see analytics.test.js and modal.test.js) instead of drifting behind a hardcoded
+// literal on each side.
+const TICKET_ANCHOR_SELECTOR = "a.btn-tickets";
+
 // data-* attribute string for a ticket anchor. Both modal.js render sites (the modal
 // button and the list-row variant) call this, so the attribute/selector coupling that
 // _onTicketClick relies on lives in one place. Named data-venue-slug (not data-venue)
@@ -40,7 +46,7 @@ function _onTicketClick(e) {
   // auxclick fires for any non-primary button (middle-click, and right-click in some
   // browsers when no context menu is shown); only a middle-click should count.
   if (e.type === "auxclick" && e.button !== 1) return;
-  const anchor = e.target.closest("a.btn-tickets");
+  const anchor = e.target.closest(TICKET_ANCHOR_SELECTOR);
   if (!anchor || typeof gtag !== "function") return;
   const [name, params] = ticketClickPayload(anchor.dataset);
   gtag("event", name, params);
@@ -58,5 +64,5 @@ if (typeof document !== "undefined") {
 // Exported for the Node test runner (`node --test frontend/tests/`). Harmless in the
 // browser, where `module` is undefined, so the file still works as a plain <script>.
 if (typeof module !== "undefined" && module.exports) {
-  module.exports = { ticketAnchorAttrs, ticketClickPayload, _onTicketClick };
+  module.exports = { ticketAnchorAttrs, ticketClickPayload, _onTicketClick, TICKET_ANCHOR_SELECTOR };
 }

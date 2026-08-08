@@ -12,24 +12,40 @@
 //    undefined when modal.js runs. Both render sites must still produce a well-formed
 //    anchor instead of throwing (which previously killed the modal for every show
 //    with a ticket URL — see modal.js:33/:133).
-//  - When analytics.js *has* loaded, the rendered anchor markup must carry
-//    class="btn-tickets" alongside the data-* attributes, since analytics.js's
-//    delegated click listener selects on `a.btn-tickets` — that selector has to stay
-//    coupled to what the render sites actually emit.
+//  - When analytics.js *has* loaded, the rendered anchor markup must carry the class
+//    analytics.js's delegated click listener selects on (TICKET_ANCHOR_SELECTOR)
+//    alongside the data-* attributes. The expected class below is parsed out of that
+//    exported constant rather than hardcoded, so a selector change on either side
+//    (the constant, or the class either render site emits) turns this suite red.
 
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
+const { TICKET_ANCHOR_SELECTOR } = require("../js/analytics.js");
 
 const MODAL_SRC = fs.readFileSync(path.join(__dirname, "../js/modal.js"), "utf8");
 const ANALYTICS_SRC = fs.readFileSync(path.join(__dirname, "../js/analytics.js"), "utf8");
 
+// TICKET_ANCHOR_SELECTOR is a CSS selector like "a.btn-tickets"; pull the class token
+// back out of it so assertions below check the render sites against the real constant
+// instead of a copy-pasted literal.
+const _selectorMatch = /^[a-z]+\.([\w-]+)$/.exec(TICKET_ANCHOR_SELECTOR);
+if (!_selectorMatch) {
+  throw new Error(`TICKET_ANCHOR_SELECTOR "${TICKET_ANCHOR_SELECTOR}" isn't a simple tag.class selector`);
+}
+const TICKET_ANCHOR_CLASS = _selectorMatch[1];
+
 function _stubElement() {
+  const addedClasses = [];
   return {
     innerHTML: "",
-    classList: { add() {}, remove() {} },
+    classList: {
+      addedClasses,
+      add(cls) { addedClasses.push(cls); },
+      remove() {},
+    },
     addEventListener() {},
   };
 }
@@ -75,8 +91,9 @@ test("_buildEventRow (group modal row) renders a well-formed ticket anchor witho
   });
   assert.match(
     html,
-    /<a href="https:\/\/tickets\.example\.com\/42" target="_blank" rel="noopener" class="btn-tickets btn-tickets-sm"\s*>Get Tickets<\/a>/
+    /<a href="https:\/\/tickets\.example\.com\/42" target="_blank" rel="noopener" class="[^"]*"\s*>Get Tickets<\/a>/
   );
+  assert.match(html, new RegExp(`class="${TICKET_ANCHOR_CLASS} btn-tickets-sm"`));
   assert.equal(html.includes("data-venue-slug"), false);
   assert.equal(html.includes("data-event-id"), false);
 });
@@ -101,11 +118,14 @@ test("openModal (single-event modal) renders a well-formed ticket anchor without
   const html = elements["modal-content"].innerHTML;
   assert.match(
     html,
-    /<a href="https:\/\/tickets\.example\.com\/42" target="_blank" rel="noopener" class="btn-tickets"\s*>Get Tickets<\/a>/
+    /<a href="https:\/\/tickets\.example\.com\/42" target="_blank" rel="noopener" class="[^"]*"\s*>Get Tickets<\/a>/
   );
+  assert.match(html, new RegExp(`class="${TICKET_ANCHOR_CLASS}"`));
   assert.equal(html.includes("data-venue-slug"), false);
   assert.equal(html.includes("data-event-id"), false);
-  assert.equal(elements["event-modal"].classList.add.name !== undefined, true); // sanity: still an object
+  // Confirms the modal actually opened: classList.add("active") ran against the real
+  // #event-modal element, not just that the stub still has an `add` method.
+  assert.deepEqual(elements["event-modal"].classList.addedClasses, ["active"]);
 });
 
 test("_buildEventRow carries class=\"btn-tickets\" alongside the real data-* attributes when analytics.js has loaded", () => {
@@ -121,7 +141,7 @@ test("_buildEventRow carries class=\"btn-tickets\" alongside the real data-* att
   };
 
   const html = sandbox._buildEventRow(ev);
-  assert.match(html, /class="btn-tickets btn-tickets-sm"/);
+  assert.match(html, new RegExp(`class="${TICKET_ANCHOR_CLASS} btn-tickets-sm"`));
   assert.match(html, /data-venue-slug="cats-cradle"/);
   assert.match(html, /data-event-id="42"/);
 });
@@ -144,7 +164,7 @@ test("openModal carries class=\"btn-tickets\" alongside the real data-* attribut
 
   sandbox.openModal(eventInfo);
   const html = elements["modal-content"].innerHTML;
-  assert.match(html, /class="btn-tickets"/);
+  assert.match(html, new RegExp(`class="${TICKET_ANCHOR_CLASS}"`));
   assert.match(html, /data-venue-slug="cats-cradle"/);
   assert.match(html, /data-event-id="42"/);
 });
