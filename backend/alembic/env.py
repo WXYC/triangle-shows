@@ -4,7 +4,7 @@ Alembic migration environment — imports SQLAlchemy models and runs schema migr
 Role: Invoked by `alembic upgrade head` (manually or during deploy); not part of the
       runtime request path. Must run before the app starts if the schema is out of date.
 Requires: DATABASE_URL env var (falls back to alembic.ini), app.database.Base,
-          app.models (Venue, Event, ScrapeLog).
+          app.models (Venue, Event, EventMissState, ScrapeLog, FeedFetch).
 """
 
 # --- Imports ---
@@ -20,7 +20,7 @@ from alembic import context
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from app.database import Base
-from app.models import Venue, Event, EventMissState, ScrapeLog  # noqa: F401 - ensure models are imported
+from app.models import Venue, Event, EventMissState, ScrapeLog, FeedFetch  # noqa: F401 - ensure models are imported
 
 # --- Alembic Config & URL Setup ---
 

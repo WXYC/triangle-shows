@@ -1,5 +1,6 @@
 """
-SQLAlchemy ORM models defining the database schema for Venue, Event, and ScrapeLog.
+SQLAlchemy ORM models defining the database schema for Venue, Event, EventMissState,
+ScrapeLog, and FeedFetch.
 
 Role: Shared data layer — imported by database.py (Base), scrapers/manager.py (upsert
 logic), and API route handlers. Migrations are managed by Alembic using these definitions.
@@ -162,3 +163,25 @@ class ScrapeLog(Base):
     duration_seconds: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
 
     venue: Mapped["Venue"] = relationship(back_populates="scrape_logs")
+
+
+class FeedFetch(Base):
+    """Append-only server-side telemetry: one row per successfully served
+    GET /feeds/events.ics (app.api.feeds.record_feed_fetch).
+
+    Privacy-minimal by design — no raw IP or user-agent is ever stored, only a
+    salted, truncated hash (client_hash). The composite (fetched_at, client_hash)
+    index serves every report query: a time-range scan (month window, trailing 28
+    days) with COUNT(DISTINCT client_hash) on top, so a standalone fetched_at
+    index would be redundant.
+    """
+    __tablename__ = "feed_fetches"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    fetched_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    client_hash: Mapped[str] = mapped_column(String(16))
+    # Raw ?venue= query param verbatim; NULL when absent (distinguishes full-calendar
+    # subscribers from per-venue ones).
+    venue_filter: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    __table_args__ = (Index("ix_feed_fetches_fetched_at_client_hash", "fetched_at", "client_hash"),)

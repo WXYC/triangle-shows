@@ -5,7 +5,7 @@ Role: Imported at startup by main.py and any module that needs runtime config (d
 scheduler toggle, API keys). The `settings` singleton is created at import time, so .env
 must be present (or env vars set) before any module imports this file.
 Requires: .env file (or environment variables) providing DATABASE_URL, TICKETMASTER_API_KEY,
-ENABLE_SCHEDULER, RUN_STARTUP_SCRAPE, APP_ENV, and LOG_LEVEL.
+ENABLE_SCHEDULER, RUN_STARTUP_SCRAPE, APP_ENV, LOG_LEVEL, and TELEMETRY_SALT.
 """
 
 # --- Imports ---
@@ -23,6 +23,10 @@ class Settings(BaseSettings):
     RUN_STARTUP_SCRAPE: bool = True  # Run a full scrape in the background at startup; set False in tests / manual-seed contexts
     APP_ENV: str = "development"
     LOG_LEVEL: str = "INFO"
+    # Per-deployment secret salting feed_fetches.client_hash (app.api.feeds.record_feed_fetch).
+    # Default "" lets dev/tests run bare; outside development an empty salt makes the
+    # recorder no-op (an unsalted hash of ip|ua is brute-forceable back to a source IP).
+    TELEMETRY_SALT: str = ""
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 

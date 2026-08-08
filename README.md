@@ -65,7 +65,7 @@ backend/
     api/            # FastAPI route handlers (v1 canonical surface, deprecated unversioned aliases, iCal feed, shared helpers)
     services/       # Shared query + cross-venue de-duplication logic used by every read surface
     scrapers/       # One scraper per venue/platform
-    models.py       # SQLAlchemy ORM — Venue, Event, ScrapeLog
+    models.py       # SQLAlchemy ORM — Venue, Event, EventMissState, ScrapeLog, FeedFetch
     schemas.py      # Pydantic response models
     scheduler.py    # APScheduler job config
     seed.py         # Venue seed data (names, URLs, colors, capacities)

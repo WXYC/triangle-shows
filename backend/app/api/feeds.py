@@ -3,35 +3,81 @@ Generates the iCal subscription feed served at GET /feeds/events.ics.
 
 Role: Consumed directly by calendar clients (Apple Calendar, Google Calendar, Outlook).
 Users subscribe once; the feed stays live and reflects whatever the scraper has loaded
-into the database. Optionally filtered to one or more venues via ?venue= slug.
+into the database. Optionally filtered to one or more venues via ?venue= slug. Every
+successfully served fetch also records a best-effort telemetry row (record_feed_fetch)
+since calendar pollers never execute JS, so this is the only server-side measure of
+feed reach (issue #88).
 Requires: PostgreSQL (via app.database), the shared events query service
 (app.services.events_query), shared param helpers (app.api.common), icalendar library.
 """
 
 # --- Standard library imports ---
+import hashlib
+import logging
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 # --- Third-party imports ---
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import Response
 from icalendar import Calendar, Event as ICalEvent, vText
 from sqlalchemy.ext.asyncio import AsyncSession
 
 # --- Internal imports ---
 from app.api.common import market_tz, split_csv, today_in_market
+from app.config import settings
 from app.database import get_session
+from app.models import FeedFetch
 from app.services.events_query import query_events
 from app.site_config import load_site_config
 
+logger = logging.getLogger(__name__)
+
 # --- Router setup ---
 router = APIRouter(prefix="/feeds", tags=["feeds"])
+
+
+# --- Feed telemetry ---
+
+async def record_feed_fetch(session: AsyncSession, request: Request, venue_param: Optional[str]) -> None:
+    """Best-effort telemetry write: one feed_fetches row per successfully served fetch.
+
+    Never allowed to break the feed response — any failure is caught, the session
+    rolled back, and a warning logged; the caller's response is unaffected either way.
+    Outside development, an empty TELEMETRY_SALT makes this a no-op (plus a warning)
+    rather than accumulate a client_hash that's brute-forceable back to a source IP.
+    """
+    if settings.APP_ENV != "development" and not settings.TELEMETRY_SALT:
+        logger.warning("TELEMETRY_SALT is unset outside development; skipping feed_fetches write")
+        return
+    try:
+        # Railway's Envoy edge appends the downstream address to any inbound
+        # X-Forwarded-For; it never rewrites earlier hops. So the LAST entry is the
+        # only one the edge itself wrote — earlier entries are caller-controlled
+        # (a client can send "X-Forwarded-For: 9.9.9.9" and have it arrive as
+        # "9.9.9.9, <real-ip>"). This is a single-hop trust assumption: it holds
+        # behind exactly one trusted proxy and would need re-deriving behind more.
+        forwarded_for = request.headers.get("x-forwarded-for")
+        if forwarded_for:
+            client_ip = forwarded_for.split(",")[-1].strip()
+        elif request.client:
+            client_ip = request.client.host
+        else:
+            client_ip = ""
+        user_agent = request.headers.get("user-agent", "")
+        digest = hashlib.sha256(f"{settings.TELEMETRY_SALT}{client_ip}|{user_agent}".encode()).hexdigest()
+        session.add(FeedFetch(client_hash=digest[:16], venue_filter=venue_param))
+        await session.commit()
+    except Exception as exc:
+        await session.rollback()
+        logger.warning(f"Failed to record feed fetch telemetry: {exc}")
 
 
 # --- iCal feed endpoint ---
 
 @router.get("/events.ics", response_class=Response)
 async def get_ical_feed(
+    request: Request,
     venue: Optional[str] = Query(None, description="Comma-separated venue slugs. Omit for all venues."),
     session: AsyncSession = Depends(get_session),
 ) -> Response:
@@ -136,6 +182,12 @@ async def get_ical_feed(
     # --- Serialize and return the .ics response ---
 
     ical_bytes = cal.to_ical()
+
+    # Recorded after serialization succeeds, immediately before the response returns:
+    # an INSERT rejected at the DB can't poison the events read, and only successfully
+    # served feeds are counted.
+    await record_feed_fetch(session, request, venue)
+
     return Response(
         content=ical_bytes,
         media_type="text/calendar; charset=utf-8",
