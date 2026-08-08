@@ -11,7 +11,8 @@ function _escapeAttr(s) {
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
 
 // data-* attribute string for a ticket anchor. Both modal.js render sites (the modal
@@ -35,15 +36,23 @@ function ticketClickPayload(dataset = {}) {
 }
 
 function _onTicketClick(e) {
+  if (!e.target || typeof e.target.closest !== "function") return;
+  // auxclick fires for any non-primary button (middle-click, and right-click in some
+  // browsers when no context menu is shown); only a middle-click should count.
+  if (e.type === "auxclick" && e.button !== 1) return;
   const anchor = e.target.closest("a.btn-tickets");
   if (!anchor || typeof gtag !== "function") return;
   const [name, params] = ticketClickPayload(anchor.dataset);
   gtag("event", name, params);
 }
 
-// Harmless in Node (no `document`); in the browser this is the whole wiring.
+// Harmless in Node (no `document`); in the browser this is the whole wiring. auxclick
+// covers middle-clicks on these target="_blank" anchors, which "click" never sees —
+// without it, the metric undercounts in a way that a cross-metro comparison can't
+// absorb (browsing habits around middle-click vary).
 if (typeof document !== "undefined") {
   document.addEventListener("click", _onTicketClick);
+  document.addEventListener("auxclick", _onTicketClick);
 }
 
 // Exported for the Node test runner (`node --test frontend/tests/`). Harmless in the

@@ -48,6 +48,39 @@ test("ticketAnchorAttrs tolerates missing props", () => {
   assert.equal(ticketAnchorAttrs(), 'data-venue-slug="" data-event-id=""');
 });
 
+test("ticketAnchorAttrs escapes apostrophes too, so the attribute string is safe in either quoting style", () => {
+  const attrs = ticketAnchorAttrs({ venueSlug: "o'brien's", eventId: "1" });
+  assert.equal(attrs.includes("'"), false);
+  assert.equal(attrs, 'data-venue-slug="o&#39;brien&#39;s" data-event-id="1"');
+});
+
+// Converts a rendered `data-*` attribute name to the camelCase key the browser's
+// `element.dataset` API exposes it as (e.g. "data-venue-slug" -> "venueSlug").
+// Test-only: mirrors browser behavior so the round-trip test below can go from
+// ticketAnchorAttrs' rendered string back to a dataset object without a real DOM.
+function _datasetKeyFromAttrName(attrName) {
+  return attrName.replace(/^data-/, "").replace(/-([a-z])/g, (_, c) => c.toUpperCase());
+}
+
+// Parses a ticketAnchorAttrs() output string into the dataset object a real click
+// handler reads off `anchor.dataset` in the browser.
+function _parseDataset(attrString) {
+  const dataset = {};
+  const re = /data-([\w-]+)="([^"]*)"/g;
+  let m;
+  while ((m = re.exec(attrString))) {
+    dataset[_datasetKeyFromAttrName(`data-${m[1]}`)] = m[2];
+  }
+  return dataset;
+}
+
+test("ticketAnchorAttrs output round-trips through the real dataset -> payload path (a rename on either side goes red)", () => {
+  const attrs = ticketAnchorAttrs({ venueSlug: "cats-cradle", eventId: "42" });
+  const dataset = _parseDataset(attrs);
+  const [, params] = ticketClickPayload(dataset);
+  assert.deepEqual(params, { venue_slug: "cats-cradle", event_id: "42" });
+});
+
 test("_onTicketClick emits ticket_click with the anchor's dataset for a.btn-tickets", () => {
   const calls = [];
   globalThis.gtag = (...args) => calls.push(args);
@@ -76,4 +109,34 @@ test("_onTicketClick no-ops when gtag isn't defined (adblock, no GA id)", () => 
   const anchor = { dataset: { venueSlug: "cats-cradle", eventId: "42" } };
   // Would throw ("gtag is not a function") if the guard were missing.
   assert.doesNotThrow(() => _onTicketClick({ target: { closest: () => anchor } }));
+});
+
+test("_onTicketClick no-ops when e.target is missing or lacks closest, matching app.js's defensive convention", () => {
+  assert.doesNotThrow(() => _onTicketClick({}));
+  assert.doesNotThrow(() => _onTicketClick({ target: null }));
+  assert.doesNotThrow(() => _onTicketClick({ target: {} }));
+});
+
+test("_onTicketClick counts a middle-click (auxclick, button 1) on a.btn-tickets", () => {
+  const calls = [];
+  globalThis.gtag = (...args) => calls.push(args);
+  try {
+    const anchor = { dataset: { venueSlug: "cats-cradle", eventId: "42" } };
+    _onTicketClick({ type: "auxclick", button: 1, target: { closest: () => anchor } });
+    assert.deepEqual(calls, [["event", "ticket_click", { venue_slug: "cats-cradle", event_id: "42" }]]);
+  } finally {
+    delete globalThis.gtag;
+  }
+});
+
+test("_onTicketClick ignores non-middle auxclicks (e.g. right-click, button 2)", () => {
+  const calls = [];
+  globalThis.gtag = (...args) => calls.push(args);
+  try {
+    const anchor = { dataset: { venueSlug: "cats-cradle", eventId: "42" } };
+    _onTicketClick({ type: "auxclick", button: 2, target: { closest: () => anchor } });
+    assert.deepEqual(calls, []);
+  } finally {
+    delete globalThis.gtag;
+  }
 });
