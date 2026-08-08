@@ -11,6 +11,12 @@ const modalOverlay = document.getElementById("modal-overlay");
 function _buildEventRow(ev) {
   const p = ev.extendedProps;
   const safeUrl = p.ticket_url && /^https?:\/\//i.test(p.ticket_url) ? p.ticket_url : null;
+  // ticketAnchorAttrs comes from /js/analytics.js, an optional add-on script. If it
+  // fails to load (tracker-blocking filter list, 404, stale cached index.html), this
+  // must degrade to a plain anchor rather than throw — see openModal's matching guard.
+  const ticketAttrs = typeof ticketAnchorAttrs === "function"
+    ? ticketAnchorAttrs({ venueSlug: p.venue_slug, eventId: ev.id })
+    : "";
 
   let badge = "";
   if (p.status === "sold_out")  badge = '<span class="badge badge-sold-out">Sold Out</span>';
@@ -30,7 +36,7 @@ function _buildEventRow(ev) {
       </div>
       ${p.support_artists?.length ? `<div class="modal-group-support">with ${_h(p.support_artists.join(", "))}</div>` : ""}
       ${meta ? `<div class="modal-group-meta">${meta}</div>` : ""}
-      ${safeUrl ? `<a href="${safeUrl}" target="_blank" rel="noopener" class="btn-tickets btn-tickets-sm" ${ticketAnchorAttrs({ venueSlug: p.venue_slug, eventId: ev.id })}>Get Tickets</a>` : ""}
+      ${safeUrl ? `<a href="${safeUrl}" target="_blank" rel="noopener" class="btn-tickets btn-tickets-sm" ${ticketAttrs}>Get Tickets</a>` : ""}
     </div>`;
 }
 
@@ -129,8 +135,12 @@ function openModal(eventInfo) {
 
   // Ticket button — only allow http/https URLs
   const safeUrl = props.ticket_url && /^https?:\/\//i.test(props.ticket_url) ? props.ticket_url : null;
+  // See the matching guard in _buildEventRow: ticketAnchorAttrs is optional.
+  const ticketAttrs = typeof ticketAnchorAttrs === "function"
+    ? ticketAnchorAttrs({ venueSlug: props.venue_slug, eventId: eventInfo.event.id })
+    : "";
   const ticketBtn = safeUrl
-    ? `<a href="${safeUrl}" target="_blank" rel="noopener" class="btn-tickets" ${ticketAnchorAttrs({ venueSlug: props.venue_slug, eventId: eventInfo.event.id })}>Get Tickets</a>`
+    ? `<a href="${safeUrl}" target="_blank" rel="noopener" class="btn-tickets" ${ticketAttrs}>Get Tickets</a>`
     : "";
 
   // Every interpolated field is escaped via _h() EXCEPT props.description, which is
