@@ -33,6 +33,12 @@ from app.main import _run_migrations
 
 BACKEND_DIR = Path(app.main.__file__).resolve().parent.parent
 
+# A data migration's own accounting line, emitted by app.services.url_backfill from
+# inside migration 0009. Both paths assert on the same string deliberately: it is the
+# output whose loss motivated the fix, and asserting it on only one path is how the CLI
+# half stayed broken while its test passed.
+BACKFILL_COUNT_MARKER = "sanitize_existing_urls:"
+
 
 def _sync_database_url() -> str:
     """The psycopg2-flavored test URL, derived exactly as alembic/env.py derives it."""
@@ -122,7 +128,7 @@ def test_in_process_migrations_leave_app_logging_intact(
     # cleared malformed URLs in production and how many was never recoverable, because
     # this line went nowhere. The count is 0 against a fresh database; what is being
     # pinned is that the record escapes the migration run at all.
-    assert "sanitize_existing_urls:" in caplog.text, (
+    assert BACKFILL_COUNT_MARKER in caplog.text, (
         "a data migration's own count line did not reach the log during the startup run"
     )
 
@@ -131,25 +137,82 @@ def test_in_process_migrations_leave_app_logging_intact(
     assert "still speaking after migrations" in caplog.text
 
 
-def test_cli_migrations_still_print_alembic_progress(migrated_database):
-    """``alembic upgrade head`` in a shell keeps the readable output alembic.ini is for.
+def _run_alembic_cli(cwd, config_path=None):
+    """``alembic upgrade head`` as a subprocess, optionally with an explicit ``-c``.
 
-    Run as a subprocess because that is literally the path under test, and because
+    A subprocess because that is literally the path under test, and because
     ``fileConfig`` would otherwise tear down pytest's own log handlers.
+
+    DATABASE_URL stays asyncpg-flavored: env.py converts it to a sync driver for
+    alembic's own engine, but it also imports app.database, which needs the async form.
+    Handing it the converted URL is what production never does.
     """
-    # DATABASE_URL stays asyncpg-flavored: env.py converts it to a sync driver for
-    # alembic's own engine, but it also imports app.database, which needs the async
-    # form. Handing it the converted URL is what production never does.
-    result = subprocess.run(
-        [sys.executable, "-m", "alembic", "upgrade", "head"],
-        cwd=BACKEND_DIR,
-        env=os.environ.copy(),
-        capture_output=True,
-        text=True,
+    argv = [sys.executable, "-m", "alembic"]
+    if config_path is not None:
+        argv += ["-c", str(config_path)]
+    argv += ["upgrade", "head"]
+    return subprocess.run(
+        argv, cwd=cwd, env=os.environ.copy(), capture_output=True, text=True
     )
+
+
+def test_cli_migrations_still_print_alembic_progress(migrated_database):
+    """``alembic upgrade head`` in a shell keeps the readable output alembic.ini is for."""
+    result = _run_alembic_cli(BACKEND_DIR)
 
     assert result.returncode == 0, result.stderr
     # alembic.ini puts the alembic logger at INFO on a stderr console handler; these
-    # two lines are emitted on every run, whether or not there is work to do.
+    # lines are emitted on every run, whether or not there is work to do.
     assert "alembic.runtime.migration" in result.stderr, result.stderr
     assert "INFO" in result.stderr, result.stderr
+
+
+def test_cli_migrations_print_the_data_migrations_own_counts(migrated_database):
+    """A hand-run migration must report what the data migrations actually touched.
+
+    This is the output whose loss motivated the whole fix, and for a while it was
+    restored on the startup path only. The previous version of this test asserted on
+    ``alembic.runtime.migration`` — a logger ``alembic.ini`` explicitly declares — so it
+    passed for a reason unrelated to the failure and the CLI half stayed broken beneath
+    a green suite. Asserting the same marker both paths use is what closes that gap.
+
+    Matters most on the recovery path: an operator upgrading a restored database by hand
+    runs 0004's duplicate-key merge, 0006's description rewrite, and 0009's URL clearing,
+    all destructive by design, and the count is the only record of what they did.
+    """
+    result = _run_alembic_cli(BACKEND_DIR)
+
+    assert result.returncode == 0, result.stderr
+    assert BACKFILL_COUNT_MARKER in result.stderr, result.stderr
+
+
+def test_migrations_do_not_depend_on_the_callers_working_directory(
+    migrated_database, preserved_logging, tmp_path, monkeypatch
+):
+    """Both entry points must resolve the migration *scripts* independently of cwd.
+
+    ``alembic.ini``'s ``script_location`` is resolved relative to the process working
+    directory unless it is anchored, so an unanchored value makes the startup migration
+    depend on where the container happened to be launched from — it worked only because
+    the Dockerfile sets WORKDIR. Running the suite from the repo root instead of
+    ``backend/`` surfaced the same fragility as a failure pointing at a missing
+    directory rather than at cwd.
+
+    The two paths are held to different standards on purpose. ``_run_migrations`` builds
+    an absolute ini path from ``__file__``, so it must work from anywhere — that is the
+    production case. The CLI is *expected* to need ``-c`` when run outside ``backend/``,
+    since ``alembic`` looks for ``alembic.ini`` in cwd by design; what must not happen is
+    finding the ini and then failing to locate the scripts beside it.
+    """
+    monkeypatch.chdir(tmp_path)
+
+    # CLI first, while there is still work to do — a run against an already-migrated
+    # database emits no count line, so asserting the marker after the in-process run
+    # would only ever pass by accident.
+    result = _run_alembic_cli(tmp_path, config_path=BACKEND_DIR / "alembic.ini")
+    assert result.returncode == 0, result.stderr
+    assert BACKFILL_COUNT_MARKER in result.stderr, result.stderr
+
+    # In-process, now a no-op upgrade. Still has to load the script directory to resolve
+    # "head", which is exactly what failed before script_location was anchored.
+    _run_migrations()
