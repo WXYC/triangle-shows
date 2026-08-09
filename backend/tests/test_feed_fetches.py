@@ -121,9 +121,61 @@ async def test_client_hash_depends_on_the_telemetry_salt(client, session, monkey
 
 # --- Client IP resolution ---
 
-async def test_last_xff_entry_wins_over_earlier_entries(client, session):
-    # The first entry is caller-controlled (Railway's edge appends the real address,
-    # it never rewrites earlier hops), so a spoofed leading IP must not move the hash.
+async def test_x_real_ip_identifies_the_client(client, session):
+    """``X-Real-IP`` is Railway's documented header for the client's remote IP.
+
+    Divergence, not equality: an equality-only assertion also passes when the header
+    is ignored entirely and both requests fall through to the fixed ASGI socket peer.
+    """
+    headers = {"User-Agent": "TestPoller/1.0"}
+    await client.get("/feeds/events.ics", headers={**headers, "X-Real-IP": "5.5.5.5"})
+    await client.get("/feeds/events.ics", headers={**headers, "X-Real-IP": "6.6.6.6"})
+
+    rows = (await session.execute(select(FeedFetch).order_by(FeedFetch.id))).scalars().all()
+    assert len(rows) == 2
+    assert rows[0].client_hash != rows[1].client_hash
+
+
+async def test_x_real_ip_wins_over_x_forwarded_for(client, session):
+    """Precedence matters because only one of these is a Railway contract.
+
+    Railway documents ``X-Real-IP`` as the client's remote IP; ``X-Forwarded-For`` is
+    not in its documented header set at all (only ``X-Forwarded-Proto`` and
+    ``X-Forwarded-Host`` are). Two requests from one client with the *same* real IP
+    but different XFF content must land in the same bucket.
+    """
+    headers = {"User-Agent": "TestPoller/1.0", "X-Real-IP": "5.5.5.5"}
+    await client.get("/feeds/events.ics", headers={**headers, "X-Forwarded-For": "9.9.9.9"})
+    await client.get("/feeds/events.ics", headers={**headers, "X-Forwarded-For": "1.1.1.1, 2.2.2.2"})
+
+    rows = (await session.execute(select(FeedFetch).order_by(FeedFetch.id))).scalars().all()
+    assert len(rows) == 2
+    assert rows[0].client_hash == rows[1].client_hash
+
+
+async def test_one_client_polling_repeatedly_stays_one_client(client, session):
+    """Regression test for the production defect this derivation was rewritten to fix.
+
+    Reading the last ``X-Forwarded-For`` entry assumed a single trusted hop. Railway
+    routes through a multi-hop global edge network, so that entry is an ephemeral
+    internal address that changes per request: on 2026-08-08, five polls from one
+    machine with one fixed User-Agent produced five distinct ``client_hash`` values,
+    turning ``COUNT(DISTINCT client_hash)`` — the epic's primary demand proxy — into
+    a count of *polls*. The varying XFF below stands in for that behavior.
+    """
+    headers = {"User-Agent": "CalendarPoller/1.0", "X-Real-IP": "5.5.5.5"}
+    for hop in ("10.0.0.1", "10.0.0.2", "10.0.0.3", "10.0.0.4", "10.0.0.5"):
+        await client.get("/feeds/events.ics", headers={**headers, "X-Forwarded-For": hop})
+
+    rows = (await session.execute(select(FeedFetch))).scalars().all()
+    assert len(rows) == 5
+    assert len({row.client_hash for row in rows}) == 1
+
+
+async def test_last_xff_entry_is_used_when_x_real_ip_is_absent(client, session):
+    # Fallback for deployments that aren't behind Railway's edge (self-hosters, other
+    # PaaS). The first entry stays caller-controlled, so a spoofed leading IP must not
+    # move the hash.
     await client.get("/feeds/events.ics", headers={"X-Forwarded-For": "9.9.9.9, 5.5.5.5"})
     await client.get("/feeds/events.ics", headers={"X-Forwarded-For": "5.5.5.5"})
 
