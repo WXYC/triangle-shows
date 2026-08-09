@@ -139,7 +139,7 @@ function downloadFavorites() {
       `SUMMARY:${_esc(ev.title)}`,
       ...(location    ? [`LOCATION:${_esc(location)}`]    : []),
       ...(desc        ? [`DESCRIPTION:${_esc(desc)}`]     : []),
-      ...(ev.ticket_url ? [`URL:${ev.ticket_url}`]        : []),
+      ...(ev.ticket_url ? [`URL:${_escUri(ev.ticket_url)}`] : []),
       `UID:${ev.id}@triangle-shows.org`,
       "END:VEVENT"
     );
@@ -189,11 +189,37 @@ function _icsEnd(dateStr, timeStr) {
   );
 }
 
+// Escape a TEXT property value (RFC 5545 §3.3.11). Order matters: the backslash pass
+// runs first so the escapes the later passes introduce are not themselves re-escaped.
+//
+// Favorites are read back out of localStorage and never revalidated, so nothing here
+// can assume a string — coerce with String() before calling .replace(), the same
+// defect modal.js::_h had. (The falsy early-return above already absorbs null/0/"",
+// so this differs from _h only in that it keeps that existing early-return.)
 function _esc(str) {
   if (!str) return "";
-  return str
+  return String(str)
     .replace(/\\/g, "\\\\")
     .replace(/;/g, "\\;")
     .replace(/,/g, "\\,")
-    .replace(/\n/g, "\\n");
+    // Every line-break form collapses to the one escaped sequence. The old /\n/g
+    // pass left a bare CR untouched: a raw control character, which TEXT forbids
+    // outright, and which a lenient parser can still read as a line break.
+    .replace(/\r\n|\r|\n/g, "\\n");
+}
+
+// Sanitize a URI property value (RFC 5545 §3.3.13). NOT the same as _esc: a URI is
+// not TEXT, so it must not pick up the backslash escaping of `,` `;` `\` — applying
+// that would corrupt any real ticket link containing those characters.
+//
+// What a URI value must not carry is a line break. This calendar is assembled by
+// joining property lines with CRLF, so a CR or LF surviving into a value ends the
+// property early and everything after it parses as a fresh iCalendar property the
+// attacker chose. ticket_url reaches here from the localStorage favorites blob that
+// app.js writes; that blob is never revalidated on read, so a favorite saved before
+// the backend URL gates landed still carries whatever the scraper stored. Strip the
+// control characters rather than escape them — none is legal in a URI anyway.
+function _escUri(str) {
+  if (!str) return "";
+  return String(str).replace(/[\u0000-\u001F\u007F]/g, "");
 }
