@@ -78,34 +78,6 @@ def migrated_database(_ensure_test_database):
             engine.dispose()
 
 
-@pytest.fixture
-def preserved_logging():
-    """Snapshot and restore global logging state around a test that reconfigures it.
-
-    ``fileConfig`` mutates process-wide state — root's level and handlers, and the
-    ``disabled`` flag plus handlers of every pre-existing logger. Without this, a
-    test that trips the bug takes the rest of the session down with it.
-    """
-    root = logging.getLogger()
-    saved_root_level = root.level
-    saved_root_handlers = root.handlers[:]
-    saved_loggers = [
-        (logger, logger.level, logger.disabled, logger.handlers[:], logger.propagate)
-        for logger in logging.Logger.manager.loggerDict.values()
-        if isinstance(logger, logging.Logger)
-    ]
-    try:
-        yield
-    finally:
-        root.setLevel(saved_root_level)
-        root.handlers[:] = saved_root_handlers
-        for logger, level, disabled, handlers, propagate in saved_loggers:
-            logger.setLevel(level)
-            logger.disabled = disabled
-            logger.handlers[:] = handlers
-            logger.propagate = propagate
-
-
 def test_in_process_migrations_leave_app_logging_intact(
     migrated_database, preserved_logging, caplog
 ):

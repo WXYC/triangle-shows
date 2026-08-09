@@ -16,6 +16,7 @@ parallel runs do not collide.
 """
 
 import hashlib
+import logging
 import os
 import re
 from datetime import date, timedelta
@@ -295,3 +296,42 @@ async def make_event(session, make_venue):
         return event
 
     return _make
+
+
+@pytest.fixture
+def preserved_logging():
+    """Snapshot and restore global logging state around a test that reconfigures it.
+
+    Both the migration path (``fileConfig``) and the startup path
+    (``app.main.configure_logging``) mutate process-wide state — root's level and
+    handlers, and the ``disabled`` flag, level, handlers and ``propagate`` of every
+    pre-existing logger. Without this, a test that trips either takes the rest of the
+    session down with it.
+
+    Shared by ``test_migration_logging.py`` and ``test_redaction.py``; it lives here
+    rather than in either module because the two reconfigure logging for opposite
+    reasons and both need the same guard.
+    """
+    root = logging.getLogger()
+    saved_root_level = root.level
+    saved_root_handlers = root.handlers[:]
+    saved_formatters = [(handler, handler.formatter) for handler in root.handlers]
+    saved_loggers = [
+        (logger, logger.level, logger.disabled, logger.handlers[:], logger.propagate)
+        for logger in logging.Logger.manager.loggerDict.values()
+        if isinstance(logger, logging.Logger)
+    ]
+    try:
+        yield
+    finally:
+        root.setLevel(saved_root_level)
+        root.handlers[:] = saved_root_handlers
+        # configure_logging() swaps formatters in place on handlers it did not create,
+        # so restoring the handler list alone would leave the new formatter installed.
+        for handler, formatter in saved_formatters:
+            handler.setFormatter(formatter)
+        for logger, level, disabled, handlers, propagate in saved_loggers:
+            logger.setLevel(level)
+            logger.disabled = disabled
+            logger.handlers[:] = handlers
+            logger.propagate = propagate

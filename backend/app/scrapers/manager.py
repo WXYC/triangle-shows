@@ -24,6 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.market_time import today_in_market
 from app.models import Venue, Event, EventMissState, ScrapeLog
+from app.redaction import redact_credentials
 from app.scrapers.base import BaseScraper, ScrapedEvent
 from app.scrapers.headliner import merge_support, parse_billing
 from app.scrapers.identity import (
@@ -155,20 +156,28 @@ class ScrapeManager:
             }
 
         except Exception as e:
-            logger.error(f"[{venue_slug}] Scrape failed: {e}")
+            # httpx.HTTPStatusError stringifies to include the full request URL, and the
+            # Ticketmaster scraper authenticates with an ?apikey= query parameter — so the
+            # raw exception text is a live credential. It reaches three sinks from here:
+            # this log line, the scrape_logs row below, and the dict returned to
+            # POST /api/scrape, which is unauthenticated. Redact once, at the top.
+            message = redact_credentials(str(e))
+            logger.error(f"[{venue_slug}] Scrape failed: {message}")
             try:
                 # Roll back the failed transaction before writing the error log,
                 # otherwise the commit below will also fail.
                 await self.session.rollback()
                 log.status = "failed"
-                log.error_message = str(e)[:2000]  # cap length to fit DB column
+                log.error_message = message[:2000]  # cap length to fit DB column
                 log.finished_at = datetime.utcnow()
                 log.duration_seconds = (log.finished_at - log.started_at).total_seconds()
                 self.session.add(log)
                 await self.session.commit()
             except Exception as log_err:
-                logger.warning(f"[{venue_slug}] Could not write error log: {log_err}")
-            return {"venue": venue_slug, "status": "failed", "error": str(e)}
+                logger.warning(
+                    f"[{venue_slug}] Could not write error log: {redact_credentials(str(log_err))}"
+                )
+            return {"venue": venue_slug, "status": "failed", "error": message}
 
     # --- Upsert helpers ---
 
