@@ -21,16 +21,45 @@ from fastapi.staticfiles import StaticFiles
 
 from app.config import settings
 from app.database import async_session
+from app.redaction import RedactingFormatter
 from app.seed import seed_venues
 from app.scheduler import scheduler, configure_scheduler
 from app.site_config import load_site_config
 from app.api import events, venues, health, feeds, v1
 
 # --- Logging setup ---
-logging.basicConfig(
-    level=getattr(logging, settings.LOG_LEVEL),
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-)
+
+LOG_FORMAT = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+
+
+def configure_logging() -> None:
+    """Configure process-wide logging, with credential redaction on every sink.
+
+    Two measures, because the Ticketmaster Discovery API authenticates with a query
+    parameter and so every request URL the scraper builds is a live credential:
+
+    * ``httpx`` is pinned to WARNING. It logs the full URL of every request at INFO,
+      which put the key in the log store four times per scrape cycle. Our scrapers
+      already emit their own per-request line naming the venue, so what is lost is the
+      HTTP status of a *successful* request; a failure still raises and is logged.
+    * Every root handler gets a :class:`~app.redaction.RedactingFormatter`, which scrubs
+      the values out of anything else that renders a URL — including the exception
+      tracebacks the httpx pin cannot reach, since ``httpx.HTTPStatusError`` carries the
+      request URL in its own message regardless of the logger's level.
+
+    Called at import so configuration is in place before any other module logs, and
+    exposed as a function so tests can assert on it without importing for its side
+    effects alone.
+    """
+    logging.basicConfig(level=getattr(logging, settings.LOG_LEVEL), format=LOG_FORMAT)
+
+    for handler in logging.getLogger().handlers:
+        handler.setFormatter(RedactingFormatter(LOG_FORMAT))
+
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+
+
+configure_logging()
 logger = logging.getLogger(__name__)
 
 

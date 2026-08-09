@@ -71,6 +71,18 @@ docker compose up
 
 The API comes up on http://localhost:8000, with the auto-generated OpenAPI docs at http://localhost:8000/docs.
 
+## Credentials in request URLs
+
+The Ticketmaster Discovery API authenticates with a query parameter (`?apikey=`) rather than a header, so every request URL the Ticketmaster scraper builds *is* a live credential. Three sinks would otherwise carry it out of the process, and closing one leaves the others open:
+
+| Sink | Closed by |
+|---|---|
+| `httpx` logs every request at INFO with the full query string | `app.main.configure_logging` pins the `httpx` logger to WARNING |
+| `httpx.HTTPStatusError` embeds the URL in `str(e)`, which is logged on a failed scrape | `RedactingFormatter` on every root handler (covers exception tracebacks too) |
+| That same string is persisted to `scrape_logs.error_message` and returned by `POST /api/scrape`, which is unauthenticated | `manager.scrape_venue` redacts once, before all three uses |
+
+`app/redaction.py::redact_credentials` is the shared helper. It is a **denylist** of parameter names and therefore never complete — a new scraper authenticating with an unlisted parameter needs an entry there and a case in the parametrized test in `tests/test_redaction.py`, not a nearby entry that happens to look similar. Only the value is removed, so a redacted URL still says which venue was being fetched.
+
 ## Tests
 
 The suite runs against **real PostgreSQL** — the same engine as production — so dialect-specific behavior (JSON columns, timestamp semantics, future `ON CONFLICT` upserts) is exercised rather than approximated by SQLite.
