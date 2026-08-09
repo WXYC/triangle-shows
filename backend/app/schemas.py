@@ -10,7 +10,7 @@ Requires: models.py (ORM objects are converted via from_attributes=True),
 
 # --- Imports ---
 
-from pydantic import AfterValidator, BaseModel, Field
+from pydantic import AfterValidator, BaseModel, BeforeValidator, Field
 from datetime import date, time, datetime, timezone
 from typing import Annotated, Optional
 
@@ -29,6 +29,31 @@ def _assume_utc(value: datetime) -> datetime:
 
 # A datetime stored as naive UTC, always serialized with an explicit UTC offset.
 UTCDateTime = Annotated[datetime, AfterValidator(_assume_utc)]
+
+
+def _none_if_not_absolute_http_url(value):
+    """Coerce a non-absolute-http(s) ``ticket_url``/``image_url`` to ``None``.
+
+    Both fields are scraper-sourced from 21+ third-party venue sites (see
+    ``app.scrapers.base.ScrapedEvent.__post_init__``, which normalizes them the
+    same way at ingestion) and are read by the web client, which renders them
+    into HTML attributes, and by the Backend-Service "On Tour" consumer. This is
+    a second, independent gate at the API boundary — it protects both against
+    any row written before that ingestion-time normalization existed and against
+    anything that reaches the database by a path other than a scraper. A
+    relative path, a ``javascript:``/``data:`` scheme, or any other non-string
+    value must never reach a consumer as-is — but a single malformed field must
+    not fail the whole event, so this normalizes rather than raises
+    (WXYC/triangle-shows#94).
+    """
+    if not isinstance(value, str):
+        return None
+    value = value.strip()
+    return value if value.lower().startswith(("http://", "https://")) else None
+
+
+# A ticket_url/image_url, normalized to an absolute http(s) string or None.
+OptionalHttpUrl = Annotated[Optional[str], BeforeValidator(_none_if_not_absolute_http_url)]
 
 
 # --- Venue Schema ---
@@ -73,10 +98,10 @@ class EventResponse(BaseModel):
     date: date
     doors_time: Optional[time] = None
     show_time: Optional[time] = None
-    ticket_url: Optional[str] = None
+    ticket_url: OptionalHttpUrl = None
     price_min: Optional[float] = None
     price_max: Optional[float] = None
-    image_url: Optional[str] = None
+    image_url: OptionalHttpUrl = None
     genre: Optional[str] = None
     subgenre: Optional[str] = None
     status: str

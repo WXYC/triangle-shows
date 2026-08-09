@@ -67,6 +67,31 @@ def _http_href_only(tag: str, attr: str, value: str) -> Optional[str]:
     return value
 
 
+# --- Scraped-URL validation ---
+
+def _validate_absolute_http_url(value: Optional[str]) -> Optional[str]:
+    """Normalize a scraped ``ticket_url``/``image_url`` to an absolute http(s) URL.
+
+    Both fields come from 21+ third-party venue pages and are interpolated into
+    HTML attributes by the web client (``frontend/js/modal.js`` escapes them, but a
+    relative, scheme-relative, or otherwise malformed value still is not a URL any
+    consumer should trust — the modal, the iCal feed (``app/api/feeds.py``, which
+    reads the ORM column directly and never passes through the API schema), or the
+    Backend-Service "On Tour" reader). Mirrors the ``/^https?:\\/\\//i`` prefix check
+    the web client itself uses on ``ticket_url``.
+
+    A non-http(s) value normalizes to ``None`` rather than raising: one bad field
+    must not turn into a scrape failure and drop an otherwise good event from the
+    calendar (WXYC/triangle-shows#94).
+    """
+    if not isinstance(value, str):
+        return None
+    value = value.strip()
+    if not value or not value.lower().startswith(("http://", "https://")):
+        return None
+    return value
+
+
 def _has_renderable_content(cleaned: str) -> bool:
     """True when sanitized markup has something a reader would see or click.
 
@@ -176,6 +201,12 @@ class ScrapedEvent:
         # and would fail the varchar column bind — treat it as no URL.
         if self.source_url is not None and not isinstance(self.source_url, str):
             self.source_url = None
+        # ticket_url/image_url are scraper-sourced and rendered into HTML
+        # attributes by the web client — normalize both to an absolute http(s)
+        # URL or None at this single choke point (issue #94), the same pattern
+        # clean_description already follows for description below.
+        self.ticket_url = _validate_absolute_http_url(self.ticket_url)
+        self.image_url = _validate_absolute_http_url(self.image_url)
         # Venue feeds put rich-text HTML in the description (Squarespace RTE,
         # JSON-LD). The frontend renders this field as HTML, so sanitize it to a
         # safe subset at this single choke point — every scraper's stored

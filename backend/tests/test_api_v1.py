@@ -255,3 +255,24 @@ async def test_v1_events_exposes_source_key(client, make_event):
 
     detail = (await client.get(f"/api/v1/events/{ev['id']}")).json()
     assert detail["source_key"] == "url:/event/chuqui"
+
+
+async def test_v1_events_serves_a_malformed_stored_url_as_null_without_dropping_the_event(client, make_event):
+    # make_event writes the Event ORM row directly, bypassing ScrapedEvent's
+    # ingestion-time normalization entirely — standing in for a row that predates
+    # that gate, or reached the database by some other path. EventResponse is the
+    # independent second gate (issue #94): a malformed ticket_url/image_url must
+    # still serve as null, and — the hard constraint — the event itself must not
+    # disappear from the calendar over one bad field.
+    await make_event(
+        artist="Duke Ellington & John Coltrane",
+        date=D,
+        ticket_url="javascript:alert(document.cookie)",
+        image_url="/relative/path/not-an-absolute-url.jpg",
+    )
+    data = (await client.get("/api/v1/events")).json()
+    assert len(data) == 1
+    ev = data[0]
+    assert ev["artist"] == "Duke Ellington & John Coltrane"
+    assert ev["ticket_url"] is None
+    assert ev["image_url"] is None
