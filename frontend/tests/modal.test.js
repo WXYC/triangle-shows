@@ -315,3 +315,55 @@ test("openModal renders a well-formed image_url with query params as an identica
   const html = elements["modal-content"].innerHTML;
   assert.match(html, /<img src="https:\/\/cdn\.example\.com\/poster\.jpg\?w=800&amp;h=600" alt="Show Name" class="modal-image">/);
 });
+
+// --- _h() must not throw on a non-string value ---
+//
+// The fields _h() receives come from JSON the API returns, and nothing in the client
+// type-checks them. `(s || "")` passes any *truthy* non-string straight through to
+// .replace(), which only exists on String.prototype — so a numeric image_url threw a
+// TypeError inside openModal and the modal never opened at all. Coercing with
+// String(s == null ? "" : s) (matching analytics.js::_escapeAttr) escapes the value
+// instead. Only image_url is exercised here because it is the one _h() call site
+// whose guard (`props.image_url ? …`) is a bare truthiness check, so a non-string
+// reaches _h() unfiltered; safeUrl is incidentally shielded because RegExp.test()
+// coerces its argument before _h() ever sees it.
+
+test("openModal renders a non-string image_url as escaped text instead of throwing", () => {
+  const { sandbox, elements } = loadModal({ withAnalytics: false });
+  const eventInfo = {
+    event: {
+      id: "42",
+      extendedProps: {
+        date: "2026-08-08",
+        name: "Show Name",
+        venue_slug: "cats-cradle",
+        venue_name: "Cat's Cradle",
+        venue_city: "Carrboro",
+        image_url: 12345,
+      },
+    },
+  };
+
+  assert.doesNotThrow(() => sandbox.openModal(eventInfo));
+  const html = elements["modal-content"].innerHTML;
+  assert.match(html, /<img src="12345" alt="Show Name" class="modal-image">/);
+  // The rest of the modal still rendered — a throw here used to abort openModal
+  // partway and leave modal-content empty.
+  assert.match(html, /<h2>Show Name<\/h2>/);
+});
+
+test("_h escapes a non-string that carries an attribute-breakout payload in its toString", () => {
+  const { sandbox } = loadModal({ withAnalytics: false });
+  // An object whose toString() carries the payload: coercion must happen *before*
+  // escaping, never instead of it.
+  const hostile = { toString: () => 'x" onerror="alert(1)' };
+
+  assert.equal(sandbox._h(hostile), "x&quot; onerror=&quot;alert(1)");
+});
+
+test("_h maps null and undefined to the empty string", () => {
+  const { sandbox } = loadModal({ withAnalytics: false });
+
+  assert.equal(sandbox._h(null), "");
+  assert.equal(sandbox._h(undefined), "");
+});
