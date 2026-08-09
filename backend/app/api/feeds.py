@@ -52,6 +52,42 @@ def _warn_telemetry_salt_missing() -> None:
     logger.warning("TELEMETRY_SALT is unset; feed telemetry disabled (no feed_fetches rows will be written)")
 
 
+def _resolve_client_ip(request: Request) -> str:
+    """The client's remote address, as a stable identifier for distinct-client counting.
+
+    Prefers ``X-Real-IP``, which is what Railway documents as "for identifying client's
+    remote IP" (networking/public-networking/specs-and-limits). Note that
+    ``X-Forwarded-For`` is *not* in Railway's documented header set at all — only
+    ``X-Forwarded-Proto`` and ``X-Forwarded-Host`` are — so it is a fallback for other
+    topologies, never the primary source here.
+
+    This function previously read the last ``X-Forwarded-For`` entry, on the reasoning
+    that a proxy appends the address it received from and so the final entry is the one
+    the edge itself wrote. That holds behind exactly one trusted proxy. Railway routes
+    through a multi-hop global edge network, where the last entry is an ephemeral
+    internal address that changes per request — measured 2026-08-08 against the
+    deployed origin, five polls from one machine with one fixed User-Agent produced
+    five distinct hashes, so ``COUNT(DISTINCT client_hash)`` counted polls rather than
+    clients and the epic's primary demand proxy was meaningless.
+
+    Both proxy headers are caller-supplied unless an edge overwrites them, so neither
+    is trustworthy on a deployment with no proxy in front; that is the same exposure
+    the previous implementation carried, and it is bounded by what the value is used
+    for (a salted, truncated hash for cohort counting — never authorization).
+    """
+    real_ip = request.headers.get("x-real-ip", "").strip()
+    if real_ip:
+        return real_ip
+    # Fallback for non-Railway deployments. The first entry stays caller-controlled
+    # (a client can send "X-Forwarded-For: 9.9.9.9" and have it arrive as
+    # "9.9.9.9, <real-ip>"), so take the last non-empty entry, not the first.
+    forwarded_for = request.headers.get("x-forwarded-for", "")
+    for entry in reversed(forwarded_for.split(",")):
+        if entry.strip():
+            return entry.strip()
+    return request.client.host if request.client else ""
+
+
 async def record_feed_fetch(
     session: AsyncSession, request: Request, venue_slugs: Optional[list[str]]
 ) -> None:
@@ -75,19 +111,7 @@ async def record_feed_fetch(
         _warn_telemetry_salt_missing()
         return
     try:
-        # Railway's Envoy edge appends the downstream address to any inbound
-        # X-Forwarded-For; it never rewrites earlier hops. So the LAST entry is the
-        # only one the edge itself wrote — earlier entries are caller-controlled
-        # (a client can send "X-Forwarded-For: 9.9.9.9" and have it arrive as
-        # "9.9.9.9, <real-ip>"). This is a single-hop trust assumption: it holds
-        # behind exactly one trusted proxy and would need re-deriving behind more.
-        forwarded_for = request.headers.get("x-forwarded-for")
-        if forwarded_for:
-            client_ip = forwarded_for.split(",")[-1].strip()
-        elif request.client:
-            client_ip = request.client.host
-        else:
-            client_ip = ""
+        client_ip = _resolve_client_ip(request)
         user_agent = request.headers.get("user-agent", "")
         digest = hashlib.sha256(f"{settings.TELEMETRY_SALT}{client_ip}|{user_agent}".encode()).hexdigest()
         # Sorted so "a,b" and "b,a" — which serve the same feed, and which the filter
