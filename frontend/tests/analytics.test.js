@@ -1,7 +1,9 @@
 // Unit tests for the ticket_click GA analytics helpers (../js/analytics.js).
 //
-// Runs on Node's built-in test runner — no build step, no npm install:
-//   node --test frontend/tests/
+// Runs on Node's built-in test runner — no build step, no npm install. Use the same
+// invocation the deploy gate uses (.github/workflows/deploy.yml); passing the directory
+// instead makes Node try to `require` it as a module and die:
+//   node --test frontend/tests/*.test.js
 //
 // Covers the two pure functions (the dataset -> gtag payload builder, and
 // ticketAnchorAttrs, which stamps the data-* attributes both modal.js render sites
