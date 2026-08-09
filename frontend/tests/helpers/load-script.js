@@ -1,10 +1,10 @@
 // Shared harness for testing the frontend's plain <script> files under `node --test`.
 //
 // Most of `frontend/js/` can be `require()`d straight into a test (`city-groups.js`,
-// `fullcalendar-adapter.js`, `analytics.js`): they export through `module.exports` and
-// do nothing at load time. The rest cannot — `modal.js` calls `document.getElementById`
-// as it loads, and `site.js`, `legacy-storage.js`, and `favorites.js` have the same
-// shape. Requiring one of those throws before a single assertion runs.
+// `fullcalendar-adapter.js`, `analytics.js`, and `favorites.js`): they export through
+// `module.exports` and touch no browser global at load time. `modal.js` cannot — it
+// calls `document.getElementById` as it loads, so `require()` throws before a single
+// assertion runs. The region-pack work (#65) is expected to add more of that shape.
 //
 // So load them the way a browser does instead: evaluate the source into a fresh `vm`
 // context holding a minimal DOM stub. Top-level `function` declarations land as
