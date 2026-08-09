@@ -1,0 +1,155 @@
+"""
+Regression tests for the in-process migration path's effect on application logging.
+
+Migrations run *inside* the FastAPI process at startup (``app.main.lifespan`` ->
+``asyncio.to_thread(_run_migrations)``), so whatever ``alembic/env.py`` does to the
+``logging`` module happens to the whole server. ``logging.config.fileConfig``
+defaults to ``disable_existing_loggers=True`` and ``alembic.ini`` pins the root
+logger at WARN, so calling it unconditionally silenced every ``app.*`` logger for
+the life of the container — at every level, WARNING and ERROR included.
+
+Two halves of the contract are pinned here, and they pull in opposite directions:
+
+* the **in-process** path must leave logging exactly as ``app.main`` configured it;
+* the **CLI** path (``alembic upgrade head`` in a shell) must still apply
+  ``alembic.ini``, which is what makes a hand-run migration readable.
+
+A fix that satisfies only the first — deleting the ``fileConfig`` call outright —
+fails the second.
+"""
+
+import logging
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+from sqlalchemy import create_engine, text
+
+import app.main
+from app.database import Base
+from app.main import _run_migrations
+
+BACKEND_DIR = Path(app.main.__file__).resolve().parent.parent
+
+
+def _sync_database_url() -> str:
+    """The psycopg2-flavored test URL, derived exactly as alembic/env.py derives it."""
+    url = os.environ["DATABASE_URL"]
+    return url.replace("postgresql+asyncpg://", "postgresql://").replace(
+        "ssl=require", "sslmode=require"
+    )
+
+
+@pytest.fixture
+def migrated_database(_ensure_test_database):
+    """Let a test run the real migration chain from scratch, then undo it.
+
+    Cleanup runs on the way in as well as out, so the chain actually executes
+    rather than short-circuiting on an ``alembic_version`` row left behind by an
+    aborted run — a test that silently migrates nothing would assert nothing.
+
+    Teardown is surgical rather than a schema drop: alembic creates exactly the
+    ORM tables plus its own ``alembic_version`` bookkeeping table, so those are
+    what get removed. The target is the harness's dedicated ``*_test`` database
+    (conftest refuses any other name), never a database holding real data.
+    """
+    engine = create_engine(_sync_database_url())
+
+    def _reset():
+        with engine.begin() as conn:
+            conn.execute(text("DROP TABLE IF EXISTS alembic_version"))
+        Base.metadata.drop_all(engine)
+
+    _reset()
+    try:
+        yield
+    finally:
+        try:
+            _reset()
+        finally:
+            engine.dispose()
+
+
+@pytest.fixture
+def preserved_logging():
+    """Snapshot and restore global logging state around a test that reconfigures it.
+
+    ``fileConfig`` mutates process-wide state — root's level and handlers, and the
+    ``disabled`` flag plus handlers of every pre-existing logger. Without this, a
+    test that trips the bug takes the rest of the session down with it.
+    """
+    root = logging.getLogger()
+    saved_root_level = root.level
+    saved_root_handlers = root.handlers[:]
+    saved_loggers = [
+        (logger, logger.level, logger.disabled, logger.handlers[:], logger.propagate)
+        for logger in logging.Logger.manager.loggerDict.values()
+        if isinstance(logger, logging.Logger)
+    ]
+    try:
+        yield
+    finally:
+        root.setLevel(saved_root_level)
+        root.handlers[:] = saved_root_handlers
+        for logger, level, disabled, handlers, propagate in saved_loggers:
+            logger.setLevel(level)
+            logger.disabled = disabled
+            logger.handlers[:] = handlers
+            logger.propagate = propagate
+
+
+def test_in_process_migrations_leave_app_logging_intact(
+    migrated_database, preserved_logging, caplog
+):
+    """The startup migration run must not silence the application's own loggers."""
+    root = logging.getLogger()
+    root.setLevel(logging.INFO)
+
+    # Created *before* the migration run: disable_existing_loggers is precisely what
+    # takes out loggers that already exist, and every app.* module is imported long
+    # before lifespan runs.
+    probe = logging.getLogger("app.tests.migration_logging_probe")
+
+    _run_migrations()
+
+    assert probe.disabled is False, "the migration run disabled a pre-existing app.* logger"
+    assert root.level == logging.INFO, "the migration run changed the root logger's level"
+
+    # The data migrations report what they touched through app.services.* loggers, and
+    # those reports are the only witness to work that is destructive by design — 0009
+    # cleared malformed URLs in production and how many was never recoverable, because
+    # this line went nowhere. The count is 0 against a fresh database; what is being
+    # pinned is that the record escapes the migration run at all.
+    assert "sanitize_existing_urls:" in caplog.text, (
+        "a data migration's own count line did not reach the log during the startup run"
+    )
+
+    caplog.clear()
+    probe.info("still speaking after migrations")
+    assert "still speaking after migrations" in caplog.text
+
+
+def test_cli_migrations_still_print_alembic_progress(migrated_database):
+    """``alembic upgrade head`` in a shell keeps the readable output alembic.ini is for.
+
+    Run as a subprocess because that is literally the path under test, and because
+    ``fileConfig`` would otherwise tear down pytest's own log handlers.
+    """
+    # DATABASE_URL stays asyncpg-flavored: env.py converts it to a sync driver for
+    # alembic's own engine, but it also imports app.database, which needs the async
+    # form. Handing it the converted URL is what production never does.
+    result = subprocess.run(
+        [sys.executable, "-m", "alembic", "upgrade", "head"],
+        cwd=BACKEND_DIR,
+        env=os.environ.copy(),
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    # alembic.ini puts the alembic logger at INFO on a stderr console handler; these
+    # two lines are emitted on every run, whether or not there is work to do.
+    assert "alembic.runtime.migration" in result.stderr, result.stderr
+    assert "INFO" in result.stderr, result.stderr

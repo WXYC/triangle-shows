@@ -34,8 +34,18 @@ if db_url:
     db_url = db_url.replace("ssl=require", "sslmode=require")
     config.set_main_option("sqlalchemy.url", db_url)
 
-# Configure logging from alembic.ini if a config file is present
-if config.config_file_name is not None:
+# Configure logging from alembic.ini if a config file is present.
+#
+# fileConfig() reconfigures logging for the whole process: it defaults to
+# disable_existing_loggers=True, and alembic.ini pins the root logger at WARN. That
+# is what you want from `alembic upgrade head` in a shell, and emphatically not what
+# you want when app.main runs migrations inside the server process at startup — there
+# it silences every app.* logger for the life of the container.
+#
+# So the programmatic caller opts out via config.attributes, alembic's documented
+# channel for exactly this. attributes is empty when alembic is driven from the CLI,
+# so the default keeps the readable hand-run output.
+if config.attributes.get("configure_logger", True) and config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 # Point Alembic at the full set of ORM models so it can diff against the live schema
