@@ -1,10 +1,11 @@
 // Tests for the ticket-anchor render paths in ../js/modal.js.
 //
 // modal.js is a plain <script> (no module.exports) that touches `document` at load
-// time, so it can't be `require()`d directly under Node's test runner. Load it into a
-// vm context with a minimal DOM stub instead — top-level function declarations become
-// properties of the sandbox object, so tests here call modal.js's actual
-// `_buildEventRow` / `openModal` template code, not a reimplementation of it.
+// time, so it can't be `require()`d directly under Node's test runner. It goes through
+// the shared loader in ./helpers/load-script.js instead, which evaluates it into a vm
+// context with a minimal DOM stub — top-level function declarations become properties
+// of the sandbox object, so tests here call modal.js's actual `_buildEventRow` /
+// `openModal` template code, not a reimplementation of it.
 //
 // Covers two things:
 //  - The modal must not hard-depend on /js/analytics.js: if that script is blocked,
@@ -20,13 +21,8 @@
 
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
-const fs = require("node:fs");
-const path = require("node:path");
-const vm = require("node:vm");
+const { loadScripts, stubElement, stubDocument } = require("./helpers/load-script.js");
 const { TICKET_ANCHOR_SELECTOR } = require("../js/analytics.js");
-
-const MODAL_SRC = fs.readFileSync(path.join(__dirname, "../js/modal.js"), "utf8");
-const ANALYTICS_SRC = fs.readFileSync(path.join(__dirname, "../js/analytics.js"), "utf8");
 
 // TICKET_ANCHOR_SELECTOR is a CSS selector like "a.btn-tickets"; pull the class token
 // back out of it so assertions below check the render sites against the real constant
@@ -37,39 +33,19 @@ if (!_selectorMatch) {
 }
 const TICKET_ANCHOR_CLASS = _selectorMatch[1];
 
-function _stubElement() {
-  const addedClasses = [];
-  return {
-    innerHTML: "",
-    classList: {
-      addedClasses,
-      add(cls) { addedClasses.push(cls); },
-      remove() {},
-    },
-    addEventListener() {},
-  };
-}
-
-// Loads modal.js into a fresh vm context with a minimal DOM stub. When `withAnalytics`
-// is true, analytics.js is executed into the same context first (so `ticketAnchorAttrs`
-// is a real global by the time modal.js runs) — simulating a normal page load. When
-// false, `ticketAnchorAttrs` is left undefined — simulating analytics.js failing to load.
+// Loads modal.js into a fresh sandbox alongside the three elements it looks up at load
+// time. When `withAnalytics` is true, analytics.js is loaded into the same context
+// first, so `ticketAnchorAttrs` is a real global by the time modal.js runs — simulating
+// a normal page load. When false, it is left undefined — simulating analytics.js being
+// blocked, 404ing, or missing from a stale cached index.html.
 function loadModal({ withAnalytics }) {
   const elements = {
-    "event-modal": _stubElement(),
-    "modal-overlay": _stubElement(),
-    "modal-content": _stubElement(),
+    "event-modal": stubElement(),
+    "modal-overlay": stubElement(),
+    "modal-content": stubElement(),
   };
-  const documentStub = {
-    getElementById: (id) => elements[id] || _stubElement(),
-    addEventListener() {},
-  };
-  const sandbox = { document: documentStub };
-  vm.createContext(sandbox);
-  if (withAnalytics) {
-    vm.runInContext(ANALYTICS_SRC, sandbox);
-  }
-  vm.runInContext(MODAL_SRC, sandbox);
+  const scripts = withAnalytics ? ["js/analytics.js", "js/modal.js"] : ["js/modal.js"];
+  const { sandbox } = loadScripts(scripts, { documentStub: stubDocument(elements) });
   return { sandbox, elements };
 }
 
