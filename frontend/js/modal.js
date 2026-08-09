@@ -1,8 +1,16 @@
 // Event detail modal
 
 // Escape user-visible text before injecting into innerHTML.
+//
+// Coerce with String(s == null ? "" : s), matching analytics.js::_escapeAttr. The
+// values reaching here are API JSON with no client-side type check, and a bare
+// `(s || "")` hands any *truthy* non-string (a numeric image_url, say) straight to
+// .replace(), which only exists on String.prototype — that threw a TypeError inside
+// openModal and the whole modal failed to open. Coercing first also means the escape
+// runs over the *coerced* text, so a hostile toString() can't smuggle a `"` past it.
 function _h(s) {
-  return (s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  return String(s == null ? "" : s)
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
 const modal = document.getElementById("event-modal");
