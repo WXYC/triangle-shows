@@ -1,8 +1,12 @@
 // Unit tests for the ticket_click GA analytics helpers (../js/analytics.js).
 //
-// Runs on Node's built-in test runner — no build step, no npm install. Use the same
-// invocation the deploy gate uses (.github/workflows/deploy.yml); passing the directory
-// instead makes Node try to `require` it as a module and die:
+// Runs on Node's built-in test runner — no build step, no npm install:
+//   node --test frontend/tests/
+//
+// That directory form works on the Node 20 the deploy gate pins
+// (.github/workflows/deploy.yml), but Node stopped expanding directory arguments after
+// 20 — on 22+ it tries to `require` the path as a module and exits non-zero. If you are
+// on a newer local Node, use the glob the workflow itself runs:
 //   node --test frontend/tests/*.test.js
 //
 // Covers the two pure functions (the dataset -> gtag payload builder, and
