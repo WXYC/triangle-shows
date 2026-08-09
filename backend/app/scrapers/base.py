@@ -69,25 +69,51 @@ def _http_href_only(tag: str, attr: str, value: str) -> Optional[str]:
 
 # --- Scraped-URL validation ---
 
+# No control character is legal in a URI (RFC 3986), and one embedded in a stored
+# ticket_url is actively dangerous downstream: app/api/feeds.py emits that column as
+# an iCalendar URL property, and the icalendar library asserts on an unescaped newline
+# in a content line — so a single such row 500s the whole .ics feed, every venue in it
+# included. Rejecting the value here costs no well-formed URL.
+_URL_CONTROL_CHARS = re.compile(r"[\x00-\x1f\x7f]")
+
+
 def _validate_absolute_http_url(value: Optional[str]) -> Optional[str]:
     """Normalize a scraped ``ticket_url``/``image_url`` to an absolute http(s) URL.
 
-    Both fields come from 21+ third-party venue pages and are interpolated into
-    HTML attributes by the web client (``frontend/js/modal.js`` escapes them, but a
-    relative, scheme-relative, or otherwise malformed value still is not a URL any
-    consumer should trust — the modal, the iCal feed (``app/api/feeds.py``, which
-    reads the ORM column directly and never passes through the API schema), or the
-    Backend-Service "On Tour" reader). Mirrors the ``/^https?:\\/\\//i`` prefix check
-    the web client itself uses on ``ticket_url``.
+    Both fields come from 21+ third-party venue pages, and a relative,
+    scheme-relative, control-character-bearing, or otherwise malformed value is not a
+    URL any consumer should trust — not the web modal (``frontend/js/modal.js``,
+    which escapes them into HTML attributes), not the iCal feed
+    (``app/api/feeds.py``), not the Backend-Service "On Tour" reader. Mirrors the
+    ``/^https?:\\/\\//i`` prefix check the web client itself uses on ``ticket_url``,
+    plus the control-character rejection that check has no equivalent of.
 
     A non-http(s) value normalizes to ``None`` rather than raising: one bad field
     must not turn into a scrape failure and drop an otherwise good event from the
     calendar (WXYC/triangle-shows#94).
+
+    **Scope — this gate is ingestion-time only, and does not reach every stored row.**
+    It runs in ``ScrapedEvent.__post_init__``, so it constrains what a scraper writes.
+    It does *not* retroactively clean a row written before it existed: the scrape
+    manager merges with ``existing.ticket_url = se.ticket_url or existing.ticket_url``
+    (``app/scrapers/manager.py``), so once this function returns ``None`` for a bad
+    scraped value the ``or`` falls back to — and therefore preserves — the legacy bad
+    value indefinitely. Nor does the independent schema-layer gate in
+    ``app/schemas.py`` cover those rows for every consumer: ``app/api/feeds.py`` reads
+    the ORM column directly and never passes through ``EventResponse``.
+
+    Migration 0009 (``app/services/url_backfill.py``) is what closes that window,
+    deterministically at deploy, for rows already in the database — the same division
+    of labour ``clean_description`` has with migration 0006. The two compose: the
+    backfill nulls the stored bad value, after which ``se.ticket_url or
+    existing.ticket_url`` yields ``None`` and it stays cleared.
     """
     if not isinstance(value, str):
         return None
     value = value.strip()
     if not value or not value.lower().startswith(("http://", "https://")):
+        return None
+    if _URL_CONTROL_CHARS.search(value):
         return None
     return value
 

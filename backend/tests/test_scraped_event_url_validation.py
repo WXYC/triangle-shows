@@ -80,6 +80,23 @@ def test_none_stays_none():
     assert ev.image_url is None
 
 
+def test_embedded_newline_becomes_none():
+    # A control character passes the prefix check (the value really does start with
+    # https://) but is not a URL. app/api/feeds.py emits ticket_url as an iCalendar
+    # URL property, and the icalendar library asserts on an unescaped newline in a
+    # content line — so one such row 500s the entire .ics feed for every venue in it,
+    # not just its own event. Reject it here rather than at the serializer.
+    assert _event(ticket_url="https://x.example/1\r\nATTENDEE:mailto:evil@example.com").ticket_url is None
+    assert _event(ticket_url="https://x.example/1\nSUMMARY:Injected").ticket_url is None
+    assert _event(image_url="https://cdn.example.com/a.jpg\rb").image_url is None
+
+
+def test_embedded_control_character_becomes_none():
+    # No control character is legal in a URI (RFC 3986), so this costs no valid URL.
+    assert _event(ticket_url="https://x.example/\x00null").ticket_url is None
+    assert _event(ticket_url="https://x.example/\x7fdel").ticket_url is None
+
+
 def test_malformed_url_does_not_prevent_event_construction():
     # The core constraint (issue #94): a bad field is dropped, never the event.
     ev = _event(name="Still Shows Up", ticket_url="not a url at all", image_url="also not a url")
