@@ -32,7 +32,7 @@ import argparse
 import asyncio
 import logging
 import sys
-from datetime import date, datetime
+from datetime import date
 from pathlib import Path
 
 # Put backend/ on sys.path so `import app...` resolves when running from the repo root.
@@ -43,9 +43,12 @@ from app.services.economics import (  # noqa: E402
     MONTH_FORMAT,
     TRAILING_CLIENT_WINDOW_DAYS,
     ZERO_EVENT_STREAK_DAYS,
+    ZERO_EVENT_STREAK_MIN_DAYS,
     MonthReport,
     collect_month_report,
+    is_incomplete_month,
     last_full_month,
+    month_window,
     parse_month,
 )
 
@@ -160,7 +163,7 @@ def render_markdown(report: MonthReport) -> str:
             "Mean s",
             "Total s",
             "Last found",
-            f"Empty {ZERO_EVENT_STREAK_DAYS}d",
+            f"Empty {ZERO_EVENT_STREAK_MIN_DAYS}+/{ZERO_EVENT_STREAK_DAYS}d",
         ],
         venue_rows,
     )
@@ -177,10 +180,11 @@ def render_markdown(report: MonthReport) -> str:
     ]
     if flagged:
         lines += [
-            f"Scraping successfully but finding nothing for the last {ZERO_EVENT_STREAK_DAYS} "
-            f"days of the month: {', '.join(f'`{slug}`' for slug in flagged)}. That is the "
-            "signature of a venue whose page changed shape without breaking — worth a look "
-            "before trusting this month's inventory numbers.",
+            f"Scraped successfully on at least {ZERO_EVENT_STREAK_MIN_DAYS} of the last "
+            f"{ZERO_EVENT_STREAK_DAYS} days of the month and found nothing on any of them: "
+            f"{', '.join(f'`{slug}`' for slug in flagged)}. Often the signature of a venue "
+            "whose page changed shape without breaking — but a genuinely quiet venue looks "
+            "the same, so check the venue's own calendar before treating it as a fault.",
             "",
         ]
 
@@ -189,19 +193,23 @@ def render_markdown(report: MonthReport) -> str:
     lines += [""]
 
     feed = report.feed
-    lines += _table(
-        ["Measure", "Value"],
-        [
-            ["Fetches served", _int(feed.total_fetches)],
-            ["Distinct clients (in month)", _int(feed.distinct_clients)],
+    # Suppressed entirely when the instrumentation was never switched on. A table of
+    # zeros printed beneath a banner explaining that zero means nothing is still a table
+    # of zeros, and it is the number someone copies into the experiment's threshold.
+    if feed.salt_configured or feed.has_rows:
+        lines += _table(
+            ["Measure", "Value"],
             [
-                f"Distinct clients (trailing {TRAILING_CLIENT_WINDOW_DAYS}d at month end)",
-                _int(feed.trailing_28d_distinct_clients),
+                ["Fetches served", _int(feed.total_fetches)],
+                ["Distinct clients (in month)", _int(feed.distinct_clients)],
+                [
+                    f"Distinct clients (trailing {TRAILING_CLIENT_WINDOW_DAYS}d at month end)",
+                    _int(feed.trailing_28d_distinct_clients),
+                ],
+                ["Full-calendar fetches", _int(feed.full_feed_fetches)],
+                ["Venue-filtered fetches", _int(feed.filtered_fetches)],
             ],
-            ["Full-calendar fetches", _int(feed.full_feed_fetches)],
-            ["Venue-filtered fetches", _int(feed.filtered_fetches)],
-        ],
-    )
+        )
 
     if feed.per_venue_fetches:
         lines += [
@@ -270,14 +278,31 @@ def main() -> int:
     )
 
     try:
-        month = parse_month(args.month) if args.month else last_full_month()
+        # `is not None`, not truthiness: `--month "$MONTH"` with an unexpanded variable
+        # arrives as the empty string, and treating that as "not supplied" silently
+        # reports a different month than the one the caller thought they asked for.
+        month = parse_month(args.month) if args.month is not None else last_full_month()
     except ValueError as exc:
         parser.error(str(exc))
         return 2  # unreachable; parser.error exits 2. Kept so the signature is honest.
 
-    if month >= datetime.now().date().replace(day=1) and args.month is None:
-        logger.warning("Reporting on %s, which is not a completed month.", f"{month:%Y-%m}")
+    # Market time on both sides, and no `--month` clause: an explicitly requested
+    # in-progress month is exactly the case worth warning about, and it was the one the
+    # previous condition excluded.
+    if is_incomplete_month(month):
+        logger.warning(
+            "Reporting on %s, which has not finished yet — its totals are not comparable "
+            "with a full month's.",
+            f"{month:%Y-%m}",
+        )
 
+    window_start, window_end = month_window(month)
+    logger.debug(
+        "Window %s to %s UTC (%s calendar month, market time)",
+        window_start.isoformat(sep=" "),
+        window_end.isoformat(sep=" "),
+        f"{month:%Y-%m}",
+    )
     logger.info("Collecting unit-economics rollup for %s", f"{month:%Y-%m}")
     try:
         report = asyncio.run(_build_report(month))
@@ -289,6 +314,12 @@ def main() -> int:
         return 1
 
     print(render_markdown(report))
+    logger.debug(
+        "Feed coverage: %d of %d days carried rows; salt %s",
+        report.feed.days_with_rows,
+        report.feed.days_in_window,
+        "configured" if report.feed.salt_configured else "unset",
+    )
     logger.info(
         "Done: %d venues, %d feed fetches, %d live upcoming events",
         len(report.venues),

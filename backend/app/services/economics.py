@@ -34,6 +34,7 @@ Requires: app.models, app.market_time (the configured region's zone), app.config
 (TELEMETRY_SALT), an AsyncSession bound to PostgreSQL.
 """
 
+import calendar
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from typing import Optional
@@ -50,6 +51,14 @@ from app.models import Event, FeedFetch, ScrapeLog, ScrapeStatus, Venue
 # single predicate standing in for real health detection until #86's verdicts land,
 # at which point this report consumes those and the predicate goes away.
 ZERO_EVENT_STREAK_DAYS = 7
+
+# How many of those days must actually carry a successful scrape before the flag is
+# raised. The scheduler runs every 6 hours, so a healthy venue produces all 7; requiring
+# 5 absorbs a couple of missed runs without letting one observation stand in for a week.
+# Without a coverage floor the predicate fires on a single empty scrape — a venue added
+# mid-month, or one hit once by a manual POST /api/scrape — and the report then names a
+# diagnosis ("its page changed shape") that one data point cannot support.
+ZERO_EVENT_STREAK_MIN_DAYS = 5
 
 # The rolling audience window #87 evaluates its distinct-client threshold over.
 TRAILING_CLIENT_WINDOW_DAYS = 28
@@ -82,6 +91,31 @@ def last_full_month(today: Optional[date] = None) -> date:
     """
     today = today or today_in_market()
     return (today.replace(day=1) - timedelta(days=1)).replace(day=1)
+
+
+def days_in_month(month: date) -> int:
+    """How many calendar days the month has.
+
+    Deliberately not ``(window_end - window_start).days``: a spring-forward month is
+    only 30d23h wide in UTC, and truncating that reports 30 days for a 31-day March.
+    That number is the denominator the report's coverage warning compares against, so
+    the undercount made a March missing a whole day of telemetry render as fully
+    covered — and a fully covered one render as "31 of 30 days".
+    """
+    return calendar.monthrange(month.year, month.month)[1]
+
+
+def is_incomplete_month(month: date, today: Optional[date] = None) -> bool:
+    """Whether ``month`` has not finished yet in market time.
+
+    Reported months are meant to be complete; a partial one's totals are not comparable
+    with a full one's. Market time on both sides is the point — comparing a market-time
+    month against a server-local clock makes the answer wrong for a few hours at every
+    month boundary for anyone west of the market, which for a server running UTC is
+    everyone in the market.
+    """
+    today = today or today_in_market()
+    return month >= today.replace(day=1)
 
 
 def month_window(month: date) -> tuple[datetime, datetime]:
@@ -130,6 +164,13 @@ class VenueScrapeStats:
     by a process that died mid-scrape never reaches a terminal status. Those rows count
     as attempts and drag the success rate down, which is the honest reading — the
     scrape was paid for and produced nothing.
+
+    ``zero_event_streak`` means: successful scrapes on at least
+    ``ZERO_EVENT_STREAK_MIN_DAYS`` distinct market days of the ``ZERO_EVENT_STREAK_DAYS``
+    ending the month, every one of which found nothing. It does **not** mean the venue
+    was observed on all seven days, and it says nothing about days the venue was not
+    scraped at all — a venue that stopped being scraped entirely shows up as a low
+    ``attempts`` count instead, which is a different problem with a different fix.
     """
 
     venue_slug: str
@@ -233,6 +274,9 @@ async def venue_scrape_stats(session: AsyncSession, month: date) -> list[VenueSc
             select(
                 ScrapeLog.venue_id,
                 func.count().label("successes"),
+                # Distinct market days, not raw row count: four scrapes on one day is
+                # one day of evidence, and the claim being made is about a week.
+                func.count(func.distinct(_market_date(ScrapeLog.started_at))).label("days"),
                 func.max(ScrapeLog.events_found).label("max_found"),
             )
             .where(
@@ -281,10 +325,13 @@ async def venue_scrape_stats(session: AsyncSession, month: date) -> list[VenueSc
                 ),
                 total_duration_seconds=float(totals_row.total_duration) if totals_row else 0.0,
                 last_events_found=last_found_by_venue.get(venue.id),
-                # Still scraping (at least one success in the trailing window) and still
-                # finding nothing (none of those successes found anything).
+                # Observed on most days of the trailing window, and empty on every one
+                # of them. Both halves are required: without the coverage floor a single
+                # empty scrape claims a week it never observed.
                 zero_event_streak=bool(
-                    streak_row and streak_row.successes > 0 and streak_row.max_found == 0
+                    streak_row
+                    and streak_row.days >= ZERO_EVENT_STREAK_MIN_DAYS
+                    and streak_row.max_found == 0
                 ),
             )
         )
@@ -332,10 +379,12 @@ async def feed_stats(session: AsyncSession, month: date) -> FeedStats:
     ).all()
     per_venue: dict[str, int] = {}
     for filter_row in filter_rows:
-        for slug in filter_row.venue_filter.split(","):
-            slug = slug.strip()
-            if slug:
-                per_venue[slug] = per_venue.get(slug, 0) + filter_row.n
+        # A set per row: split_csv does not deduplicate, so `?venue=a,a` is accepted and
+        # stored verbatim. The UI cannot emit that, but a hand-built subscription URL is
+        # polled unattended for months, and counting it twice would inflate one venue's
+        # demand on every future report. Rows already in the table are fixed on read.
+        for slug in {s.strip() for s in filter_row.venue_filter.split(",") if s.strip()}:
+            per_venue[slug] = per_venue.get(slug, 0) + filter_row.n
 
     return FeedStats(
         total_fetches=row.total,
@@ -347,7 +396,7 @@ async def feed_stats(session: AsyncSession, month: date) -> FeedStats:
         first_fetch_at=row.first_at,
         last_fetch_at=row.last_at,
         days_with_rows=row.days,
-        days_in_window=(end - start).days,
+        days_in_window=days_in_month(month),
         salt_configured=bool(settings.TELEMETRY_SALT),
     )
 

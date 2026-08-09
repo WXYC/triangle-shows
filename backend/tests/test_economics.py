@@ -514,8 +514,16 @@ async def test_markdown_says_telemetry_was_never_enabled_rather_than_printing_ze
 
     lowered = markdown.lower()
     assert "not enabled" in lowered or "disabled" in lowered
-    # And it must not present the threshold input as a measured zero.
-    assert "0 distinct clients" not in lowered
+    # And it must not present the threshold input as a measured zero. The earlier
+    # version of this assertion looked for the prose string "0 distinct clients",
+    # which the renderer never emits in any state — counts go out as table cells — so
+    # it could not fail, and the bare-zero table it was meant to forbid was rendering
+    # directly beneath the banner the whole time. Assert on the table row instead.
+    assert "distinct clients" not in lowered, (
+        "the counts table rendered under the not-enabled banner, presenting "
+        "'nothing was ever recorded' as a measured zero"
+    )
+    assert "fetches served" not in lowered
 
 
 async def test_markdown_distinguishes_enabled_but_unused_from_never_enabled(
@@ -532,3 +540,224 @@ async def test_markdown_distinguishes_enabled_but_unused_from_never_enabled(
 
     assert "no rows" in markdown.lower()
     assert "not enabled" not in markdown.lower()
+
+
+# --- Review follow-ups (issue #110) ------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "month, expected_days, note",
+    [
+        (date(2026, 3, 1), 31, "spring forward: 30d23h in UTC, truncates to 30"),
+        (date(2026, 11, 1), 30, "fall back: 30d1h in UTC, floors correctly"),
+        (date(2026, 7, 1), 31, "no transition"),
+        (date(2026, 2, 1), 28, "short month"),
+        (date(2028, 2, 1), 29, "leap February"),
+    ],
+)
+def test_days_in_window_is_the_calendar_length_not_the_utc_delta(
+    month, expected_days, note
+):
+    """A spring-forward month is 23 hours short in UTC, and truncating that loses a day.
+
+    The consequence is not cosmetic: `days_in_window` is the denominator the report's
+    partial-coverage warning compares against, so an undercount makes a March with a
+    whole day of missing telemetry render as complete coverage.
+    """
+    assert economics.days_in_month(month) == expected_days, note
+
+
+async def test_a_march_missing_a_day_of_telemetry_is_reported_as_partial(
+    session, make_venue, monkeypatch
+):
+    """The regression the day-count bug actually produced, end to end."""
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "TELEMETRY_SALT", "a-real-salt")
+    await make_venue(slug="cats-cradle", name="Cat's Cradle")
+    # Rows on 30 of March's 31 market days; the 31st is silent.
+    await _seed_feed_fetches(
+        session,
+        [(datetime(2026, 3, day, 12, 0), f"client{day:010d}", None) for day in range(1, 31)],
+    )
+
+    stats = await economics.feed_stats(session, date(2026, 3, 1))
+    assert stats.days_with_rows == 30
+    assert stats.days_in_window == 31
+
+    cli = _load_cli_module()
+    markdown = cli.render_markdown(await economics.collect_month_report(session, date(2026, 3, 1)))
+    assert "30 of 31 days" in markdown
+    assert "Coverage is partial" in markdown
+
+
+# --- The incomplete-month guard ----------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "month, today, expected, note",
+    [
+        (date(2026, 8, 1), date(2026, 8, 9), True, "the month in progress right now"),
+        (date(2026, 12, 1), date(2026, 8, 9), True, "a future month, report would be empty"),
+        (date(2026, 7, 1), date(2026, 8, 9), False, "the last full month"),
+        (date(2026, 7, 1), date(2026, 8, 1), False, "completed, asked for on the 1st"),
+    ],
+)
+def test_incomplete_month_detection(month, today, expected, note):
+    """The guard must fire on a month that has not finished, and only then.
+
+    The original condition was `month >= now.replace(day=1) and args.month is None`,
+    which is unsatisfiable in the direction that matters: the default month is by
+    construction complete, and an explicitly requested month makes the second clause
+    false. So the one case it existed for — an operator asking for the current month —
+    never warned, while a server-local clock made it warn about a *completed* month for
+    three hours on the last evening of every month anywhere west of Eastern.
+    """
+    assert economics.is_incomplete_month(month, today=today) is expected, note
+
+
+# --- The zero-event streak, restated -----------------------------------------------
+
+
+async def test_a_single_empty_scrape_is_not_a_seven_day_streak(session, make_venue):
+    """One successful empty scrape says nothing about the other six days.
+
+    A venue added mid-month, or hit once by a manual POST /api/scrape, produced the
+    same flag as a genuinely stalled scraper — and the report named a diagnosis ("its
+    page changed shape") that a single data point cannot support.
+    """
+    venue = await make_venue(slug="one-shot", name="One Shot")
+    session.add(
+        ScrapeLog(
+            venue_id=venue.id,
+            scraper_type="manual",
+            started_at=_utc(datetime(2026, 7, 26, 6, 0)),
+            status=ScrapeStatus.success.value,
+            events_found=0,
+            duration_seconds=1.0,
+        )
+    )
+    await session.commit()
+
+    stats = {s.venue_slug: s for s in await economics.venue_scrape_stats(session, date(2026, 7, 1))}
+    assert stats["one-shot"].zero_event_streak is False
+    assert stats["one-shot"].attempts == 1
+
+
+async def test_the_streak_needs_the_window_covered_not_merely_touched(
+    session, make_venue
+):
+    """Coverage means empty successes spanning the window, not one at each end."""
+    venue = await make_venue(slug="sparse", name="Sparse")
+    # Two successes seven days apart, nothing between: the venue was not observed for
+    # most of the window, so its emptiness there is unknown rather than established.
+    for day in (25, 31):
+        session.add(
+            ScrapeLog(
+                venue_id=venue.id,
+                scraper_type="manual",
+                started_at=_utc(datetime(2026, 7, day, 6, 0)),
+                status=ScrapeStatus.success.value,
+                events_found=0,
+                duration_seconds=1.0,
+            )
+        )
+    await session.commit()
+
+    stats = {s.venue_slug: s for s in await economics.venue_scrape_stats(session, date(2026, 7, 1))}
+    assert stats["sparse"].zero_event_streak is False
+
+
+# --- Duplicated slugs --------------------------------------------------------------
+
+
+async def test_a_slug_repeated_in_one_subscription_counts_once(session):
+    """`?venue=cats-cradle,cats-cradle` is accepted by the feed and stored verbatim.
+
+    split_csv does not deduplicate, so the normalized join can carry a repeat. The
+    frontend cannot produce one, but a hand-built subscription URL is polled unattended
+    for months, so one such subscriber would inflate that venue on every future report.
+    Deduplicating on read keeps rows already in the table from lying.
+    """
+    await _seed_feed_fetches(
+        session,
+        [(datetime(2026, 7, 5, 9, 0), "aaaaaaaaaaaaaaaa", "cats-cradle,cats-cradle")],
+    )
+
+    stats = await economics.feed_stats(session, date(2026, 7, 1))
+    assert stats.per_venue_fetches == {"cats-cradle": 1}
+    assert stats.filtered_fetches == 1
+
+
+# --- Mutations that previously survived --------------------------------------------
+
+
+async def test_success_rate_denominator_counts_scrapes_that_never_finished(
+    session, make_venue
+):
+    """A row stuck at `running` was paid for and produced nothing.
+
+    VenueScrapeStats' docstring commits to this reading; nothing asserted it, so
+    changing the denominator to successes + failures left the suite green.
+    """
+    venue = await make_venue(slug="stalled", name="Stalled")
+    for status in (ScrapeStatus.success, ScrapeStatus.running, ScrapeStatus.failed):
+        session.add(
+            ScrapeLog(
+                venue_id=venue.id,
+                scraper_type="manual",
+                started_at=_utc(datetime(2026, 7, 5, 6, 0)),
+                status=status.value,
+                events_found=1 if status is ScrapeStatus.success else 0,
+                # A running row has no duration: it never finished.
+                duration_seconds=2.0 if status is not ScrapeStatus.running else None,
+            )
+        )
+    await session.commit()
+
+    stats = {s.venue_slug: s for s in await economics.venue_scrape_stats(session, date(2026, 7, 1))}
+    stalled = stats["stalled"]
+    assert stalled.attempts == 3
+    assert stalled.successes == 1
+    assert stalled.failures == 1
+    assert stalled.success_rate == pytest.approx(1 / 3)  # not 1/2
+    # AVG ignores the NULL duration; SUM must not come back as None.
+    assert stalled.total_duration_seconds == pytest.approx(4.0)
+    assert stalled.mean_duration_seconds == pytest.approx(2.0)
+
+
+async def test_total_duration_is_zero_not_none_when_no_scrape_ever_finished(
+    session, make_venue
+):
+    """SUM over only-NULL durations is NULL, and float(None) raises.
+
+    A venue whose single in-window row is still `running` is the reachable case.
+    """
+    venue = await make_venue(slug="never-finished", name="Never Finished")
+    session.add(
+        ScrapeLog(
+            venue_id=venue.id,
+            scraper_type="manual",
+            started_at=_utc(datetime(2026, 7, 5, 6, 0)),
+            status=ScrapeStatus.running.value,
+            events_found=0,
+            duration_seconds=None,
+        )
+    )
+    await session.commit()
+
+    stats = {s.venue_slug: s for s in await economics.venue_scrape_stats(session, date(2026, 7, 1))}
+    assert stats["never-finished"].total_duration_seconds == 0.0
+    assert stats["never-finished"].mean_duration_seconds is None
+
+
+async def test_live_inventory_excludes_events_whose_date_has_passed(
+    session, make_venue, make_event
+):
+    """"Live upcoming" is two conditions, and only the tombstone half was asserted."""
+    venue = await make_venue(slug="past-and-future", name="Past And Future")
+    await make_event(venue=venue, name="Upcoming")
+    await make_event(venue=venue, name="Already happened", date=date(2020, 1, 1))
+
+    stats = await economics.inventory_stats(session, date(2026, 7, 1))
+    assert stats.live_upcoming_events == 1
