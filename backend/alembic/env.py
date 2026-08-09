@@ -1,8 +1,17 @@
 """
 Alembic migration environment — imports SQLAlchemy models and runs schema migrations.
 
-Role: Invoked by `alembic upgrade head` (manually or during deploy); not part of the
-      runtime request path. Must run before the app starts if the schema is out of date.
+Role: Runs on two paths, and the difference matters. In production it executes
+      *inside the app process* — app.main's lifespan calls alembic upgrade head at
+      startup, and nothing else applies migrations (railway.json's startCommand and
+      the Dockerfile CMD are uvicorn only; no workflow invokes alembic). It also runs
+      from a shell when someone upgrades a database by hand.
+
+      Because the production path shares a process with the running server, anything
+      here that mutates process-global state — logging config, sys.path, os.environ —
+      lands on the server for the life of the container. That is not hypothetical: an
+      unconditional logging.config.fileConfig() call in this file silenced every app.*
+      logger in production (issue #101). See the configure_logger note below.
 Requires: DATABASE_URL env var (falls back to alembic.ini), app.database.Base,
           app.models (Venue, Event, EventMissState, ScrapeLog, FeedFetch).
 """
