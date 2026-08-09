@@ -44,6 +44,11 @@ def _run_migrations():
     # alembic.ini lives one directory above this file (i.e. /app/alembic.ini in Docker)
     ini_path = Path(__file__).parent.parent / "alembic.ini"
     cfg = Config(str(ini_path))
+    # Migrations run in-process, so alembic.ini's logging config would reconfigure the
+    # whole server's logging — disabling every app.* logger and dropping root to WARN.
+    # alembic/env.py honors this attribute; the shell `alembic upgrade head` path,
+    # where that config is exactly what you want, leaves it unset.
+    cfg.attributes["configure_logger"] = False
     command.upgrade(cfg, "head")
 
 
