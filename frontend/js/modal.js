@@ -10,6 +10,10 @@ const modalOverlay = document.getElementById("modal-overlay");
 
 function _buildEventRow(ev) {
   const p = ev.extendedProps;
+  // Prefix-checked only, not sanitized: /^https?:\/\//i confirms how the string
+  // starts, not what it contains, so a value like "https://x/\" onmouseover=…"
+  // still passes it. _h() below at the render site is what actually makes
+  // safeUrl safe to interpolate — see the fuller note on openModal's safeUrl.
   const safeUrl = p.ticket_url && /^https?:\/\//i.test(p.ticket_url) ? p.ticket_url : null;
   // ticketAnchorAttrs comes from /js/analytics.js, an optional add-on script. If it
   // fails to load (tracker-blocking filter list, 404, stale cached index.html), this
@@ -36,7 +40,7 @@ function _buildEventRow(ev) {
       </div>
       ${p.support_artists?.length ? `<div class="modal-group-support">with ${_h(p.support_artists.join(", "))}</div>` : ""}
       ${meta ? `<div class="modal-group-meta">${meta}</div>` : ""}
-      ${safeUrl ? `<a href="${safeUrl}" target="_blank" rel="noopener" class="btn-tickets btn-tickets-sm" ${ticketAttrs}>Get Tickets</a>` : ""}
+      ${safeUrl ? `<a href="${_h(safeUrl)}" target="_blank" rel="noopener" class="btn-tickets btn-tickets-sm" ${ticketAttrs}>Get Tickets</a>` : ""}
     </div>`;
 }
 
@@ -88,9 +92,11 @@ function openModal(eventInfo) {
     }
   }
 
-  // Image
+  // Image — image_url is scraper-sourced (third-party venue pages) and needs no
+  // click/hover to reach the browser: a broken src fires onerror the instant this
+  // markup is assigned to innerHTML. Escape it like every other field (issue #94).
   const imageHtml = props.image_url
-    ? `<img src="${props.image_url}" alt="${_h(props.name)}" class="modal-image">`
+    ? `<img src="${_h(props.image_url)}" alt="${_h(props.name)}" class="modal-image">`
     : "";
 
   // Status badge
@@ -133,14 +139,18 @@ function openModal(eventInfo) {
     ? `<div class="modal-support">with ${_h(props.support_artists.join(", "))}</div>`
     : "";
 
-  // Ticket button — only allow http/https URLs
+  // Ticket button — only allow http/https URLs. /^https?:\/\//i only constrains how
+  // the string *starts*; it does not stop a `"` further in from closing the href
+  // attribute early (e.g. "https://x/\" onmouseover=…" still passes it). _h() at the
+  // render site below is what actually neutralizes that, same as _buildEventRow's
+  // matching safeUrl for the list-row variant (issue #94).
   const safeUrl = props.ticket_url && /^https?:\/\//i.test(props.ticket_url) ? props.ticket_url : null;
   // See the matching guard in _buildEventRow: ticketAnchorAttrs is optional.
   const ticketAttrs = typeof ticketAnchorAttrs === "function"
     ? ticketAnchorAttrs({ venueSlug: props.venue_slug, showId: eventInfo.event.id })
     : "";
   const ticketBtn = safeUrl
-    ? `<a href="${safeUrl}" target="_blank" rel="noopener" class="btn-tickets" ${ticketAttrs}>Get Tickets</a>`
+    ? `<a href="${_h(safeUrl)}" target="_blank" rel="noopener" class="btn-tickets" ${ticketAttrs}>Get Tickets</a>`
     : "";
 
   // Every interpolated field is escaped via _h() EXCEPT props.description, which is
@@ -148,6 +158,12 @@ function openModal(eventInfo) {
   // allowlist (app/scrapers/base.py::clean_description) so blurbs keep their
   // paragraphs, emphasis, and links. Do not wrap it in _h() (that re-shows the tags)
   // and do not add other raw-HTML fields here without server-side sanitization.
+  //
+  // This explicitly includes imageHtml's props.image_url and ticketBtn's safeUrl
+  // above: both are scraper-sourced from 21+ third-party venue sites, and passing
+  // the ticket_url prefix check does not make a value safe to interpolate — only
+  // _h() does. Both render sites for ticket_url (here and _buildEventRow's list-row
+  // variant) and the lone image_url render site all go through it (issue #94).
   el.innerHTML = `
     ${imageHtml}
     <div class="modal-body">
