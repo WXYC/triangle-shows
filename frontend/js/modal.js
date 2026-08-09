@@ -15,7 +15,7 @@ function _buildEventRow(ev) {
   // fails to load (tracker-blocking filter list, 404, stale cached index.html), this
   // must degrade to a plain anchor rather than throw — see openModal's matching guard.
   const ticketAttrs = typeof ticketAnchorAttrs === "function"
-    ? ticketAnchorAttrs({ venueSlug: p.venue_slug, eventId: ev.id })
+    ? ticketAnchorAttrs({ venueSlug: p.venue_slug, showId: ev.id })
     : "";
 
   let badge = "";
@@ -137,7 +137,7 @@ function openModal(eventInfo) {
   const safeUrl = props.ticket_url && /^https?:\/\//i.test(props.ticket_url) ? props.ticket_url : null;
   // See the matching guard in _buildEventRow: ticketAnchorAttrs is optional.
   const ticketAttrs = typeof ticketAnchorAttrs === "function"
-    ? ticketAnchorAttrs({ venueSlug: props.venue_slug, eventId: eventInfo.event.id })
+    ? ticketAnchorAttrs({ venueSlug: props.venue_slug, showId: eventInfo.event.id })
     : "";
   const ticketBtn = safeUrl
     ? `<a href="${safeUrl}" target="_blank" rel="noopener" class="btn-tickets" ${ticketAttrs}>Get Tickets</a>`

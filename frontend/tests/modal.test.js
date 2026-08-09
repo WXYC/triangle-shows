@@ -95,7 +95,7 @@ test("_buildEventRow (group modal row) renders a well-formed ticket anchor witho
   );
   assert.match(html, new RegExp(`class="${TICKET_ANCHOR_CLASS} btn-tickets-sm"`));
   assert.equal(html.includes("data-venue-slug"), false);
-  assert.equal(html.includes("data-event-id"), false);
+  assert.equal(html.includes("data-show-id"), false);
 });
 
 test("openModal (single-event modal) renders a well-formed ticket anchor without throwing when analytics.js hasn't loaded", () => {
@@ -122,7 +122,7 @@ test("openModal (single-event modal) renders a well-formed ticket anchor without
   );
   assert.match(html, new RegExp(`class="${TICKET_ANCHOR_CLASS}"`));
   assert.equal(html.includes("data-venue-slug"), false);
-  assert.equal(html.includes("data-event-id"), false);
+  assert.equal(html.includes("data-show-id"), false);
   // Confirms the modal actually opened: classList.add("active") ran against the real
   // #event-modal element, not just that the stub still has an `add` method.
   assert.deepEqual(elements["event-modal"].classList.addedClasses, ["active"]);
@@ -143,7 +143,7 @@ test("_buildEventRow carries class=\"btn-tickets\" alongside the real data-* att
   const html = sandbox._buildEventRow(ev);
   assert.match(html, new RegExp(`class="${TICKET_ANCHOR_CLASS} btn-tickets-sm"`));
   assert.match(html, /data-venue-slug="cats-cradle"/);
-  assert.match(html, /data-event-id="42"/);
+  assert.match(html, /data-show-id="42"/);
 });
 
 test("openModal carries class=\"btn-tickets\" alongside the real data-* attributes when analytics.js has loaded", () => {
@@ -166,5 +166,5 @@ test("openModal carries class=\"btn-tickets\" alongside the real data-* attribut
   const html = elements["modal-content"].innerHTML;
   assert.match(html, new RegExp(`class="${TICKET_ANCHOR_CLASS}"`));
   assert.match(html, /data-venue-slug="cats-cradle"/);
-  assert.match(html, /data-event-id="42"/);
+  assert.match(html, /data-show-id="42"/);
 });

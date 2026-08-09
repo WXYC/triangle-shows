@@ -15,15 +15,15 @@ const assert = require("node:assert/strict");
 const { ticketAnchorAttrs, ticketClickPayload, _onTicketClick, TICKET_ANCHOR_SELECTOR } = require("../js/analytics.js");
 
 test("ticketClickPayload maps a full dataset to the gtag event tuple", () => {
-  const [name, params] = ticketClickPayload({ venueSlug: "cats-cradle", eventId: "42" });
+  const [name, params] = ticketClickPayload({ venueSlug: "cats-cradle", showId: "42" });
   assert.equal(name, "ticket_click");
-  assert.deepEqual(params, { venue_slug: "cats-cradle", event_id: "42" });
+  assert.deepEqual(params, { venue_slug: "cats-cradle", show_id: "42" });
 });
 
 test("ticketClickPayload omits missing fields instead of stringifying undefined", () => {
   const [, onlyVenue] = ticketClickPayload({ venueSlug: "motorco" });
   assert.deepEqual(onlyVenue, { venue_slug: "motorco" });
-  assert.equal("event_id" in onlyVenue, false);
+  assert.equal("show_id" in onlyVenue, false);
 
   const [, empty] = ticketClickPayload({});
   assert.deepEqual(empty, {});
@@ -33,25 +33,25 @@ test("ticketClickPayload omits missing fields instead of stringifying undefined"
 });
 
 test("ticketAnchorAttrs emits both data attributes, namespaced away from filters.js's data-venue", () => {
-  const attrs = ticketAnchorAttrs({ venueSlug: "cats-cradle", eventId: "42" });
-  assert.equal(attrs, 'data-venue-slug="cats-cradle" data-event-id="42"');
+  const attrs = ticketAnchorAttrs({ venueSlug: "cats-cradle", showId: "42" });
+  assert.equal(attrs, 'data-venue-slug="cats-cradle" data-show-id="42"');
 });
 
 test("ticketAnchorAttrs escapes quotes so a value can't break out of the attribute", () => {
-  const attrs = ticketAnchorAttrs({ venueSlug: '"><script>evil', eventId: "1" });
+  const attrs = ticketAnchorAttrs({ venueSlug: '"><script>evil', showId: "1" });
   assert.equal(attrs.includes('"><script>'), false);
-  assert.match(attrs, /^data-venue-slug="[^"]*" data-event-id="1"$/);
+  assert.match(attrs, /^data-venue-slug="[^"]*" data-show-id="1"$/);
 });
 
 test("ticketAnchorAttrs tolerates missing props", () => {
-  assert.equal(ticketAnchorAttrs({}), 'data-venue-slug="" data-event-id=""');
-  assert.equal(ticketAnchorAttrs(), 'data-venue-slug="" data-event-id=""');
+  assert.equal(ticketAnchorAttrs({}), 'data-venue-slug="" data-show-id=""');
+  assert.equal(ticketAnchorAttrs(), 'data-venue-slug="" data-show-id=""');
 });
 
 test("ticketAnchorAttrs escapes apostrophes too, so the attribute string is safe in either quoting style", () => {
-  const attrs = ticketAnchorAttrs({ venueSlug: "o'brien's", eventId: "1" });
+  const attrs = ticketAnchorAttrs({ venueSlug: "o'brien's", showId: "1" });
   assert.equal(attrs.includes("'"), false);
-  assert.equal(attrs, 'data-venue-slug="o&#39;brien&#39;s" data-event-id="1"');
+  assert.equal(attrs, 'data-venue-slug="o&#39;brien&#39;s" data-show-id="1"');
 });
 
 // Converts a rendered `data-*` attribute name to the camelCase key the browser's
@@ -75,17 +75,17 @@ function _parseDataset(attrString) {
 }
 
 test("ticketAnchorAttrs output round-trips through the real dataset -> payload path (a rename on either side goes red)", () => {
-  const attrs = ticketAnchorAttrs({ venueSlug: "cats-cradle", eventId: "42" });
+  const attrs = ticketAnchorAttrs({ venueSlug: "cats-cradle", showId: "42" });
   const dataset = _parseDataset(attrs);
   const [, params] = ticketClickPayload(dataset);
-  assert.deepEqual(params, { venue_slug: "cats-cradle", event_id: "42" });
+  assert.deepEqual(params, { venue_slug: "cats-cradle", show_id: "42" });
 });
 
 test("_onTicketClick emits ticket_click with the anchor's dataset for a.btn-tickets", () => {
   const calls = [];
   globalThis.gtag = (...args) => calls.push(args);
   try {
-    const anchor = { dataset: { venueSlug: "cats-cradle", eventId: "42" } };
+    const anchor = { dataset: { venueSlug: "cats-cradle", showId: "42" } };
     const closestArgs = [];
     const closest = (selector) => {
       closestArgs.push(selector);
@@ -96,7 +96,7 @@ test("_onTicketClick emits ticket_click with the anchor's dataset for a.btn-tick
     // stubbed to return — a delegated selector that drifted from TICKET_ANCHOR_SELECTOR
     // would still pass every other assertion here.
     assert.deepEqual(closestArgs, [TICKET_ANCHOR_SELECTOR]);
-    assert.deepEqual(calls, [["event", "ticket_click", { venue_slug: "cats-cradle", event_id: "42" }]]);
+    assert.deepEqual(calls, [["event", "ticket_click", { venue_slug: "cats-cradle", show_id: "42" }]]);
   } finally {
     delete globalThis.gtag;
   }
@@ -115,7 +115,7 @@ test("_onTicketClick stays silent for clicks outside a.btn-tickets", () => {
 
 test("_onTicketClick no-ops when gtag isn't defined (adblock, no GA id)", () => {
   delete globalThis.gtag;
-  const anchor = { dataset: { venueSlug: "cats-cradle", eventId: "42" } };
+  const anchor = { dataset: { venueSlug: "cats-cradle", showId: "42" } };
   // Would throw ("gtag is not a function") if the guard were missing.
   assert.doesNotThrow(() => _onTicketClick({ target: { closest: () => anchor } }));
 });
@@ -130,9 +130,9 @@ test("_onTicketClick counts a middle-click (auxclick, button 1) on a.btn-tickets
   const calls = [];
   globalThis.gtag = (...args) => calls.push(args);
   try {
-    const anchor = { dataset: { venueSlug: "cats-cradle", eventId: "42" } };
+    const anchor = { dataset: { venueSlug: "cats-cradle", showId: "42" } };
     _onTicketClick({ type: "auxclick", button: 1, target: { closest: () => anchor } });
-    assert.deepEqual(calls, [["event", "ticket_click", { venue_slug: "cats-cradle", event_id: "42" }]]);
+    assert.deepEqual(calls, [["event", "ticket_click", { venue_slug: "cats-cradle", show_id: "42" }]]);
   } finally {
     delete globalThis.gtag;
   }
@@ -142,7 +142,7 @@ test("_onTicketClick ignores non-middle auxclicks (e.g. right-click, button 2)",
   const calls = [];
   globalThis.gtag = (...args) => calls.push(args);
   try {
-    const anchor = { dataset: { venueSlug: "cats-cradle", eventId: "42" } };
+    const anchor = { dataset: { venueSlug: "cats-cradle", showId: "42" } };
     _onTicketClick({ type: "auxclick", button: 2, target: { closest: () => anchor } });
     assert.deepEqual(calls, []);
   } finally {
