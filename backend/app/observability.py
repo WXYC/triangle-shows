@@ -109,9 +109,10 @@ async def send_alert(text: str) -> None:
 
 def flush_errors() -> None:
     """Block until any buffered tracker events are sent. A vendor-free delegate:
-    calling sentry_sdk.flush() directly from app.main would hard-fail for an
-    operator who deleted requirements-optional.txt but not sentry_hook.py's
-    guarded import — this stays a no-op instead when the hook is absent."""
+    calling the tracker SDK's own flush function directly from app.main would
+    hard-fail for an operator who deleted requirements-optional.txt but not
+    sentry_hook.py's guarded import — this stays a no-op instead when the hook
+    is absent."""
     if sentry_hook is not None:
         sentry_hook.flush()
 
