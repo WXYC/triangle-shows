@@ -170,10 +170,11 @@ _site = load_site_config().site
 # Before app construction, not in the lifespan: Starlette builds the middleware
 # stack lazily inside Starlette.__call__ (the lifespan scope is itself a pass
 # through __call__), so by the time the lifespan body ran the stack would already
-# exist and Sentry's FastAPI/Starlette integration patching would land too late to
-# enrich it. This also runs before `app` exists, which is when the equivalent
-# class-level route-handler patching wants to happen. A no-op with no SENTRY_DSN
-# set (the test environment), so sentry_sdk.init never runs under pytest.
+# exist and the optional tracker's FastAPI/Starlette integration patching would
+# land too late to enrich it. This also runs before `app` exists, which is when
+# the equivalent class-level route-handler patching wants to happen. A no-op
+# with no SENTRY_DSN set (the test environment), so the tracker's own init never
+# runs under pytest.
 init_error_tracking()
 
 app = FastAPI(
