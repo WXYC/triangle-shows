@@ -129,5 +129,13 @@ async def health_check(session: AsyncSession = Depends(get_session)) -> HealthRe
         event_count=event_count,
         venue_count=venue_count,
         last_scrape=last_scrape,
-        version=os.environ.get("GIT_COMMIT", "unknown"),  # set via the Dockerfile's GIT_COMMIT build ARG, not Cloud Build (Railway builds this Dockerfile)
+        # GIT_COMMIT is engine-neutral config, set by the *deployment* (e.g. Railway's
+        # GIT_COMMIT=${{RAILWAY_GIT_COMMIT_SHA}} service variable), not by a Dockerfile
+        # build ARG — no build arg is passed today (deploys go through
+        # `railway redeploy --from-source`). `or "unknown"` rather than a get() default:
+        # os.environ.get(k, default) only returns the default when the key is absent, and
+        # the Dockerfile unconditionally sets ENV GIT_COMMIT=unknown, so the key is always
+        # present — a set-but-empty reference variable would otherwise report "" instead
+        # of the honest "unknown".
+        version=os.environ.get("GIT_COMMIT") or "unknown",
     )
