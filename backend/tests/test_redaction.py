@@ -27,7 +27,7 @@ import logging
 import httpx
 import pytest
 
-from app.redaction import RedactingFormatter, redact_credentials
+from app.redaction import RedactingFormatter, redact_credentials, redact_handler
 
 # Shaped exactly like the URL the Ticketmaster scraper builds (app/scrapers/ticketmaster.py),
 # with a placeholder standing in for the live key.
@@ -270,3 +270,82 @@ async def test_trigger_scrape_catch_all_redacts_and_reports_the_credential(clien
     assert FAKE_KEY not in detail, "the unauthenticated endpoint leaked the credential"
     assert "401 Unauthorized" in detail, "the diagnosis itself must survive"
     assert len(reported) == 1, "the catch-all must route through the funnel too"
+
+
+# --- The uvicorn sink: a non-propagating logger the root formatter cannot reach ----
+
+
+def test_redact_handler_scrubs_without_changing_the_existing_format():
+    """redact_handler *wraps* the handler's formatter rather than replacing it, so a
+    handler owned by someone else (uvicorn installs its own DefaultFormatter and an
+    AccessFormatter that renders from record args, not %(message)s) keeps its layout."""
+    buf = io.StringIO()
+    handler = logging.StreamHandler(buf)
+    handler.setFormatter(logging.Formatter("PREFIX %(levelname)s :: %(message)s"))
+    redact_handler(handler)
+
+    logger = logging.getLogger("test_redact_handler_format")
+    logger.propagate = False
+    logger.handlers = [handler]
+    logger.setLevel(logging.INFO)
+    logger.info("fetching %s", TM_URL)
+
+    out = buf.getvalue()
+    assert out.startswith("PREFIX INFO :: "), "the wrapped formatter's layout was lost"
+    assert FAKE_KEY not in out
+    assert "venueId=KovZpZAdEEvA" in out, "only the credential value should be removed"
+
+
+def test_redact_handler_is_idempotent():
+    """configure_logging() runs at import and again in any test that calls it, so a
+    second pass must not nest wrappers."""
+    handler = logging.StreamHandler(io.StringIO())
+    handler.setFormatter(logging.Formatter("%(message)s"))
+    redact_handler(handler)
+    first = handler.formatter
+    redact_handler(handler)
+    assert handler.formatter is first
+
+
+def test_configure_logging_closes_the_uvicorn_traceback_sink(preserved_logging):
+    """Starlette's ServerErrorMiddleware ALWAYS re-raises after invoking the
+    bare-Exception handler, so uvicorn logs the traceback itself on `uvicorn.error`.
+    That logger's parent (`uvicorn`) is configured with propagate=False and its own
+    handler, so nothing it writes ever passes a root handler — and RedactingFormatter
+    is installed only on root handlers. Without this, an httpx.HTTPStatusError
+    escaping any route writes a live ?apikey= to the log stream in full.
+    """
+    from app.main import configure_logging
+
+    uvicorn_logger = logging.getLogger("uvicorn")
+    original_handlers = uvicorn_logger.handlers
+    original_propagate = uvicorn_logger.propagate
+
+    buf = io.StringIO()
+    handler = logging.StreamHandler(buf)
+    handler.setFormatter(logging.Formatter("%(levelname)s: %(message)s"))
+    uvicorn_logger.handlers = [handler]
+    uvicorn_logger.propagate = False
+
+    try:
+        configure_logging()
+
+        try:
+            raise httpx.HTTPStatusError(
+                f"Client error '401 Unauthorized' for url '{TM_URL}'",
+                request=httpx.Request("GET", TM_URL),
+                response=httpx.Response(401, request=httpx.Request("GET", TM_URL)),
+            )
+        except httpx.HTTPStatusError as exc:
+            logging.getLogger("uvicorn.error").error(
+                "Exception in ASGI application\n", exc_info=exc
+            )
+
+        out = buf.getvalue()
+    finally:
+        uvicorn_logger.handlers = original_handlers
+        uvicorn_logger.propagate = original_propagate
+
+    assert "Exception in ASGI application" in out, "the test did not exercise the handler"
+    assert FAKE_KEY not in out, "uvicorn's own handler leaked the credential"
+    assert "venueId=KovZpZAdEEvA" in out, "the diagnosis itself must survive"
