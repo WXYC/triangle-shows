@@ -116,6 +116,23 @@ async def _startup_scrape():
 
 # --- Lifespan (startup / shutdown) ---
 
+async def _cancel_startup_scrape(app: FastAPI) -> None:
+    """Cancel and await the in-flight startup scrape, if there is one.
+
+    Shared by the shutdown path and the startup-failure path, which both need it for
+    the same reason: abandoning a pending task mid-transaction gives "Task was
+    destroyed but it is pending!" and a scrape holding a database session that nobody
+    will ever close.
+    """
+    scrape_task = getattr(app.state, "startup_scrape_task", None)
+    if scrape_task is None or scrape_task.done():
+        return
+    scrape_task.cancel()
+    with suppress(asyncio.CancelledError):
+        await scrape_task
+    logger.info("Startup scrape cancelled")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup and shutdown logic."""
@@ -154,19 +171,18 @@ async def lifespan(app: FastAPI):
         # otherwise.
         report_error(e, where="main.lifespan.startup")
         flush_errors()
+        # The scrape task is created *inside* this try, so a later failure here (a bad
+        # cron expression in configure_scheduler, a scheduler that won't start) would
+        # re-raise without ever yielding — and the shutdown branch below, which is what
+        # normally cancels it, only runs after a yield. Without this the process dies
+        # with a live scrape pending.
+        await _cancel_startup_scrape(app)
         raise
 
     yield
 
     # Shutdown
-    scrape_task = getattr(app.state, "startup_scrape_task", None)
-    if scrape_task is not None and not scrape_task.done():
-        # Cancel and await the in-flight scrape so shutdown doesn't abandon a pending
-        # task mid-transaction ("Task was destroyed but it is pending!").
-        scrape_task.cancel()
-        with suppress(asyncio.CancelledError):
-            await scrape_task
-        logger.info("Startup scrape cancelled at shutdown")
+    await _cancel_startup_scrape(app)
     if scheduler.running:
         scheduler.shutdown()
         logger.info("Scheduler shut down")

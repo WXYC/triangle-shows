@@ -71,12 +71,23 @@ def sentry_transport(monkeypatch):
     monkeypatch.setattr(settings, "SENTRY_DSN", FAKE_DSN)
     sentry_hook.init_sentry()
     client = sentry_sdk.get_client()
+    # init_sentry built a real HttpTransport (a urllib3 PoolManager plus a background
+    # worker). Overwriting client.transport below orphans it, and client.close() would
+    # then close only the capturing stand-in — so hold onto the real one and kill it in
+    # teardown. Its worker thread never starts (it's lazy on first submit), so nothing
+    # reaches the network either way; this is about not leaking a pool per fixture use.
+    real_transport = client.transport
     cap = _CapturingTransport({"dsn": FAKE_DSN})
     client.transport = cap
     try:
         yield cap
     finally:
         client.close()
+        if real_transport is not None:
+            real_transport.kill()
+        # init_sentry also set a service.name tag on the *global* scope, which outlives
+        # the client teardown above and would otherwise ride into later tests.
+        sentry_sdk.get_global_scope().clear()
         sentry_sdk.get_global_scope().set_client(None)
 
 
@@ -179,6 +190,21 @@ class TestCaptureExceptionAndFlush:
     def test_capture_exception_is_a_no_op_without_the_sdk(self, monkeypatch):
         monkeypatch.setattr(sentry_hook, "sentry_sdk", None)
         sentry_hook.capture_exception(ValueError("boom"), where="test")  # must not raise
+
+    def test_capture_exception_is_a_no_op_without_a_dsn(self, monkeypatch):
+        """The gate lives here, beside init_sentry's identical check, rather than in
+        app.observability's caller: this is the only file allowed to know the tracker
+        exists, and one file holding both checks is what stops them drifting apart.
+        Without it, every error in a deployment that installed requirements-optional.txt
+        (where the hook always imports) would call into an uninitialized client.
+        """
+        calls = []
+        monkeypatch.setattr(settings, "SENTRY_DSN", "")
+        monkeypatch.setattr(sentry_sdk, "capture_exception", lambda exc: calls.append(exc))
+
+        sentry_hook.capture_exception(ValueError("boom"), where="test.no_dsn")
+
+        assert calls == []
 
     def test_flush_is_a_no_op_without_the_sdk(self, monkeypatch):
         monkeypatch.setattr(sentry_hook, "sentry_sdk", None)

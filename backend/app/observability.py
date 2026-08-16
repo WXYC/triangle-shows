@@ -22,8 +22,9 @@ site.toml's [integrations].google_analytics_id):
   3. report_error() additionally forwards to app.sentry_hook when it is
      importable and SENTRY_DSN is set — opt-in, isolated, deletable.
 
-Requires: app.config.settings (SENTRY_DSN, ALERT_WEBHOOK_URL), app.redaction (the
-same credential scrubber applied at every other sink in this codebase).
+Requires: app.config.settings (ALERT_WEBHOOK_URL only — SENTRY_DSN is read by
+app.sentry_hook alone, which is what keeps this module vendor-free), app.redaction
+(the same credential scrubber applied at every other sink in this codebase).
 """
 
 import logging
@@ -58,14 +59,13 @@ def report_error(exc: BaseException, *, where: str, context: Optional[dict] = No
     "scheduler.job_error") for triage; `context` is optional structured detail
     (e.g. {"job_id": ...}) attached to the tracker event when present.
 
-    The forward is gated on SENTRY_DSN as well as the hook's presence. The hook
-    imports whenever the file exists — which, in any deployment that installed
-    requirements-optional.txt, is always — so without the DSN check every error would
-    call into an uninitialized client. That is a no-op today, but it makes the error
-    path depend on a third party's no-op staying a no-op; tier 1 must not.
+    The hook's own capture_exception is what decides whether the tracker is actually
+    on (it checks SENTRY_DSN) — deliberately not re-checked here, which would put a
+    vendor-named setting back into this vendor-free module and leave the same gate
+    spelled out in two files, free to disagree.
     """
     logger.error("[%s] %s", where, exc, exc_info=exc)
-    if sentry_hook is not None and settings.SENTRY_DSN:
+    if sentry_hook is not None:
         sentry_hook.capture_exception(exc, where=where, context=context)
 
 

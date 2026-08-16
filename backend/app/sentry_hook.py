@@ -122,8 +122,16 @@ def init_sentry() -> None:
 
 
 def capture_exception(exc: BaseException, *, where: str, context: dict | None = None) -> None:
-    """Send exc to Sentry, tagged with where it originated. A no-op without the SDK."""
-    if sentry_sdk is None:
+    """Send exc to Sentry, tagged with where it originated.
+
+    A no-op without the SDK *or* without a DSN. The DSN check lives here rather than
+    in app.observability's caller for two reasons: this file is the only one allowed
+    to know the tracker exists, and init_sentry() below gates on exactly the same
+    setting — keeping both in one file is what stops them drifting apart. Without it,
+    every error in a deployment that installed requirements-optional.txt (where the
+    hook always imports) would call into an uninitialized client.
+    """
+    if sentry_sdk is None or not settings.SENTRY_DSN:
         return
     report_context = {"where": where}
     if context:
