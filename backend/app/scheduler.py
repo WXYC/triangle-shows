@@ -12,12 +12,14 @@ Requires: ENABLE_SCHEDULER env var (via config.py), app.scrapers.manager.ScrapeM
 import logging
 from datetime import datetime, timedelta
 
+from apscheduler.events import EVENT_JOB_ERROR, EVENT_JOB_MISSED
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from sqlalchemy import delete
 
 from app.database import async_session
 from app.models import Event
+from app.observability import report_error
 from app.scrapers.manager import ScrapeManager
 from app.site_config import load_site_config
 
@@ -69,6 +71,31 @@ async def cleanup_past_events_job():
         logger.info(f"Deleted {result.rowcount} past events")
 
 
+# --- Error/missed-job reporting ---
+
+def _job_listener(event) -> None:
+    """Route APScheduler's own job events through the error-capture funnel.
+
+    Two branches, deliberately not the same path: EVENT_JOB_ERROR carries a real
+    exception, so it goes to report_error. EVENT_JOB_MISSED does not — verified in
+    the installed apscheduler package, executors/base.py builds the missed event as
+    ``JobExecutionEvent(EVENT_JOB_MISSED, job.id, jobstore_alias, run_time)``, four
+    positional args against a signature whose ``exception``/``traceback`` default to
+    None. Passing that None into report_error would call
+    ``logger.error(exc_info=None)`` and (via sentry_hook) ``capture_exception(None)``,
+    and the latter falls back to ``sys.exc_info()`` — misattributing an unrelated
+    in-flight exception to a missed job, or reporting nothing. A missed job is a
+    scheduling problem (the job didn't run at all), not a crash, so it takes its own
+    WARNING path carrying the job id and scheduled time instead.
+    """
+    if event.code == EVENT_JOB_ERROR:
+        report_error(event.exception, where="scheduler.job_error", context={"job_id": event.job_id})
+    elif event.code == EVENT_JOB_MISSED:
+        logger.warning(
+            "Job %s missed its scheduled run at %s", event.job_id, event.scheduled_run_time
+        )
+
+
 # --- Scheduler configuration ---
 
 def configure_scheduler():
@@ -79,6 +106,15 @@ def configure_scheduler():
     IANA id "US/Eastern" used to hardcode (same zone; the alias is converged to
     its canonical form, behavior-identical — region-pack epic decision 10).
     """
+    # remove_listener is silent when absent, so this pair is idempotent like every
+    # add_job beside it (replace_existing=True, "safe to call multiple times, e.g.
+    # on hot reload"). add_listener itself just appends with no dedupe, so without
+    # this a naive call would stack one listener per configure_scheduler() call —
+    # and per test that calls it — making "exactly one report_error" assertions
+    # order- and xdist-shard-dependent.
+    scheduler.remove_listener(_job_listener)
+    scheduler.add_listener(_job_listener, EVENT_JOB_ERROR | EVENT_JOB_MISSED)
+
     tz = load_site_config().site.timezone
 
     # Ticketmaster: 6 AM + 6 PM local

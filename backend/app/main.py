@@ -17,11 +17,13 @@ from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.config import settings
 from app.database import async_session
-from app.redaction import RedactingFormatter
+from app.observability import flush_errors, init_error_tracking, report_error
+from app.redaction import RedactingFormatter, redact_credentials
 from app.seed import seed_venues
 from app.scheduler import scheduler, configure_scheduler
 from app.site_config import load_site_config
@@ -94,7 +96,7 @@ async def _startup_scrape():
         logger.info("Startup scrape: complete")
     except Exception as e:
         # Non-fatal: the API should still serve cached data even if the scrape fails
-        logger.warning(f"Startup scrape failed: {e}")
+        report_error(e, where="main._startup_scrape")
 
 
 # --- Lifespan (startup / shutdown) ---
@@ -104,29 +106,40 @@ async def lifespan(app: FastAPI):
     """Startup and shutdown logic."""
     logger.info(f"Starting {_site.name} API...")
 
-    # Apply any pending Alembic migrations — creates tables on fresh DBs, updates schema on existing ones
-    await asyncio.to_thread(_run_migrations)
-    logger.info("Migrations applied")
+    try:
+        # Apply any pending Alembic migrations — creates tables on fresh DBs, updates schema on existing ones
+        await asyncio.to_thread(_run_migrations)
+        logger.info("Migrations applied")
 
-    # Seed venues
-    await seed_venues()
-    logger.info("Venues seeded")
+        # Seed venues
+        await seed_venues()
+        logger.info("Venues seeded")
 
-    # Kick off a scrape immediately in the background (skipped when RUN_STARTUP_SCRAPE
-    # is false, e.g. under tests or when seeding data manually). The Task is kept on
-    # app.state because the event loop holds only a weak reference — an unreferenced
-    # task can be garbage-collected mid-scrape.
-    if settings.RUN_STARTUP_SCRAPE:
-        app.state.startup_scrape_task = asyncio.create_task(_startup_scrape())
-        logger.info("Startup scrape scheduled")
-    else:
-        logger.info("Startup scrape disabled (RUN_STARTUP_SCRAPE=false)")
+        # Kick off a scrape immediately in the background (skipped when RUN_STARTUP_SCRAPE
+        # is false, e.g. under tests or when seeding data manually). The Task is kept on
+        # app.state because the event loop holds only a weak reference — an unreferenced
+        # task can be garbage-collected mid-scrape.
+        if settings.RUN_STARTUP_SCRAPE:
+            app.state.startup_scrape_task = asyncio.create_task(_startup_scrape())
+            logger.info("Startup scrape scheduled")
+        else:
+            logger.info("Startup scrape disabled (RUN_STARTUP_SCRAPE=false)")
 
-    # Start scheduler if enabled
-    if settings.ENABLE_SCHEDULER:
-        configure_scheduler()
-        scheduler.start()
-        logger.info("Scheduler started")
+        # Start scheduler if enabled
+        if settings.ENABLE_SCHEDULER:
+            configure_scheduler()
+            scheduler.start()
+            logger.info("Scheduler started")
+    except Exception as e:
+        # Migrations and seed_venues are unguarded above on purpose: a failure here
+        # is fatal and must crash-loop the container, not limp along on an empty or
+        # stale database. What was missing was the signal — this makes the crash
+        # loud instead of silent. flush_errors() matters because re-raising exits
+        # uvicorn immediately after; a buffered tracker event would never ship
+        # otherwise.
+        report_error(e, where="main.lifespan.startup")
+        flush_errors()
+        raise
 
     yield
 
@@ -153,6 +166,15 @@ async def lifespan(app: FastAPI):
 # fail-fast (region-pack epic decision 5): importing app.main dies immediately on
 # a malformed or missing site.toml, same as any deploy that imports this module.
 _site = load_site_config().site
+
+# Before app construction, not in the lifespan: Starlette builds the middleware
+# stack lazily inside Starlette.__call__ (the lifespan scope is itself a pass
+# through __call__), so by the time the lifespan body ran the stack would already
+# exist and Sentry's FastAPI/Starlette integration patching would land too late to
+# enrich it. This also runs before `app` exists, which is when the equivalent
+# class-level route-handler patching wants to happen. A no-op with no SENTRY_DSN
+# set (the test environment), so sentry_sdk.init never runs under pytest.
+init_error_tracking()
 
 app = FastAPI(
     title=f"{_site.name} API",
@@ -201,8 +223,28 @@ async def trigger_scrape(scraper_type: str = None):
                 results = await manager.scrape_all()
             return {"results": results}
     except Exception as e:
-        logger.error(f"[trigger_scrape] Unhandled error: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        report_error(e, where="main.trigger_scrape")
+        # This endpoint is unauthenticated, and failures here happen *outside*
+        # scrape_venue (session construction, a scraper import) — before manager's
+        # own redaction runs — so this catch-all must scrub independently rather
+        # than rely on the per-venue result dict's redaction.
+        raise HTTPException(status_code=500, detail=redact_credentials(str(e)))
+
+
+async def _unhandled_exception_handler(request, exc: Exception):
+    """Catch every otherwise-unhandled request exception so it is captured instead
+    of just becoming a 500 and a uvicorn log line. Registered for bare Exception,
+    leaving Starlette's own HTTPException handling untouched.
+
+    The response body is a fixed, opaque message — never str(exc). This handler is
+    a response sink on *every* route; echoing the exception would turn the
+    credential leak trigger_scrape used to have (see above) into an every-route one.
+    """
+    report_error(exc, where="main.unhandled_exception", context={"path": str(request.url.path)})
+    return JSONResponse({"detail": "Internal Server Error"}, status_code=500)
+
+
+app.add_exception_handler(Exception, _unhandled_exception_handler)
 
 
 # --- Static file serving ---

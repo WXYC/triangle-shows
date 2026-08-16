@@ -6,3 +6,12 @@
 pytest==8.3.4
 pytest-asyncio==0.25.0
 pytest-xdist==3.6.1
+
+# Pinned directly here, not via `-r requirements-optional.txt`: pip hard-fails on a
+# -r pointing at a missing file, so if that were the mechanism, a fork performing
+# the two-deletion opt-out (see requirements-optional.txt) could no longer run this
+# file at all — breaking `pytest`, the only local gate. Keep this version in sync
+# with requirements-optional.txt. Because it lives here too, sentry_sdk is still
+# installed after the opt-out, which is why tests/test_sentry_hook.py's skip guard
+# is `pytest.importorskip("app.sentry_hook")` and not the SDK alone.
+sentry-sdk==2.68.0
