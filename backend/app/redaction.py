@@ -1,9 +1,11 @@
 """Scrub credential-bearing query parameters out of text before it leaves the process.
 
-Role: shared by the three sinks a request URL can escape through — the logging
-formatter installed in ``app.main.configure_logging`` (covering both messages and
-exception tracebacks), and the two non-logging sinks in
-``app.scrapers.manager.scrape_venue``: the ``scrape_logs.error_message`` column and
+Role: shared by every sink a request URL can escape through — the logging formatter
+installed in ``app.main.configure_logging`` (covering both messages and exception
+tracebacks), the same function's wrapping of *uvicorn's own* handlers via
+:func:`redact_handler` (uvicorn logs unhandled-request tracebacks on a logger with
+``propagate=False``, which no root handler ever sees), and the two non-logging sinks
+in ``app.scrapers.manager.scrape_venue``: the ``scrape_logs.error_message`` column and
 the error body returned by ``POST /api/scrape``, which is unauthenticated.
 
 Why this exists: the Ticketmaster Discovery API authenticates with a query parameter
@@ -89,3 +91,34 @@ class RedactingFormatter(logging.Formatter):
 
     def format(self, record: logging.LogRecord) -> str:
         return redact_credentials(super().format(record))
+
+
+class _WrappedRedactingFormatter(logging.Formatter):
+    """Scrubs whatever another formatter rendered, preserving that formatter's layout.
+
+    Used for handlers this codebase does not own — uvicorn installs its own
+    ``DefaultFormatter``/``AccessFormatter`` on its own handlers, and replacing them
+    outright with :class:`RedactingFormatter` would silently change the shape of the
+    server's log lines (the access log in particular renders from record *args*, not
+    from a plain ``%(message)s``). Wrapping keeps their output byte-identical apart
+    from the credential values.
+    """
+
+    def __init__(self, inner: logging.Formatter) -> None:
+        super().__init__()
+        self._inner = inner
+
+    def format(self, record: logging.LogRecord) -> str:
+        return redact_credentials(self._inner.format(record))
+
+
+def redact_handler(handler: logging.Handler) -> None:
+    """Ensure `handler` scrubs credentials, leaving its existing format alone.
+
+    Idempotent: a handler already carrying either redacting formatter is left as-is,
+    so repeated ``configure_logging()`` calls (import, then a test) don't nest wrappers.
+    """
+    existing = handler.formatter
+    if isinstance(existing, (RedactingFormatter, _WrappedRedactingFormatter)):
+        return
+    handler.setFormatter(_WrappedRedactingFormatter(existing or logging.Formatter()))

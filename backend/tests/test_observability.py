@@ -42,6 +42,7 @@ class TestReportError:
 
     def test_forwards_to_the_tracker_hook_when_present(self, monkeypatch):
         calls = []
+        monkeypatch.setattr(settings, "SENTRY_DSN", "https://public@o0.ingest.sentry.io/1")
         monkeypatch.setattr(
             observability,
             "sentry_hook",
@@ -56,6 +57,27 @@ class TestReportError:
         assert forwarded_exc is exc
         assert kwargs["where"] == "test.forward"
         assert kwargs["context"] == {"venue": "red-hat"}
+
+    def test_does_not_forward_when_the_dsn_is_empty(self, monkeypatch, caplog):
+        """The hook imports whenever app/sentry_hook.py exists — which, wherever
+        requirements-optional.txt was installed, is always — so presence of the hook
+        cannot be the only gate, or every error on the always-on tier would call into
+        an uninitialized client. Tier 1 must not depend on a third party's no-op
+        staying a no-op.
+        """
+        caplog.set_level(logging.ERROR, logger="app.observability")
+        calls = []
+        monkeypatch.setattr(settings, "SENTRY_DSN", "")
+        monkeypatch.setattr(
+            observability,
+            "sentry_hook",
+            SimpleNamespace(capture_exception=lambda exc, **kw: calls.append((exc, kw))),
+        )
+
+        observability.report_error(ValueError("boom"), where="test.no_dsn")
+
+        assert calls == []
+        assert "test.no_dsn" in caplog.text, "tier 1 must still log unconditionally"
 
     def test_works_when_the_tracker_hook_is_absent(self, monkeypatch, caplog):
         """Simulates the two-deletion opt-out: app/sentry_hook.py deleted, so
@@ -365,3 +387,70 @@ class TestUnhandledExceptionCapturePoint:
         assert response.json() == {"detail": "Internal Server Error"}
         assert len(reported) == 1
         assert isinstance(reported[0][0], RuntimeError)
+
+    async def test_the_client_still_gets_its_500_when_the_funnel_itself_raises(self, monkeypatch):
+        """Starlette invokes this handler *before* sending the response, so a raising
+        report_error would cost the client its 500 entirely (a dropped connection)
+        and replace the original exception in the log with the reporting one.
+        Capturing an error must never be the reason a response is lost.
+        """
+
+        def _exploding_report_error(exc, **kw):
+            raise RuntimeError("the tracker transport is wedged")
+
+        monkeypatch.setattr(app_main, "report_error", _exploding_report_error)
+
+        async def _boom():
+            raise RuntimeError("kaboom")
+
+        route = APIRoute("/__test_funnel_itself_raises__", _boom, methods=["GET"])
+        app_main.app.router.routes.insert(0, route)
+
+        try:
+            transport = ASGITransport(app=app_main.app, raise_app_exceptions=False)
+            async with AsyncClient(transport=transport, base_url="http://testserver") as http_client:
+                response = await http_client.get("/__test_funnel_itself_raises__")
+        finally:
+            app_main.app.router.routes.remove(route)
+
+        assert response.status_code == 500
+        assert response.json() == {"detail": "Internal Server Error"}
+
+
+# --- Capture point: api/feeds.py::record_feed_fetch ------------------------------
+
+
+class TestFeedTelemetryCapturePoint:
+    async def test_a_telemetry_write_failure_is_reported_not_swallowed(
+        self, session, monkeypatch
+    ):
+        """record_feed_fetch used to swallow into a bare logger.warning with no stack
+        trace — the same shape as the six points this issue consolidated. Telemetry
+        failing silently is how you end up trusting an empty table. Still non-fatal:
+        the caller's feed response must be unaffected.
+        """
+        from app.api import feeds
+        from fastapi import Request
+
+        monkeypatch.setattr(settings, "TELEMETRY_SALT", "a-salt")
+
+        async def _failing_commit():
+            raise RuntimeError("feed_fetches insert failed")
+
+        monkeypatch.setattr(session, "commit", _failing_commit)
+
+        reported = []
+        monkeypatch.setattr(
+            "app.api.feeds.report_error", lambda exc, **kw: reported.append((exc, kw))
+        )
+
+        request = Request(
+            {"type": "http", "headers": [(b"user-agent", b"test-agent")], "client": ("1.2.3.4", 0)}
+        )
+
+        await feeds.record_feed_fetch(session, request, None)  # must not raise
+
+        assert len(reported) == 1
+        exc, kwargs = reported[0]
+        assert isinstance(exc, RuntimeError)
+        assert kwargs["where"] == "api.feeds.record_feed_fetch"

@@ -57,9 +57,15 @@ def report_error(exc: BaseException, *, where: str, context: Optional[dict] = No
     `where` identifies the capture point (e.g. "main.lifespan.startup",
     "scheduler.job_error") for triage; `context` is optional structured detail
     (e.g. {"job_id": ...}) attached to the tracker event when present.
+
+    The forward is gated on SENTRY_DSN as well as the hook's presence. The hook
+    imports whenever the file exists — which, in any deployment that installed
+    requirements-optional.txt, is always — so without the DSN check every error would
+    call into an uninitialized client. That is a no-op today, but it makes the error
+    path depend on a third party's no-op staying a no-op; tier 1 must not.
     """
     logger.error("[%s] %s", where, exc, exc_info=exc)
-    if sentry_hook is not None:
+    if sentry_hook is not None and settings.SENTRY_DSN:
         sentry_hook.capture_exception(exc, where=where, context=context)
 
 

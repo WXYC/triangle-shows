@@ -23,7 +23,7 @@ from fastapi.staticfiles import StaticFiles
 from app.config import settings
 from app.database import async_session
 from app.observability import flush_errors, init_error_tracking, report_error
-from app.redaction import RedactingFormatter, redact_credentials
+from app.redaction import RedactingFormatter, redact_credentials, redact_handler
 from app.seed import seed_venues
 from app.scheduler import scheduler, configure_scheduler
 from app.site_config import load_site_config
@@ -48,15 +48,30 @@ def configure_logging() -> None:
       the values out of anything else that renders a URL — including the exception
       tracebacks the httpx pin cannot reach, since ``httpx.HTTPStatusError`` carries the
       request URL in its own message regardless of the logger's level.
+    * uvicorn's *own* handlers get the same treatment via
+      :func:`~app.redaction.redact_handler`. Root handlers alone are not enough: the
+      ``uvicorn`` logger is configured with ``propagate=False`` and its own handler, so
+      nothing it logs ever reaches a root handler. That matters because Starlette's
+      ``ServerErrorMiddleware`` always re-raises after invoking the bare-``Exception``
+      handler, and uvicorn then logs the full traceback itself on ``uvicorn.error`` — so
+      an ``httpx.HTTPStatusError`` escaping any route would otherwise write a live
+      ``?apikey=`` to the log stream unredacted. ``redact_handler`` *wraps* uvicorn's
+      formatters rather than replacing them, so its log lines keep their existing shape.
 
     Called at import so configuration is in place before any other module logs, and
     exposed as a function so tests can assert on it without importing for its side
-    effects alone.
+    effects alone. uvicorn builds its logging config in ``Config.__init__``, before it
+    imports the app, so its handlers already exist by the time this runs under a real
+    server; the loop simply finds nothing under pytest or a bare interpreter.
     """
     logging.basicConfig(level=getattr(logging, settings.LOG_LEVEL), format=LOG_FORMAT)
 
     for handler in logging.getLogger().handlers:
         handler.setFormatter(RedactingFormatter(LOG_FORMAT))
+
+    for logger_name in ("uvicorn", "uvicorn.error", "uvicorn.access"):
+        for handler in logging.getLogger(logger_name).handlers:
+            redact_handler(handler)
 
     logging.getLogger("httpx").setLevel(logging.WARNING)
 
@@ -239,8 +254,18 @@ async def _unhandled_exception_handler(request, exc: Exception):
     The response body is a fixed, opaque message — never str(exc). This handler is
     a response sink on *every* route; echoing the exception would turn the
     credential leak trigger_scrape used to have (see above) into an every-route one.
+
+    report_error is guarded because Starlette invokes this handler *before* sending
+    the response (ServerErrorMiddleware: handler first, then `if not response_started`).
+    A raising funnel — a wedged tracker transport, a formatter blowing up on a weird
+    payload — would therefore cost the client its 500 entirely and replace the original
+    exception in the log with the reporting one. Capturing errors must never be the
+    reason a response is lost.
     """
-    report_error(exc, where="main.unhandled_exception", context={"path": str(request.url.path)})
+    try:
+        report_error(exc, where="main.unhandled_exception", context={"path": str(request.url.path)})
+    except Exception:
+        logger.exception("[main.unhandled_exception] error capture itself failed")
     return JSONResponse({"detail": "Internal Server Error"}, status_code=500)
 
 

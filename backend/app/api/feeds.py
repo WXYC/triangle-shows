@@ -29,6 +29,7 @@ from app.api.common import market_tz, split_csv, today_in_market
 from app.config import settings
 from app.database import get_session
 from app.models import FeedFetch
+from app.observability import report_error
 from app.services.events_query import query_events
 from app.site_config import load_site_config
 
@@ -121,7 +122,12 @@ async def record_feed_fetch(
         await session.commit()
     except Exception as exc:
         await session.rollback()
-        logger.warning(f"Failed to record feed fetch telemetry: {exc}")
+        # Through the funnel, not a bare logger.warning: this is the same "swallowed
+        # into a level that nobody reads, with no stack trace" shape as the six points
+        # issue #118 consolidated, and telemetry failing silently is how you end up
+        # trusting an empty table. Still non-fatal — the caller's feed response is
+        # unaffected either way, which is what the rollback above preserves.
+        report_error(exc, where="api.feeds.record_feed_fetch")
 
 
 # --- iCal feed endpoint ---

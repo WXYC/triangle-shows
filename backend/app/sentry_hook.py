@@ -128,8 +128,16 @@ def capture_exception(exc: BaseException, *, where: str, context: dict | None = 
     report_context = {"where": where}
     if context:
         report_context.update(context)
-    sentry_sdk.set_context("report_error", report_context)
-    sentry_sdk.capture_exception(exc)
+    # new_scope(), not the module-level sentry_sdk.set_context(): the latter writes to
+    # the *isolation* scope, which outlives the capture. Requests fork their own
+    # isolation scope, but startup, the background startup scrape, and every scheduler
+    # job share one long-lived scope for the process's lifetime — so a `where` and
+    # `job_id` set there would stay attached and ride unrelated later events,
+    # misattributing them exactly when someone is triaging an incident. new_scope()
+    # forks for the duration of the with-block and discards on exit.
+    with sentry_sdk.new_scope() as scope:
+        scope.set_context("report_error", report_context)
+        sentry_sdk.capture_exception(exc)
 
 
 def flush() -> None:

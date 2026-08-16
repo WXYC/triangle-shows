@@ -286,3 +286,32 @@ class TestExactlyOneEvent:
 
         sentry_sdk.flush()
         assert len(sentry_transport.events) == 1
+
+
+# --- Scope isolation ---------------------------------------------------------------
+
+
+class TestCaptureExceptionScopeIsolation:
+    def test_context_does_not_ride_along_on_later_unrelated_events(self, sentry_transport):
+        """capture_exception must fork a scope rather than write to the isolation scope.
+
+        sentry_sdk.set_context() targets the *isolation* scope, which outlives the
+        capture. Requests fork their own, but startup, the background startup scrape,
+        and every scheduler job share one isolation scope for the process's lifetime —
+        so a `where`/`job_id` written there stays attached and misattributes later
+        events, exactly when someone is triaging an incident.
+        """
+        sentry_hook.capture_exception(
+            ValueError("the scheduled job failed"),
+            where="scheduler.job_error",
+            context={"job_id": "scrape_indie"},
+        )
+        sentry_sdk.capture_exception(ValueError("something else entirely"))
+        sentry_sdk.flush()
+
+        assert len(sentry_transport.events) == 2
+        first, second = sentry_transport.events
+        assert first["contexts"]["report_error"]["where"] == "scheduler.job_error"
+        assert "report_error" not in second.get("contexts", {}), (
+            "stale context leaked onto an unrelated later event"
+        )
