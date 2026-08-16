@@ -73,15 +73,23 @@ The API comes up on http://localhost:8000, with the auto-generated OpenAPI docs 
 
 ## Credentials in request URLs
 
-The Ticketmaster Discovery API authenticates with a query parameter (`?apikey=`) rather than a header, so every request URL the Ticketmaster scraper builds *is* a live credential. Three sinks would otherwise carry it out of the process, and closing one leaves the others open:
+The Ticketmaster Discovery API authenticates with a query parameter (`?apikey=`) rather than a header, so every request URL the Ticketmaster scraper builds *is* a live credential. Several sinks would otherwise carry it (or another credential-bearing string) out of the process, and closing one leaves the others open:
 
 | Sink | Closed by |
 |---|---|
 | `httpx` logs every request at INFO with the full query string | `app.main.configure_logging` pins the `httpx` logger to WARNING |
 | `httpx.HTTPStatusError` embeds the URL in `str(e)`, which is logged on a failed scrape | `RedactingFormatter` on every root handler (covers exception tracebacks too) |
-| That same string is persisted to `scrape_logs.error_message` and returned by `POST /api/scrape`, which is unauthenticated | `manager.scrape_venue` redacts once, before all three uses |
+| That same string is persisted to `scrape_logs.error_message` and returned in the per-venue result dict | `manager.scrape_venue` redacts once, before all three uses |
+| `POST /api/scrape`'s catch-all (unauthenticated) also returns `detail=str(e)`, but on failures *outside* `scrape_venue` — session construction, a scraper import — that never pass through its redaction | `main.trigger_scrape` redacts independently, in its own `except` block |
+| A future scrape-health digest embeds `ScrapeLog.error_message` in the text posted to a chat webhook | `app.observability.send_alert` redacts again at the sink — `redact_credentials` is idempotent, so double-scrubbing here is free |
 
 `app/redaction.py::redact_credentials` is the shared helper. It is a **denylist** of parameter names and therefore never complete — a new scraper authenticating with an unlisted parameter needs an entry there and a case in the parametrized test in `tests/test_redaction.py`, not a nearby entry that happens to look similar. Only the value is removed, so a redacted URL still says which venue was being fetched.
+
+Note that `send_alert`'s *own* failure path (the webhook POST itself failing) is deliberately not run through `redact_credentials` at all: the webhook URL's secret lives in the URL **path** (`hooks.slack.com/services/T.../B.../<secret>`), which a query-parameter denylist cannot scrub, and `httpx.HTTPStatusError.__str__` embeds the full URL. That failure path logs only the exception's type name and, when present, the HTTP status code — see `app/observability.py`.
+
+## Internal error capture
+
+Six points where an exception used to be silently swallowed, crash-loop the container with no signal, or vanish into a third-party logger now route through one funnel: `app/observability.py`. `report_error(exc, where=..., context=None)` logs at `ERROR` with a stack trace (always, no configuration) and forwards to an optional exception tracker; `send_alert(text)` posts to `ALERT_WEBHOOK_URL` (currently only wired to the scrape-health digest, not yet shipped) or logs when it's unset. `app/main.py` and `app/scheduler.py` call only these four functions (`report_error`, `send_alert`, `flush_errors`, `init_error_tracking`) — never the tracker SDK directly — so the entire tracker integration lives in one deletable file, `app/sentry_hook.py`, guarded by a `try/except ImportError`. Deleting that file plus `backend/requirements-optional.txt` is a complete opt-out: the Docker image still builds, `pip install -r requirements-dev.txt` still works, and `pytest` still passes with the tracker-specific tests (`tests/test_sentry_hook.py`) skipped rather than erroring.
 
 ## Tests
 
