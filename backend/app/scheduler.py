@@ -17,6 +17,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from sqlalchemy import delete
 
+from app.cadence import cron_hour_string
 from app.database import async_session
 from app.models import Event
 from app.observability import report_error
@@ -105,6 +106,11 @@ def configure_scheduler():
     not a fixed literal — Triangle's pack pins "America/New_York", the canonical
     IANA id "US/Eastern" used to hardcode (same zone; the alias is converged to
     its canonical form, behavior-identical — region-pack epic decision 10).
+
+    The hour values themselves come from app.cadence (issue #86 part 1) rather than
+    a literal here, since the scrape-health evaluator needs the identical table to
+    derive its staleness threshold — a second hardcoded copy could drift and produce
+    false staleness alarms.
     """
     # remove_listener is silent when absent, so this pair is idempotent like every
     # add_job beside it (replace_existing=True, "safe to call multiple times, e.g.
@@ -120,7 +126,7 @@ def configure_scheduler():
     # Ticketmaster: 6 AM + 6 PM local
     scheduler.add_job(
         scrape_ticketmaster_job,
-        CronTrigger(hour="6,18", timezone=tz),
+        CronTrigger(hour=cron_hour_string("ticketmaster"), timezone=tz),
         id="scrape_ticketmaster",
         replace_existing=True,  # safe to call multiple times (e.g., on hot reload)
     )
@@ -128,7 +134,7 @@ def configure_scheduler():
     # Indie venues: 6 AM + 12 PM + 6 PM local
     scheduler.add_job(
         scrape_indie_job,
-        CronTrigger(hour="6,12,18", timezone=tz),
+        CronTrigger(hour=cron_hour_string("indie"), timezone=tz),
         id="scrape_indie",
         replace_existing=True,
     )
