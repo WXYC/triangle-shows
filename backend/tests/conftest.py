@@ -64,6 +64,15 @@ os.environ.setdefault("ENABLE_SCHEDULER", "false")
 # (app.api.feeds.record_feed_fetch no-ops when this is empty). Tests that need the
 # unsalted behavior monkeypatch settings.TELEMETRY_SALT themselves.
 os.environ.setdefault("TELEMETRY_SALT", "test-telemetry-salt")
+# Unconditional, unlike the setdefault block above: these are safety rails in the
+# mold of DATABASE_URL two lines up, not behavior toggles a developer may
+# legitimately flip. Settings reads backend/.env, and app.main is imported below,
+# so a shell-exported SENTRY_DSN — exactly what someone debugging the Sentry
+# integration would have set — would survive setdefault and make the whole suite
+# initialize the tracker at import and ship live events. Tests that need a DSN set
+# it themselves via monkeypatch, with an explicit teardown (see test_observability.py).
+os.environ["SENTRY_DSN"] = ""
+os.environ["ALERT_WEBHOOK_URL"] = ""
 
 import pytest  # noqa: E402
 import pytest_asyncio  # noqa: E402
