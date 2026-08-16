@@ -8,6 +8,13 @@ with the migration that creates it (migration 0004 / uq_events_venue_source_key)
 the test harness builds schema from Base.metadata.create_all, never Alembic, so a
 migration-only index would exist in no test database.
 
+Also drops the single-column ix_scrape_logs_venue_id (created by migration 0001):
+the new composite covers venue_id as its leading column, so the old index is dead
+weight on an append-only table. downgrade() recreates it BY NAME — migration 0001
+created it under that exact name, and this repo runs migrations in-process at
+container boot (main.py), so a downgrade that can't reproduce the original name is
+a production problem, not a cosmetic one.
+
 Requires: A live PostgreSQL database reachable via DATABASE_URL.
 """
 
@@ -21,6 +28,7 @@ depends_on = None
 
 
 def upgrade() -> None:
+    op.drop_index('ix_scrape_logs_venue_id', table_name='scrape_logs')
     op.create_index(
         'ix_scrape_logs_venue_id_started_at',
         'scrape_logs',
@@ -30,3 +38,4 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.drop_index('ix_scrape_logs_venue_id_started_at', table_name='scrape_logs')
+    op.create_index('ix_scrape_logs_venue_id', 'scrape_logs', ['venue_id'])
