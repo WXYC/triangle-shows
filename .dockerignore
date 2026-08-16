@@ -1,0 +1,10 @@
+# Dockerfile does `COPY backend/ .`, so without this, a local `docker build` bakes
+# backend/.env (TICKETMASTER_API_KEY and, after issue #118, a real SENTRY_DSN) plus
+# a macOS-built virtualenv into the image. Production is unaffected — Railway
+# builds from GitHub, where .env is gitignored — but this matters for local
+# rebuilds and the two-deletion opt-out verification (see backend/README.md).
+**/.env
+**/.venv/
+**/__pycache__/
+*.pyc
+**/.pytest_cache/
