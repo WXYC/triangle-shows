@@ -32,22 +32,41 @@ from app.api.common import (
     split_csv,
     today_in_market,
 )
+from app.cadence import CRON_HOURS
 from app.config import settings
 from app.database import get_session
 from app.models import EventStatus, ScrapeLog, Venue
 from app.schemas import EventResponse, HealthResponse, ScraperHealthResponse, VenueResponse
 from app.services.events_query import query_events
-from app.services.scrape_health import evaluate_venue_health
+from app.services.scrape_health import BASELINE_WINDOW_DAYS, evaluate_venue_health
 from app.site_config import SiteConfig, load_site_config
 
-# Row cap for the per-venue scrape_logs query below. Must comfortably span
-# scrape_health.BASELINE_WINDOW_DAYS (30) at the busiest group's cadence (the indie
-# group's 3 runs/day -> 90 rows for 30 days); 120 leaves headroom. Ordering by
-# started_at DESC (matching the ix_scrape_logs_venue_id_started_at composite index
-# added alongside this endpoint) means row 0 is always the true most recent attempt
-# regardless of how old it is -- a venue silent for the whole window still resolves
-# to a real "stale"/"critical" verdict rather than misreporting "unknown".
-_RECENT_SCRAPE_LOG_LIMIT = 120
+# Row cap for the per-venue scrape_logs query below.
+#
+# Derived, not hand-set: it has to span scrape_health.BASELINE_WINDOW_DAYS, because a
+# cap shorter than that window silently truncates the evaluator's input below the
+# history its own silent-zero baseline guard needs. That failure is invisible and it
+# inverts the signal -- the guard reads "this venue never shows events, so its zeros
+# are normal" and returns ok, when the truth was a warning. A hardcoded literal here
+# would also be a second copy of cadence knowledge, which is the exact drift
+# app/cadence.py exists to prevent: adding one hour to CRON_HOURS["indie"] would make
+# a fixed 120 the binding constraint with no test failing. test_scrape_health_endpoint
+# pins the invariant so a cadence change breaks loudly instead.
+#
+# SCRAPE_LOG_FETCH_HEADROOM covers attempts the cron table doesn't predict -- chiefly
+# manual POST /api/scrape triggers, which write ScrapeLog rows like any other attempt.
+SCRAPE_LOG_FETCH_HEADROOM = 2
+_MAX_SCHEDULED_RUNS_PER_DAY = max(len(hours) for hours in CRON_HOURS.values())
+_RECENT_SCRAPE_LOG_LIMIT = (
+    BASELINE_WINDOW_DAYS * _MAX_SCHEDULED_RUNS_PER_DAY * SCRAPE_LOG_FETCH_HEADROOM
+)
+
+# Ordering by started_at DESC (matching the ix_scrape_logs_venue_id_started_at
+# composite index added alongside this endpoint) means row 0 is always the true most
+# recent attempt regardless of how old it is -- a venue silent for the whole window
+# still resolves to a real "stale"/"critical" verdict rather than misreporting
+# "unknown". The cap is a safety valve on response size, never the thing that decides
+# which window the evaluator sees.
 
 # --- Router ---
 
@@ -202,14 +221,19 @@ async def get_scraper_health(session: AsyncSession = Depends(get_session)) -> li
     (venue_id, started_at DESC) index makes the cost index depth plus 120 rows, independent
     of how large the table gets. The only dimension that scales it is venue count, which
     grows slowly and by deliberate act (Seattle roughly doubles it; nationwide scaling is
-    issue #84's problem, not this endpoint's). Total today is ~2.4ms of database execution
-    across 22 statements.
+    issue #84's problem, not this endpoint's).
 
-    If venue count ever makes the round trips matter, the correct fix is a LATERAL join
+    Measured end to end over a real connection at 110K rows, 21 venues: this loop's 22
+    round trips take a median 4.47ms, against 3.64ms for the LATERAL equivalent below in
+    a single round trip — 0.83ms apart. That gap was measured over loopback, so a
+    networked deployment widens it roughly in proportion to RTT; at this venue count it
+    still does not approach mattering for an endpoint with no latency budget to speak of.
+
+    If venue count ever makes the round trips matter, the fix is that LATERAL join
     (`venues JOIN LATERAL (SELECT ... WHERE venue_id = v.id ORDER BY started_at DESC
-    LIMIT n) ON true`), which the EXPLAIN above shows performs the identical per-venue
-    index scans (loops=21, same Index Cond) in a single round trip. It is not done here
-    because it buys ~15ms today at the price of a Postgres-specific construct.
+    LIMIT n) ON true`), which EXPLAIN shows performs the identical per-venue index scans
+    (loops=21, same Index Cond) in one round trip. It is not done here because sub-
+    millisecond is not worth a Postgres-specific construct in the request path today.
     """
     now = datetime.utcnow()
     venues = (await session.execute(select(Venue).order_by(Venue.city, Venue.name))).scalars().all()

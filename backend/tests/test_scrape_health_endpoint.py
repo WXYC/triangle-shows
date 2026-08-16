@@ -12,6 +12,55 @@ from datetime import datetime, timedelta
 from app.models import ScrapeLog
 
 
+async def test_a_high_frequency_venue_still_sees_its_silent_zero_baseline(
+    client, session, make_venue
+):
+    """The endpoint caps how many ScrapeLog rows it hands the evaluator. If that cap
+    spans less wall-clock time than the evaluator's BASELINE_WINDOW_DAYS guard, it
+    truncates the input below the history the guard needs -- and the resulting failure
+    is silent and *inverted*: the guard concludes "this venue never shows events, so
+    its zeros are normal" and reports ok, when the honest verdict was warning.
+
+    This venue is scraped ~6x/day (scheduled runs plus manual POST /api/scrape
+    triggers, which write ScrapeLog rows like any other attempt), so its recent zeros
+    alone overflow a cap tuned only for the scheduled cadence. Its last healthy scrape
+    is 28 days back -- still inside the 30-day baseline window, and so still the truth
+    the verdict must reflect.
+    """
+    venue = await make_venue(slug="high-frequency")
+    now = datetime.utcnow()
+
+    # ~6 zero-event successes/day for 25 days: 150 rows, all inside the baseline window.
+    for i in range(150):
+        started = now - timedelta(hours=4 * i)
+        session.add(
+            ScrapeLog(
+                venue_id=venue.id, scraper_type=venue.scraper_type, status="success",
+                events_found=0, started_at=started,
+                finished_at=started + timedelta(seconds=5),
+            )
+        )
+    # The baseline: a healthy scrape 28 days ago, within BASELINE_WINDOW_DAYS but
+    # older than a too-small cap would reach.
+    baseline_at = now - timedelta(days=28)
+    session.add(
+        ScrapeLog(
+            venue_id=venue.id, scraper_type=venue.scraper_type, status="success",
+            events_found=9, started_at=baseline_at,
+            finished_at=baseline_at + timedelta(seconds=5),
+        )
+    )
+    await session.commit()
+
+    resp = await client.get("/api/v1/health/scrapers")
+    body = next(v for v in resp.json() if v["venue_slug"] == "high-frequency")
+    assert body["status"] == "warning", (
+        "the row cap truncated the history below the 30-day baseline window, so the "
+        "silent-zero guard saw no normal activity and inverted the verdict to ok"
+    )
+    assert body["signal"] == "silent_zero"
+
+
 async def test_returns_empty_list_on_an_empty_database(client):
     resp = await client.get("/api/v1/health/scrapers")
     assert resp.status_code == 200
