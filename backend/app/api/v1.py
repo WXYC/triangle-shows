@@ -17,10 +17,11 @@ schemas (app.schemas), shared route helpers/handlers (app.api.common), the share
 query service (app.services.events_query).
 """
 
-from datetime import date
+from datetime import date, datetime
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Query
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.common import (
@@ -31,11 +32,22 @@ from app.api.common import (
     split_csv,
     today_in_market,
 )
+from app.config import settings
 from app.database import get_session
-from app.models import EventStatus
-from app.schemas import EventResponse, HealthResponse, VenueResponse
+from app.models import EventStatus, ScrapeLog, Venue
+from app.schemas import EventResponse, HealthResponse, ScraperHealthResponse, VenueResponse
 from app.services.events_query import query_events
+from app.services.scrape_health import evaluate_venue_health
 from app.site_config import SiteConfig, load_site_config
+
+# Row cap for the per-venue scrape_logs query below. Must comfortably span
+# scrape_health.BASELINE_WINDOW_DAYS (30) at the busiest group's cadence (the indie
+# group's 3 runs/day -> 90 rows for 30 days); 120 leaves headroom. Ordering by
+# started_at DESC (matching the ix_scrape_logs_venue_id_started_at composite index
+# added alongside this endpoint) means row 0 is always the true most recent attempt
+# regardless of how old it is -- a venue silent for the whole window still resolves
+# to a real "stale"/"critical" verdict rather than misreporting "unknown".
+_RECENT_SCRAPE_LOG_LIMIT = 120
 
 # --- Router ---
 
@@ -142,3 +154,46 @@ async def get_site() -> SiteConfig:
     Additive to the v1 contract: no existing endpoint's response shape changes.
     """
     return load_site_config()
+
+
+@router.get(
+    "/health/scrapers",
+    response_model=list[ScraperHealthResponse],
+    summary="Per-venue scrape-health verdicts",
+)
+async def get_scraper_health(session: AsyncSession = Depends(get_session)) -> list[ScraperHealthResponse]:
+    """Every venue's current scrape-health verdict (issue #86 part 1: detection and
+    exposure), derived from recent app.models.ScrapeLog history by the pure evaluator
+    in app.services.scrape_health. `ok | warning | critical | unknown`, each with a
+    `signal` tag and a human-readable `detail` — already scrubbed of any embedded
+    query string, since this endpoint is unauthenticated and ScrapeLog.error_message
+    can otherwise carry the Ticketmaster API key.
+
+    Deliberately implemented here rather than in app.api.common: this is an
+    operations surface, not part of the client-agnostic event/venue contract, and it
+    has no deprecated-router twin to share a handler with (see backend/README.md's
+    "API contracts" section — precedent: GET /api/v1/site).
+
+    Staleness (one of the evaluator's three signals) is only meaningful when
+    something is actually scheduled to run it, so this passes
+    settings.ENABLE_SCHEDULER through unchanged rather than assuming True — a
+    freshly-seeded dev database or a region not yet switched on would otherwise
+    report every venue "critical" for having no recent scrapes it was never
+    supposed to have.
+    """
+    now = datetime.utcnow()
+    venues = (await session.execute(select(Venue).order_by(Venue.city, Venue.name))).scalars().all()
+
+    verdicts = []
+    for venue in venues:
+        logs = (
+            await session.execute(
+                select(ScrapeLog)
+                .where(ScrapeLog.venue_id == venue.id, ScrapeLog.started_at <= now)
+                .order_by(ScrapeLog.started_at.desc())
+                .limit(_RECENT_SCRAPE_LOG_LIMIT)
+            )
+        ).scalars().all()
+        verdict = evaluate_venue_health(venue, logs, now=now, evaluate_staleness=settings.ENABLE_SCHEDULER)
+        verdicts.append(ScraperHealthResponse.model_validate(verdict))
+    return verdicts
