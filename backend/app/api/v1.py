@@ -17,7 +17,7 @@ schemas (app.schemas), shared route helpers/handlers (app.api.common), the share
 query service (app.services.events_query).
 """
 
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Query
@@ -43,18 +43,20 @@ from app.site_config import SiteConfig, load_site_config
 
 # Row cap for the per-venue scrape_logs query below.
 #
-# Derived, not hand-set: it has to span scrape_health.BASELINE_WINDOW_DAYS, because a
-# cap shorter than that window silently truncates the evaluator's input below the
-# history its own silent-zero baseline guard needs. That failure is invisible and it
-# inverts the signal -- the guard reads "this venue never shows events, so its zeros
-# are normal" and returns ok, when the truth was a warning. A hardcoded literal here
-# would also be a second copy of cadence knowledge, which is the exact drift
-# app/cadence.py exists to prevent: adding one hour to CRON_HOURS["indie"] would make
-# a fixed 120 the binding constraint with no test failing. test_scrape_health_endpoint
-# pins the invariant so a cadence change breaks loudly instead.
+# Derived from the cadence table rather than hand-set, so it can't become a second
+# copy of cadence knowledge -- the exact drift app/cadence.py exists to prevent, where
+# adding one hour to CRON_HOURS["indie"] would quietly make a fixed literal the
+# binding constraint on how far back the evaluator can see.
 #
-# SCRAPE_LOG_FETCH_HEADROOM covers attempts the cron table doesn't predict -- chiefly
-# manual POST /api/scrape triggers, which write ScrapeLog rows like any other attempt.
+# The cap deliberately does NOT carry the silent-zero baseline guard: no row count can,
+# since unscheduled attempts are unbounded (see the baseline query in the handler).
+# What it does bound is how far back the recency signals and last_success_at can reach,
+# which degrades gracefully -- a too-small cap costs a last_success_at timestamp, not a
+# flipped verdict.
+#
+# SCRAPE_LOG_FETCH_HEADROOM covers attempts the cron table doesn't predict -- the
+# startup scrape on every redeploy, and manual POST /api/scrape triggers, both of which
+# write ScrapeLog rows like any other attempt.
 SCRAPE_LOG_FETCH_HEADROOM = 2
 _MAX_SCHEDULED_RUNS_PER_DAY = max(len(hours) for hours in CRON_HOURS.values())
 _RECENT_SCRAPE_LOG_LIMIT = (
@@ -218,7 +220,7 @@ async def get_scraper_health(session: AsyncSession = Depends(get_session)) -> li
     What this loop costs instead is one round trip per venue, and each of those queries is
     flat under table growth rather than linear: the per-venue index scan measured 0.115ms
     at 11K rows and 0.182ms at 110K — a 10x table for a 1.6x query, since the composite
-    (venue_id, started_at DESC) index makes the cost index depth plus 120 rows, independent
+    (venue_id, started_at DESC) index makes the cost index depth plus the row cap, independent
     of how large the table gets. The only dimension that scales it is venue count, which
     grows slowly and by deliberate act (Seattle roughly doubles it; nationwide scaling is
     issue #84's problem, not this endpoint's).
@@ -238,16 +240,49 @@ async def get_scraper_health(session: AsyncSession = Depends(get_session)) -> li
     now = datetime.utcnow()
     venues = (await session.execute(select(Venue).order_by(Venue.city, Venue.name))).scalars().all()
 
+    baseline_cutoff = now - timedelta(days=BASELINE_WINDOW_DAYS)
+
     verdicts = []
     for venue in venues:
-        logs = (
+        logs = list(
+            (
+                await session.execute(
+                    select(ScrapeLog)
+                    .where(ScrapeLog.venue_id == venue.id, ScrapeLog.started_at <= now)
+                    .order_by(ScrapeLog.started_at.desc())
+                    .limit(_RECENT_SCRAPE_LOG_LIMIT)
+                )
+            ).scalars().all()
+        )
+
+        # The evaluator's silent-zero guard needs the venue's most recent healthy scrape
+        # inside the baseline window, and the row cap above cannot promise to reach it:
+        # unscheduled attempts are unbounded (RUN_STARTUP_SCRAPE writes a full round on
+        # every redeploy, and POST /api/scrape is unauthenticated), so any fixed row
+        # count can be pushed past by churn. Fetch that one row directly instead of
+        # inferring it, because the failure it prevents is the inverted one -- a
+        # truncated history reads as "this venue never shows events, so its zeros are
+        # normal" and reports ok for a venue behind a fresh bot wall.
+        baseline_row = (
             await session.execute(
                 select(ScrapeLog)
-                .where(ScrapeLog.venue_id == venue.id, ScrapeLog.started_at <= now)
+                .where(
+                    ScrapeLog.venue_id == venue.id,
+                    ScrapeLog.status == "success",
+                    ScrapeLog.events_found > 0,
+                    ScrapeLog.started_at >= baseline_cutoff,
+                    ScrapeLog.started_at <= now,
+                )
                 .order_by(ScrapeLog.started_at.desc())
-                .limit(_RECENT_SCRAPE_LOG_LIMIT)
+                .limit(1)
             )
-        ).scalars().all()
+        ).scalars().first()
+        # Identity, not equality: both queries run in one session, so SQLAlchemy's
+        # identity map returns the same object for a row the capped fetch already had.
+        # Appending a duplicate would corrupt the consecutive-window slice.
+        if baseline_row is not None and not any(row is baseline_row for row in logs):
+            logs.append(baseline_row)
+
         verdict = evaluate_venue_health(venue, logs, now=now, evaluate_staleness=settings.ENABLE_SCHEDULER)
         verdicts.append(ScraperHealthResponse.model_validate(verdict))
     return verdicts

@@ -28,7 +28,13 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.drop_index('ix_scrape_logs_venue_id', table_name='scrape_logs')
+    # IF EXISTS, not a bare drop_index: migrations run in-process during lifespan
+    # startup (main.py), so an UndefinedObject here is not a failed migration, it is a
+    # container that will not boot. The index is absent in any database whose schema
+    # came from Base.metadata.create_all rather than the migration chain -- the shape
+    # tests/conftest.py builds -- and in any database where it was dropped by hand.
+    # Being already-gone is exactly the state this step wants; it should not be fatal.
+    op.execute('DROP INDEX IF EXISTS ix_scrape_logs_venue_id')
     op.create_index(
         'ix_scrape_logs_venue_id_started_at',
         'scrape_logs',

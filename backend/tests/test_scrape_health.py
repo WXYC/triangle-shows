@@ -204,6 +204,70 @@ def test_staleness_threshold_follows_the_venues_group():
     assert verdict.signal == "stale"
 
 
+# --- signal precedence (overlapping conditions; the first match wins) ---
+
+
+def test_staleness_outranks_silent_zero():
+    """A venue dropped from the schedule keeps whatever its last attempts looked like.
+    When those were zero-event successes, both conditions hold -- and reporting the
+    warning would tell an operator triaging by severity to deprioritize the venue that
+    has actually vanished."""
+    old = NOW - timedelta(days=5)
+    logs = [
+        _Log(started_at=old - timedelta(hours=6 * i), status="success", events_found=0)
+        for i in range(CONSECUTIVE_WINDOW)
+    ]
+    logs.append(_Log(started_at=NOW - timedelta(days=10), status="success", events_found=7))
+    verdict = evaluate_venue_health(_Venue(), logs, now=NOW, evaluate_staleness=True)
+    assert verdict.status == "critical"
+    assert verdict.signal == "stale"
+
+
+def test_staleness_outranks_consecutive_failures():
+    """Both are critical, so only the triage text differs -- but "not being scraped at
+    all" is the root cause, and leading with the last stored error would point the
+    operator at the venue's site when the scheduler is what broke."""
+    old = NOW - timedelta(days=5)
+    logs = [
+        _Log(started_at=old - timedelta(hours=6 * i), status="failed", error_message="boom")
+        for i in range(CONSECUTIVE_WINDOW)
+    ]
+    verdict = evaluate_venue_health(_Venue(), logs, now=NOW, evaluate_staleness=True)
+    assert verdict.signal == "stale"
+    assert verdict.detail == "venue not being scraped at all"
+
+
+def test_silent_zero_still_wins_when_the_venue_is_being_scraped_on_time():
+    """The precedence above must not swallow silent-zero for a venue that is scraped
+    on schedule -- that is the signal's whole purpose."""
+    logs = _attempts_every(6, CONSECUTIVE_WINDOW, status="success", events_found=0)
+    logs.append(_Log(started_at=NOW - timedelta(days=10), status="success", events_found=7))
+    verdict = evaluate_venue_health(_Venue(), logs, now=NOW, evaluate_staleness=True)
+    assert verdict.status == "warning"
+    assert verdict.signal == "silent_zero"
+
+
+# --- last_success_at over a nullable finished_at ---
+
+
+def test_last_success_at_skips_a_success_row_with_no_finished_at():
+    """finished_at is nullable. Yielding the newest success's None would report "never
+    succeeded" while an older success carrying a real timestamp sits in the same
+    history."""
+    stamped = _Log(
+        started_at=NOW - timedelta(hours=12),
+        status="success",
+        events_found=4,
+        finished_at=NOW - timedelta(hours=12) + timedelta(seconds=5),
+    )
+    unstamped = _Log(started_at=NOW - timedelta(hours=6), status="success", events_found=4)
+    unstamped.finished_at = None  # bypass __post_init__'s default stamping
+    verdict = evaluate_venue_health(
+        _Venue(), [unstamped, stamped], now=NOW, evaluate_staleness=False
+    )
+    assert verdict.last_success_at == stamped.finished_at
+
+
 # --- healthy path ---
 
 

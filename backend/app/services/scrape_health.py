@@ -124,6 +124,14 @@ def evaluate_venue_health(
     detection) a true replay rather than one still seeing rows that "hadn't
     happened yet" at that earlier instant.
 
+    `logs` need not be every row the venue has, but the silent-zero baseline guard can
+    only see what it is given: if the venue has a nonzero-events success inside
+    BASELINE_WINDOW_DAYS and that row is missing from `logs`, the guard concludes the
+    venue never shows events and downgrades a genuine warning to ok. That failure is
+    silent and inverted, so a caller that caps its fetch owes this function the baseline
+    row explicitly rather than assuming a row count reaches far enough back (see
+    api/v1.py, which fetches it as its own query).
+
     `evaluate_staleness` gates signal 3 only. The endpoint passes
     `settings.ENABLE_SCHEDULER` (staleness is meaningless when nothing is scheduled
     to run); the future digest job passes True unconditionally, since
@@ -144,11 +152,48 @@ def evaluate_venue_health(
 
     ordered = sorted(visible, key=lambda log: log.started_at, reverse=True)
     last_attempt_at = ordered[0].started_at
+    # finished_at is nullable, so a success row can carry no completion timestamp (a
+    # hand-backfilled row, or a future path that commits before stamping it). Skip
+    # those rather than reporting the newest one's None: yielding None here would say
+    # "this venue has never succeeded" while older successes that *do* carry a
+    # timestamp sit right there in the same history.
     last_success_at = next(
-        (log.finished_at for log in ordered if log.status == "success"), None
+        (
+            log.finished_at
+            for log in ordered
+            if log.status == "success" and log.finished_at is not None
+        ),
+        None,
     )
     recent = ordered[:CONSECUTIVE_WINDOW]
     has_full_window = len(recent) == CONSECUTIVE_WINDOW
+
+    # Signals are evaluated in descending severity, and staleness comes first even
+    # though it is numbered last in issue #86. Order is load-bearing, not cosmetic:
+    # these conditions overlap, and the first match wins.
+    #
+    # A venue that stops being scraped altogether keeps whatever its last few attempts
+    # looked like. If those were zero-event successes, checking silent-zero first
+    # returns warning ("possible bot wall or markup change") for a venue that has in
+    # fact vanished from the schedule -- an operator triaging by severity deprioritizes
+    # exactly the venue that most needs attention, and part 2's digest inherits the
+    # mis-ranking. Staleness also outranks consecutive failures: when both hold, "not
+    # being scraped at all" is the root cause and the stored error is a stale artifact
+    # of the last attempt, so leading with it would point triage at the venue's site
+    # when the scheduler is what broke.
+
+    # Signal 3 (highest severity): staleness -- no attempt within 2x the expected max gap.
+    if evaluate_staleness:
+        threshold = timedelta(hours=STALENESS_MULTIPLIER * max_gap_hours(group_for(venue)))
+        if now - last_attempt_at > threshold:
+            return ScrapeHealthVerdict(
+                venue_slug=venue.slug,
+                status="critical",
+                signal="stale",
+                detail="venue not being scraped at all",
+                last_success_at=last_success_at,
+                last_attempt_at=last_attempt_at,
+            )
 
     # Signal 1: consecutive hard failures.
     if has_full_window and all(log.status == "failed" for log in recent):
@@ -161,7 +206,9 @@ def evaluate_venue_health(
             last_attempt_at=last_attempt_at,
         )
 
-    # Signal 2: silent zero, guarded by a 30-day baseline of nonzero successes.
+    # Signal 2 (lowest severity): silent zero, guarded by a 30-day baseline of nonzero
+    # successes. The caller must supply that baseline row in `logs` if one exists --
+    # see the note on truncation in the docstring above.
     if has_full_window and all(
         log.status == "success" and log.events_found == 0 for log in recent
     ):
@@ -178,19 +225,6 @@ def evaluate_venue_health(
                 status="warning",
                 signal="silent_zero",
                 detail="possible bot wall or markup change",
-                last_success_at=last_success_at,
-                last_attempt_at=last_attempt_at,
-            )
-
-    # Signal 3: staleness -- no attempt within 2x the group's expected max gap.
-    if evaluate_staleness:
-        threshold = timedelta(hours=STALENESS_MULTIPLIER * max_gap_hours(group_for(venue)))
-        if now - last_attempt_at > threshold:
-            return ScrapeHealthVerdict(
-                venue_slug=venue.slug,
-                status="critical",
-                signal="stale",
-                detail="venue not being scraped at all",
                 last_success_at=last_success_at,
                 last_attempt_at=last_attempt_at,
             )
