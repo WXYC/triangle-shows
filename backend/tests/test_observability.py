@@ -8,6 +8,7 @@ the real SDK live in ``test_sentry_hook.py``, guarded by
 ``pytest.importorskip("app.sentry_hook")``.
 """
 
+import asyncio
 import json
 import logging
 from types import SimpleNamespace
@@ -41,8 +42,11 @@ class TestReportError:
         assert "Traceback" in caplog.text
 
     def test_forwards_to_the_tracker_hook_when_present(self, monkeypatch):
+        """Unconditionally, whenever the hook imports — whether the tracker is actually
+        switched on is the hook's own decision (it gates on SENTRY_DSN), deliberately
+        not re-checked here, which would put a vendor-named setting back into this
+        vendor-free module. See test_sentry_hook.py for the gate itself."""
         calls = []
-        monkeypatch.setattr(settings, "SENTRY_DSN", "https://public@o0.ingest.sentry.io/1")
         monkeypatch.setattr(
             observability,
             "sentry_hook",
@@ -57,27 +61,6 @@ class TestReportError:
         assert forwarded_exc is exc
         assert kwargs["where"] == "test.forward"
         assert kwargs["context"] == {"venue": "red-hat"}
-
-    def test_does_not_forward_when_the_dsn_is_empty(self, monkeypatch, caplog):
-        """The hook imports whenever app/sentry_hook.py exists — which, wherever
-        requirements-optional.txt was installed, is always — so presence of the hook
-        cannot be the only gate, or every error on the always-on tier would call into
-        an uninitialized client. Tier 1 must not depend on a third party's no-op
-        staying a no-op.
-        """
-        caplog.set_level(logging.ERROR, logger="app.observability")
-        calls = []
-        monkeypatch.setattr(settings, "SENTRY_DSN", "")
-        monkeypatch.setattr(
-            observability,
-            "sentry_hook",
-            SimpleNamespace(capture_exception=lambda exc, **kw: calls.append((exc, kw))),
-        )
-
-        observability.report_error(ValueError("boom"), where="test.no_dsn")
-
-        assert calls == []
-        assert "test.no_dsn" in caplog.text, "tier 1 must still log unconditionally"
 
     def test_works_when_the_tracker_hook_is_absent(self, monkeypatch, caplog):
         """Simulates the two-deletion opt-out: app/sentry_hook.py deleted, so
@@ -309,6 +292,42 @@ class TestLifespanCapturePoint:
 
         assert len(reported) == 1
         assert flushed == [True]
+
+    async def test_a_failure_after_the_scrape_task_starts_still_cancels_it(self, monkeypatch):
+        """The startup scrape task is created *inside* the guarded block, so a later
+        failure (a bad cron expression, a scheduler that won't start) re-raises without
+        ever yielding — and the shutdown branch that normally cancels the task only runs
+        after a yield. Without an explicit cancel on the failure path the process dies
+        with a live scrape pending, holding a session nobody will close.
+        """
+        monkeypatch.setattr(app_main, "report_error", lambda exc, **kw: None)
+        monkeypatch.setattr(app_main, "flush_errors", lambda: None)
+        monkeypatch.setattr(app_main, "_run_migrations", lambda: None)
+        monkeypatch.setattr(settings, "RUN_STARTUP_SCRAPE", True)
+        monkeypatch.setattr(settings, "ENABLE_SCHEDULER", True)
+
+        async def _noop_seed():
+            return None
+
+        async def _long_scrape():
+            await asyncio.sleep(3600)
+
+        def _boom():
+            raise RuntimeError("bad cron expression")
+
+        monkeypatch.setattr(app_main, "seed_venues", _noop_seed)
+        monkeypatch.setattr(app_main, "_startup_scrape", _long_scrape)
+        monkeypatch.setattr(app_main, "configure_scheduler", _boom)
+
+        dummy_app = SimpleNamespace(state=SimpleNamespace())
+
+        with pytest.raises(RuntimeError, match="bad cron expression"):
+            async with app_main.lifespan(dummy_app):
+                pass  # unreachable: the context manager raises before yielding
+
+        task = dummy_app.state.startup_scrape_task
+        assert task.done(), "the startup scrape was left pending when startup failed"
+        assert task.cancelled()
 
 
 # --- Capture point: scrapers/manager.py:176-179 (nested log-write fallback) ----
