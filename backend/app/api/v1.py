@@ -180,6 +180,36 @@ async def get_scraper_health(session: AsyncSession = Depends(get_session)) -> li
     freshly-seeded dev database or a region not yet switched on would otherwise
     report every venue "critical" for having no recent scrapes it was never
     supposed to have.
+
+    One query per venue, not one windowed query over all of them. Issue #86 asks for
+    "one query over the recent log window"; that wording is not followed, deliberately,
+    because both single-query forms are worse here — measured on a 21-venue database at
+    11K and 110K scrape_logs rows:
+
+    - A *time*-windowed single query (the literal reading) breaks the staleness signal.
+      Bounding by `started_at >= now - 30d` returns nothing at all for a venue whose last
+      scrape was 45 days ago, so the evaluator sees an empty history and reports "unknown"
+      — precisely the venue that should report "critical/stale". The per-venue LIMIT below
+      is ordered started_at DESC with no lower bound, so row 0 is always the true most
+      recent attempt however old it is, which is what makes "stale" detectable at all.
+    - A window-function single query (row_number() OVER (PARTITION BY venue_id)) preserves
+      the semantics but reads the whole table to do it: 2929 shared buffers vs 727 for the
+      equivalent LATERAL, and it grows with scrape_logs, which is never pruned.
+
+    What this loop costs instead is one round trip per venue, and each of those queries is
+    flat under table growth rather than linear: the per-venue index scan measured 0.115ms
+    at 11K rows and 0.182ms at 110K — a 10x table for a 1.6x query, since the composite
+    (venue_id, started_at DESC) index makes the cost index depth plus 120 rows, independent
+    of how large the table gets. The only dimension that scales it is venue count, which
+    grows slowly and by deliberate act (Seattle roughly doubles it; nationwide scaling is
+    issue #84's problem, not this endpoint's). Total today is ~2.4ms of database execution
+    across 22 statements.
+
+    If venue count ever makes the round trips matter, the correct fix is a LATERAL join
+    (`venues JOIN LATERAL (SELECT ... WHERE venue_id = v.id ORDER BY started_at DESC
+    LIMIT n) ON true`), which the EXPLAIN above shows performs the identical per-venue
+    index scans (loops=21, same Index Cond) in a single round trip. It is not done here
+    because it buys ~15ms today at the price of a Postgres-specific construct.
     """
     now = datetime.utcnow()
     venues = (await session.execute(select(Venue).order_by(Venue.city, Venue.name))).scalars().all()
