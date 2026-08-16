@@ -164,6 +164,13 @@ class ScrapeLog(Base):
 
     venue: Mapped["Venue"] = relationship(back_populates="scrape_logs")
 
+    # Serves both the scrape-health evaluator's per-venue latest-N query and the
+    # 30-day baseline scan (app/services/scrape_health.py, issue #86 part 1) --
+    # started_at DESC matches both queries' ORDER BY exactly.
+    __table_args__ = (
+        Index("ix_scrape_logs_venue_id_started_at", "venue_id", started_at.desc()),
+    )
+
 
 class FeedFetch(Base):
     """Append-only server-side telemetry: one row per successfully served
