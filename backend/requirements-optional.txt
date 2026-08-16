@@ -1,0 +1,13 @@
+# Optional runtime dependencies — features that degrade gracefully to "off" when
+# this file (or an individual package it lists) is absent. See app/sentry_hook.py
+# for the guarded import that makes this true.
+#
+# Deleting this file plus app/sentry_hook.py is a complete opt-out of the exception
+# tracker: the image still builds (Dockerfile's COPY uses a glob that tolerates a
+# missing file), the app still boots, and `pytest` still passes with the
+# tracker-specific tests skipped (see backend/tests/test_sentry_hook.py).
+#
+# The version is pinned here AND in requirements-dev.txt (which pins it directly
+# rather than `-r`ing this file, so the two-deletion opt-out above doesn't also
+# break `pip install -r requirements-dev.txt`) — keep the two in sync.
+sentry-sdk==2.68.0

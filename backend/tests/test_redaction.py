@@ -237,3 +237,36 @@ async def test_scrape_failure_does_not_persist_or_return_the_credential(
     assert all(FAKE_KEY not in (row.error_message or "") for row in rows), (
         "the credential was persisted to scrape_logs.error_message"
     )
+
+
+@pytest.mark.asyncio
+async def test_trigger_scrape_catch_all_redacts_and_reports_the_credential(client, monkeypatch):
+    """POST /api/scrape has its own except Exception, separate from
+    scrape_venue's — it fires on failures *outside* scrape_venue (session
+    construction, a scraper import) that never pass through manager.scrape_venue's
+    own redaction (test above). Forcing the session factory itself to raise reaches
+    exactly that branch; app.main.trigger_scrape must scrub independently rather
+    than assume the per-venue result dict already did it (issue #118).
+    """
+    import app.main as app_main
+
+    reported = []
+    monkeypatch.setattr(app_main, "report_error", lambda exc, **kw: reported.append((exc, kw)))
+
+    def _raising_session_factory():
+        request = httpx.Request("GET", TM_URL)
+        raise httpx.HTTPStatusError(
+            f"Client error '401 Unauthorized' for url '{TM_URL}'",
+            request=request,
+            response=httpx.Response(401, request=request),
+        )
+
+    monkeypatch.setattr("app.database.async_session", _raising_session_factory)
+
+    response = await client.post("/api/scrape")
+
+    assert response.status_code == 500
+    detail = response.json()["detail"]
+    assert FAKE_KEY not in detail, "the unauthenticated endpoint leaked the credential"
+    assert "401 Unauthorized" in detail, "the diagnosis itself must survive"
+    assert len(reported) == 1, "the catch-all must route through the funnel too"

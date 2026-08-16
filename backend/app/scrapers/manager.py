@@ -24,6 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.market_time import today_in_market
 from app.models import Venue, Event, EventMissState, ScrapeLog
+from app.observability import report_error
 from app.redaction import redact_credentials
 from app.scrapers.base import BaseScraper, ScrapedEvent
 from app.scrapers.headliner import merge_support, parse_billing
@@ -174,8 +175,12 @@ class ScrapeManager:
                 self.session.add(log)
                 await self.session.commit()
             except Exception as log_err:
-                logger.warning(
-                    f"[{venue_slug}] Could not write error log: {redact_credentials(str(log_err))}"
+                # A scrape that failed *and* couldn't record it leaves no trace
+                # anywhere else — this is the last chance to make it visible.
+                report_error(
+                    log_err,
+                    where="scrapers.manager.scrape_venue.log_write",
+                    context={"venue": venue_slug},
                 )
             return {"venue": venue_slug, "status": "failed", "error": message}
 
