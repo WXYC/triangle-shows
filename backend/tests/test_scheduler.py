@@ -16,7 +16,7 @@ from app.scheduler import _job_listener, configure_scheduler, scheduler
 
 # The job ids configure_scheduler() registers, and the set every test's cleanup is
 # derived from — so the assertion and the teardown can never drift apart.
-JOB_IDS = {"scrape_ticketmaster", "scrape_indie", "cleanup_past_events"}
+JOB_IDS = {"scrape_ticketmaster", "scrape_indie", "cleanup_past_events", "scrape_health_digest"}
 
 
 def _tz_str(trigger: CronTrigger) -> str:

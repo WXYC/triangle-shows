@@ -3,9 +3,12 @@ APScheduler job definitions for periodic scraping and data maintenance.
 
 Role: Started during FastAPI app startup (main.py) when ENABLE_SCHEDULER=true.
       Runs scrape jobs on a fixed cron schedule as an alternative to Cloud Scheduler
-      HTTP triggers — both ultimately call the same ScrapeManager logic.
+      HTTP triggers — both ultimately call the same ScrapeManager logic. Also runs
+      the daily scrape-health digest (issue #86 part 2), which reuses the pure
+      evaluator from app.services.scrape_health rather than re-deriving verdicts.
 Requires: ENABLE_SCHEDULER env var (via config.py), app.scrapers.manager.ScrapeManager,
-          app.database.async_session, and a running async event loop (provided by FastAPI).
+          app.database.async_session, app.services.scrape_health, and a running
+          async event loop (provided by FastAPI).
 """
 
 # --- Imports ---
@@ -15,13 +18,14 @@ from datetime import datetime, timedelta
 from apscheduler.events import EVENT_JOB_ERROR, EVENT_JOB_MISSED
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
-from sqlalchemy import delete
+from sqlalchemy import delete, select
 
-from app.cadence import cron_hour_string
+from app.cadence import CRON_HOURS, cron_hour_string
 from app.database import async_session
-from app.models import Event
-from app.observability import report_error
+from app.models import Event, ScrapeLog, Venue
+from app.observability import report_error, send_alert
 from app.scrapers.manager import ScrapeManager
+from app.services.scrape_health import BASELINE_WINDOW_DAYS, ScrapeHealthVerdict, evaluate_venue_health
 from app.site_config import load_site_config
 
 # --- Module-level setup ---
@@ -70,6 +74,136 @@ async def cleanup_past_events_job():
         )
         await session.commit()
         logger.info(f"Deleted {result.rowcount} past events")
+
+
+# --- Scrape-health digest (issue #86 part 2) ---
+
+# Row cap for the per-venue scrape_logs query below. Mirrors app.api.v1's own
+# cap byte-for-byte (same rationale, same formula): bounding by wall-clock time
+# instead would break the staleness signal for a venue silent longer than the
+# window, since a `started_at >= cutoff` filter returns nothing at all for it.
+# Duplicated here rather than imported from app.api.v1 because the dependency
+# would run the wrong direction -- v1.py is the API layer, and scheduler.py
+# already sits below it (it imports app.database/app.models/app.scrapers.manager
+# directly, per app.cadence's own module docstring on why that's a one-way
+# street) and touching the already-reviewed endpoint module is out of scope for
+# this change.
+_MAX_SCHEDULED_RUNS_PER_DAY = max(len(hours) for hours in CRON_HOURS.values())
+_SCRAPE_LOG_FETCH_HEADROOM = 2
+_DIGEST_SCRAPE_LOG_LIMIT = (
+    BASELINE_WINDOW_DAYS * _MAX_SCHEDULED_RUNS_PER_DAY * _SCRAPE_LOG_FETCH_HEADROOM
+)
+
+
+def _format_digest(
+    site_name: str, broke: list[ScrapeHealthVerdict], recovered: list[ScrapeHealthVerdict]
+) -> str:
+    """Render the transition list into the text posted (or logged) by send_alert.
+
+    Prefixed with site.name (not site.title, the lowercase page-title slug) so
+    Triangle and Seattle can share one ops channel and still tell their alerts
+    apart. `broke` carries each venue's *current* verdict (what it broke into);
+    `recovered` carries each venue's *previous* verdict (what it recovered
+    from) -- the more useful half of a recovery notice is what had been wrong.
+    """
+    total = len(broke) + len(recovered)
+    lines = [f"{site_name} scrape-health digest: {total} change(s)"]
+    for v in broke:
+        lines.append(f"BROKE: {v.venue_slug} [{v.status}/{v.signal}] {v.detail}")
+    for v in recovered:
+        lines.append(f"RECOVERED: {v.venue_slug} (was {v.status}/{v.signal})")
+    return "\n".join(lines)
+
+
+async def scrape_health_digest_job():
+    """Daily transition-only scrape-health alert (issue #86 part 2).
+
+    Runs at 7 AM market time, after the morning scrape wave, so the freshest
+    results are already in ScrapeLog by the time this evaluates -- registered
+    in configure_scheduler() below with the site-configured timezone, same as
+    every other job.
+
+    Stateless by design: APScheduler's default in-memory jobstore does not
+    survive a Railway redeploy, so there is no durable "last digest ran at" to
+    diff against. The previous verdict is instead derived by replaying
+    evaluate_venue_health at ``now - 24h`` against the *same* fetched rows --
+    a true replay, not an approximation, because the evaluator excludes any
+    row with ``started_at > now`` by contract (pinned by a dedicated test in
+    the detection PR). 24h is not an arbitrary choice either: it is this job's
+    own cadence, so the replay always lines up with "as of yesterday's run".
+
+    Only a venue whose broken/not-broken state actually changed between the
+    two instants is reported -- a venue that has been broken for a week does
+    not re-page every morning, and the ordinary case (nothing changed anywhere)
+    sends nothing at all.
+    """
+    logger.info("Running scrape-health digest")
+    now = datetime.utcnow()
+    previous_now = now - timedelta(hours=24)
+    site_name = load_site_config().site.name
+
+    broke: list[ScrapeHealthVerdict] = []
+    recovered: list[ScrapeHealthVerdict] = []
+    async with async_session() as session:
+        venues = (await session.execute(select(Venue).order_by(Venue.city, Venue.name))).scalars().all()
+        baseline_cutoff = now - timedelta(days=BASELINE_WINDOW_DAYS)
+
+        for venue in venues:
+            logs = list(
+                (
+                    await session.execute(
+                        select(ScrapeLog)
+                        .where(ScrapeLog.venue_id == venue.id, ScrapeLog.started_at <= now)
+                        .order_by(ScrapeLog.started_at.desc())
+                        .limit(_DIGEST_SCRAPE_LOG_LIMIT)
+                    )
+                ).scalars().all()
+            )
+            # The silent-zero baseline guard needs the venue's most recent healthy
+            # scrape inside the 30-day window, which the capped fetch above cannot
+            # promise to reach (unscheduled attempts -- startup scrapes, manual
+            # POST /api/scrape -- are unbounded). Fetch it directly, exactly as
+            # app.api.v1's endpoint does, rather than risk the guard silently
+            # inverting a warning into ok.
+            baseline_row = (
+                await session.execute(
+                    select(ScrapeLog)
+                    .where(
+                        ScrapeLog.venue_id == venue.id,
+                        ScrapeLog.status == "success",
+                        ScrapeLog.events_found > 0,
+                        ScrapeLog.started_at >= baseline_cutoff,
+                        ScrapeLog.started_at <= now,
+                    )
+                    .order_by(ScrapeLog.started_at.desc())
+                    .limit(1)
+                )
+            ).scalars().first()
+            if baseline_row is not None and not any(row is baseline_row for row in logs):
+                logs.append(baseline_row)
+
+            # evaluate_staleness=True literally, NOT settings.ENABLE_SCHEDULER.
+            # This is not a shortcut standing in for the setting -- it's correct
+            # by construction: configure_scheduler() (below) only ever runs under
+            # `if settings.ENABLE_SCHEDULER:` in main.py, so this job existing at
+            # all already implies the scheduler is on. Reading the setting here
+            # would read as a false symmetry with the endpoint, which (unlike
+            # this job) can run with the scheduler off.
+            current = evaluate_venue_health(venue, logs, now=now, evaluate_staleness=True)
+            previous = evaluate_venue_health(venue, logs, now=previous_now, evaluate_staleness=True)
+
+            is_broken_now = current.status in ("warning", "critical")
+            was_broken = previous.status in ("warning", "critical")
+            if is_broken_now and not was_broken:
+                broke.append(current)
+            elif was_broken and not is_broken_now:
+                recovered.append(previous)
+
+    if not broke and not recovered:
+        logger.info("Scrape-health digest: no transitions")
+        return
+
+    await send_alert(_format_digest(site_name, broke, recovered))
 
 
 # --- Error/missed-job reporting ---
@@ -144,5 +278,15 @@ def configure_scheduler():
         cleanup_past_events_job,
         CronTrigger(hour=3, timezone=tz),
         id="cleanup_past_events",
+        replace_existing=True,
+    )
+
+    # Scrape-health digest: 7 AM local, after the morning (6 AM) scrape wave so
+    # its results are already in ScrapeLog by the time this evaluates (issue #86
+    # part 2).
+    scheduler.add_job(
+        scrape_health_digest_job,
+        CronTrigger(hour=7, timezone=tz),
+        id="scrape_health_digest",
         replace_existing=True,
     )
