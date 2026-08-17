@@ -23,7 +23,7 @@ from fastapi.staticfiles import StaticFiles
 from app.config import settings
 from app.database import async_session
 from app.observability import flush_errors, init_error_tracking, report_error
-from app.redaction import RedactingFormatter, redact_credentials, redact_handler
+from app.redaction import redact_credentials, redact_handler
 from app.seed import seed_venues
 from app.scheduler import scheduler, configure_scheduler
 from app.site_config import load_site_config
@@ -44,33 +44,47 @@ def configure_logging() -> None:
       which put the key in the log store four times per scrape cycle. Our scrapers
       already emit their own per-request line naming the venue, so what is lost is the
       HTTP status of a *successful* request; a failure still raises and is logged.
-    * Every root handler gets a :class:`~app.redaction.RedactingFormatter`, which scrubs
-      the values out of anything else that renders a URL — including the exception
-      tracebacks the httpx pin cannot reach, since ``httpx.HTTPStatusError`` carries the
-      request URL in its own message regardless of the logger's level.
-    * uvicorn's *own* handlers get the same treatment via
-      :func:`~app.redaction.redact_handler`. Root handlers alone are not enough: the
-      ``uvicorn`` logger is configured with ``propagate=False`` and its own handler, so
-      nothing it logs ever reaches a root handler. That matters because Starlette's
-      ``ServerErrorMiddleware`` always re-raises after invoking the bare-``Exception``
-      handler, and uvicorn then logs the full traceback itself on ``uvicorn.error`` — so
-      an ``httpx.HTTPStatusError`` escaping any route would otherwise write a live
-      ``?apikey=`` to the log stream unredacted. ``redact_handler`` *wraps* uvicorn's
-      formatters rather than replacing them, so its log lines keep their existing shape.
+    * **Every handler in the process** — root's and everybody else's — is wrapped by
+      :func:`~app.redaction.redact_handler`, which scrubs the values out of anything
+      that renders a URL, including the exception tracebacks the httpx pin cannot
+      reach (``httpx.HTTPStatusError`` carries the request URL in its own message
+      regardless of the logger's level).
+
+      Root handlers alone are not enough. Starlette's ``ServerErrorMiddleware`` always
+      re-raises after invoking the bare-``Exception`` handler, and the ASGI server then
+      logs the full traceback itself on a logger it configures with ``propagate=False``
+      and its own handler — which no root handler ever sees. Under uvicorn that is the
+      ``uvicorn`` logger; under ``gunicorn -k UvicornWorker`` it is ``gunicorn.error``.
+      Naming those loggers here instead would make this a snapshot of today's
+      dependency set whose failure mode is a *silent* one: swap the server — an
+      ordinary deployment change touching no application code — and the sink reopens
+      with no signal and no failing test, because a test can only reach for the same
+      names the code does. Sweeping every handler is immune to that by construction.
+
+      This is safe to apply indiscriminately precisely because ``redact_handler``
+      wraps rather than replaces: a handler somebody else owns (uvicorn's access
+      formatter, a structured/JSON handler a deployment installs on root) keeps its
+      exact layout, and the wrap is idempotent, so repeat calls never nest.
 
     Called at import so configuration is in place before any other module logs, and
     exposed as a function so tests can assert on it without importing for its side
     effects alone. uvicorn builds its logging config in ``Config.__init__``, before it
     imports the app, so its handlers already exist by the time this runs under a real
-    server; the loop simply finds nothing under pytest or a bare interpreter.
+    server; the sweep simply finds fewer of them under pytest or a bare interpreter.
+
+    Residue worth knowing: handlers installed *after* this runs are not covered. That
+    is a narrower bet than the one a name-based enumeration makes, but it is still a
+    bet — if a future dependency installs a handler lazily, call this again once it has.
     """
     logging.basicConfig(level=getattr(logging, settings.LOG_LEVEL), format=LOG_FORMAT)
 
-    for handler in logging.getLogger().handlers:
-        handler.setFormatter(RedactingFormatter(LOG_FORMAT))
-
-    for logger_name in ("uvicorn", "uvicorn.error", "uvicorn.access"):
-        for handler in logging.getLogger(logger_name).handlers:
+    loggers = [logging.getLogger()] + [
+        existing
+        for existing in logging.root.manager.loggerDict.values()
+        if isinstance(existing, logging.Logger)
+    ]
+    for each in loggers:
+        for handler in each.handlers:
             redact_handler(handler)
 
     logging.getLogger("httpx").setLevel(logging.WARNING)
