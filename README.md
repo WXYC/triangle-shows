@@ -162,7 +162,7 @@ To deploy a specific commit out of band, run the workflow manually (`workflow_di
 Beyond the `RAILWAY_TOKEN` GitHub Actions secret above, the Railway **service** itself takes optional variables (set via the Railway dashboard or `railway variables`, not a GitHub secret) for internal error capture — see `backend/README.md`'s "Internal error capture" section and `SELF-HOSTING.md`'s "Operating this" for what each one does:
 
 - **`SENTRY_DSN`** — enables the exception tracker. Unset by default; internal errors still reach the container's stderr log stream without it.
-- **`ALERT_WEBHOOK_URL`** — a Slack/Mattermost/Discord incoming-webhook URL for scrape-health digests, not internal errors. Inert until that feature ships (issue #86) — setting it now is harmless but silent.
+- **`ALERT_WEBHOOK_URL`** — a Slack/Mattermost/Discord incoming-webhook URL for scrape-health digests, not internal errors. Fed by a daily 7 AM market-time job that alerts only when a venue's health transitions (breaks or recovers) since the previous day's run — unset, the digest is logged instead of posted.
 - **`GIT_COMMIT`** — should be set to `${{RAILWAY_GIT_COMMIT_SHA}}` so `GET /api/v1/health` reports a real build SHA instead of `"unknown"`. This is a **gate, not a given**: Railway's GitHub App is not installed on this fork (the deploy workflow uses the CLI instead, above), so the reference variable may not resolve. Check that it actually resolves on the running service before setting it — if it resolves empty, leave `GIT_COMMIT` unset (today's honest `"unknown"` beats a silently empty version string) and file the build-arg fix instead. *Outcome: not yet checked post-merge.*
 
 ---
