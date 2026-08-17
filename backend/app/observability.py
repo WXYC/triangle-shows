@@ -59,12 +59,20 @@ def report_error(exc: BaseException, *, where: str, context: Optional[dict] = No
     "scheduler.job_error") for triage; `context` is optional structured detail
     (e.g. {"job_id": ...}) attached to the tracker event when present.
 
+    `where` is also the record's logger *name*, not just message text: every value is a
+    module path with the leading "app." dropped, so re-attaching that prefix nests each
+    capture point under the real module hierarchy. That keeps `where` something the
+    logging system enforces rather than a convention — per-module level configuration,
+    caplog(logger=...), and drain-side grouping by record name all keep working, where
+    emitting seven subsystems under one `app.observability` name would have flattened
+    them into a single bucket recoverable only by substring-matching the message.
+
     The hook's own capture_exception is what decides whether the tracker is actually
     on (it checks SENTRY_DSN) — deliberately not re-checked here, which would put a
     vendor-named setting back into this vendor-free module and leave the same gate
     spelled out in two files, free to disagree.
     """
-    logger.error("[%s] %s", where, exc, exc_info=exc)
+    logging.getLogger(f"app.{where}").error("%s", exc, exc_info=exc)
     if sentry_hook is not None:
         sentry_hook.capture_exception(exc, where=where, context=context)
 
