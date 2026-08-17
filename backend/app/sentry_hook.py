@@ -82,8 +82,11 @@ def init_sentry() -> None:
     if sentry_sdk is None or not settings.SENTRY_DSN:
         return
 
-    # Imported here, not at module level: avoids a needless site_config load (and
-    # its own failure mode) on every import of this module when the tracker is off.
+    # Imported here, not at module level, to keep this module's import contract: the
+    # docstring above promises importing it is always safe, and app.site_config raises
+    # on a malformed pack. It saves no work — app.main imports site_config at module
+    # level and calls load_site_config() before init_error_tracking(), so by the time
+    # this line runs the module is in sys.modules and the result is already memoized.
     from app.site_config import load_site_config
 
     sentry_sdk.init(
@@ -110,6 +113,15 @@ def init_sentry() -> None:
         # enabled: with tracing off it still records outbound-request breadcrumbs,
         # which do ride error events through before_send.
         traces_sample_rate=0.0,
+        # Off for the same reason tracing is, and it closes a hole the scrubber above
+        # structurally cannot: with local variables on (the SDK default), every frame
+        # ships a repr of its locals, so `settings` or a bare `api_key` reaches the
+        # tracker as `'apikey': 'live-value'` — a dict repr, not a query string.
+        # redact_credentials matches `name=value` and would walk straight past it, and
+        # the SDK's own EventScrubber denylist matches key names exactly, so a key
+        # spelled TICKETMASTER_API_KEY is not covered either. It also cuts event size by
+        # roughly an order of magnitude, which is most of what _before_send walks.
+        include_local_variables=False,
         before_send=_before_send,
     )
     # service.name tag, mirroring the wxyc_fastapi shape, so multiple regions
