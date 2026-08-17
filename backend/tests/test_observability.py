@@ -22,7 +22,8 @@ from app import main as app_main
 from app import observability
 from app.config import settings
 
-FAKE_KEY = "s3cr3tKEYvalue0123456789abcdefgh"
+from tests.conftest import FAKE_KEY  # noqa: E402  (the shared credential shape)
+
 WEBHOOK_URL = "https://hooks.slack.com/services/T000/B000/s3cr3twebhooksecret"
 
 

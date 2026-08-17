@@ -29,6 +29,19 @@ from sqlalchemy.engine import make_url
 # factory default and test filters can never drift apart.
 DEFAULT_EVENT_DATE = date.today() + timedelta(days=30)
 
+# Shaped exactly like the URL the Ticketmaster scraper builds
+# (app/scrapers/ticketmaster.py), with a placeholder standing in for the live key.
+# Lives here, beside DEFAULT_EVENT_DATE and for the same reason: three suites
+# (test_redaction, test_observability, test_sentry_hook) assert that this exact shape
+# gets scrubbed at three different sinks, and a copy per module lets one of them be
+# edited into pinning a shape production no longer emits — the silent drift the
+# single anchor exists to prevent.
+FAKE_KEY = "s3cr3tKEYvalue0123456789abcdefgh"
+TM_URL = (
+    "https://app.ticketmaster.com/discovery/v2/events.json"
+    f"?apikey={FAKE_KEY}&venueId=KovZpZAdEEvA&size=200&page=0&sort=date%2Casc"
+)
+
 # --- Pin the app to the test database BEFORE importing any app.* module ---------
 # app.config.settings and the engine in app.database read DATABASE_URL at import
 # time, so the environment must be set first.
