@@ -1,12 +1,12 @@
 """Scrub credential-bearing query parameters out of text before it leaves the process.
 
-Role: shared by every sink a request URL can escape through — the logging formatter
-installed in ``app.main.configure_logging`` (covering both messages and exception
-tracebacks), the same function's wrapping of *uvicorn's own* handlers via
-:func:`redact_handler` (uvicorn logs unhandled-request tracebacks on a logger with
-``propagate=False``, which no root handler ever sees), and the two non-logging sinks
-in ``app.scrapers.manager.scrape_venue``: the ``scrape_logs.error_message`` column and
-the error body returned by ``POST /api/scrape``, which is unauthenticated.
+Role: shared by every sink a request URL can escape through — :func:`redact_handler`,
+which ``app.main.configure_logging`` applies to every log handler in the process
+(covering messages, exception tracebacks, and the handlers owned by whatever ASGI
+server is running, which log unhandled-request tracebacks on loggers that set
+``propagate=False`` and so are invisible to any root handler), and the two non-logging
+sinks in ``app.scrapers.manager.scrape_venue``: the ``scrape_logs.error_message``
+column and the error body returned by ``POST /api/scrape``, which is unauthenticated.
 
 Why this exists: the Ticketmaster Discovery API authenticates with a query parameter
 rather than a header, so the scraper's request URL *is* a credential. ``httpx`` logs
@@ -70,6 +70,15 @@ def redact_credentials(text):
     """
     if not isinstance(text, str):
         return text
+    # Group 1 of the pattern always ends in a literal `=`, so text without one cannot
+    # match — a provable short-circuit, not a heuristic. Worth the line because the
+    # pattern is deliberately anchorless (a leading `(?i)`, an alternation, and a
+    # lookbehind leave the engine no literal prefix to seek on), so it costs roughly
+    # 50ns per character and retries at every position. Tracebacks reach tens of KB
+    # once a tracker event carries source context, and this function now runs over
+    # every one of them at two sinks; the miss case is the overwhelmingly common one.
+    if "=" not in text:
+        return text
     return _CREDENTIAL_QUERY_RE.sub(rf"\g<1>{REDACTED}", text)
 
 
@@ -77,7 +86,7 @@ def redact_credentials(text):
 
 
 class RedactingFormatter(logging.Formatter):
-    """A ``Formatter`` that scrubs credentials from everything it renders.
+    """Scrubs credentials from whatever another formatter rendered, keeping its layout.
 
     Deliberately a formatter rather than a ``logging.Filter``. A filter sees
     ``record.msg`` and ``record.args`` before they are combined, and never sees the
@@ -85,23 +94,16 @@ class RedactingFormatter(logging.Formatter):
     straight past it carrying the URL in the traceback text. Formatting is the single
     point where message, arguments, and traceback have all become one string.
 
-    Attach to *handlers*, not to loggers: a formatter belongs to a handler by design, and
-    the handler is what every propagated record from every child logger passes through.
-    """
-
-    def format(self, record: logging.LogRecord) -> str:
-        return redact_credentials(super().format(record))
-
-
-class _WrappedRedactingFormatter(logging.Formatter):
-    """Scrubs whatever another formatter rendered, preserving that formatter's layout.
-
-    Used for handlers this codebase does not own — uvicorn installs its own
-    ``DefaultFormatter``/``AccessFormatter`` on its own handlers, and replacing them
-    outright with :class:`RedactingFormatter` would silently change the shape of the
-    server's log lines (the access log in particular renders from record *args*, not
-    from a plain ``%(message)s``). Wrapping keeps their output byte-identical apart
-    from the credential values.
+    Deliberately *wraps* an inner formatter rather than rendering from its own format
+    string. Most handlers this runs against belong to somebody else — uvicorn installs
+    its own ``DefaultFormatter``/``AccessFormatter``, and a deployment may install a
+    structured/JSON handler on the root logger — and replacing their formatter outright
+    would silently reshape those log lines (the access log in particular renders from
+    record *args*, not from a plain ``%(message)s``). Wrapping keeps every handler's
+    output byte-identical apart from the credential values, which means the same
+    mechanism is safe to apply to every handler in the process without first deciding
+    who owns it. Attach to *handlers*, not to loggers: a formatter belongs to a handler
+    by design, and the handler is what every propagated record passes through.
     """
 
     def __init__(self, inner: logging.Formatter) -> None:
@@ -115,10 +117,10 @@ class _WrappedRedactingFormatter(logging.Formatter):
 def redact_handler(handler: logging.Handler) -> None:
     """Ensure `handler` scrubs credentials, leaving its existing format alone.
 
-    Idempotent: a handler already carrying either redacting formatter is left as-is,
+    Idempotent: a handler already carrying a :class:`RedactingFormatter` is left as-is,
     so repeated ``configure_logging()`` calls (import, then a test) don't nest wrappers.
     """
     existing = handler.formatter
-    if isinstance(existing, (RedactingFormatter, _WrappedRedactingFormatter)):
+    if isinstance(existing, RedactingFormatter):
         return
-    handler.setFormatter(_WrappedRedactingFormatter(existing or logging.Formatter()))
+    handler.setFormatter(RedactingFormatter(existing or logging.Formatter()))
