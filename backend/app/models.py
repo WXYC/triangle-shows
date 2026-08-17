@@ -151,7 +151,7 @@ class ScrapeLog(Base):
     __tablename__ = "scrape_logs"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    venue_id: Mapped[int] = mapped_column(ForeignKey("venues.id"), index=True)
+    venue_id: Mapped[int] = mapped_column(ForeignKey("venues.id"))
     scraper_type: Mapped[str] = mapped_column(String(50))
     started_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)  # null while still running
@@ -163,6 +163,15 @@ class ScrapeLog(Base):
     duration_seconds: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
 
     venue: Mapped["Venue"] = relationship(back_populates="scrape_logs")
+
+    # Serves both the scrape-health evaluator's per-venue latest-N query and the
+    # 30-day baseline scan (app/services/scrape_health.py, issue #86 part 1) --
+    # started_at DESC matches both queries' ORDER BY exactly. venue_id leads the
+    # composite, so it also covers every lookup the single-column ix_scrape_logs_venue_id
+    # index served (migration 0010 drops that index in a separate commit).
+    __table_args__ = (
+        Index("ix_scrape_logs_venue_id_started_at", "venue_id", started_at.desc()),
+    )
 
 
 class FeedFetch(Base):

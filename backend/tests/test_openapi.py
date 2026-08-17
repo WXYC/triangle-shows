@@ -13,11 +13,11 @@ def test_openapi_exposes_v1_paths_and_neutral_schemas():
     spec = app.openapi()
 
     paths = spec["paths"]
-    for expected in ("/api/v1/events", "/api/v1/events/{event_id}", "/api/v1/venues", "/api/v1/health", "/api/v1/site"):
+    for expected in ("/api/v1/events", "/api/v1/events/{event_id}", "/api/v1/venues", "/api/v1/health", "/api/v1/site", "/api/v1/health/scrapers"):
         assert expected in paths, f"missing path {expected}"
 
     schemas = spec["components"]["schemas"]
-    for expected in ("EventResponse", "VenueResponse", "HealthResponse", "SiteConfig"):
+    for expected in ("EventResponse", "VenueResponse", "HealthResponse", "SiteConfig", "ScraperHealthResponse"):
         assert expected in schemas, f"missing schema {expected}"
 
     # updated_at is part of the neutral event contract (used by an incremental sync).
@@ -41,6 +41,10 @@ def test_openapi_exposes_v1_paths_and_neutral_schemas():
     # Internal scraping machinery stays out of the public venue contract.
     assert "scraper_type" not in schemas["VenueResponse"]["properties"]
 
+    # ...and out of the scrape-health contract too (issue #86 part 1) -- the
+    # venue->scraper mapping is a venues.toml lookup away for the operator.
+    assert "scraper_type" not in schemas["ScraperHealthResponse"]["properties"]
+
 
 def test_openapi_title_is_pinned():
     # Characterization pin (region-pack epic, issue #62/#63/#64): the FastAPI title
@@ -60,6 +64,7 @@ def test_openapi_marks_legacy_aliases_deprecated():
     assert paths["/api/events"]["get"]["deprecated"] is True
     assert paths["/api/venues"]["get"]["deprecated"] is True
     assert paths["/api/health"]["get"]["deprecated"] is True
-    # ...while the v1 surface (including the new site manifest) is not deprecated.
-    for v1_path in ("/api/v1/events", "/api/v1/venues", "/api/v1/health", "/api/v1/site"):
+    # ...while the v1 surface (including the new site manifest and scraper-health
+    # endpoint) is not deprecated.
+    for v1_path in ("/api/v1/events", "/api/v1/venues", "/api/v1/health", "/api/v1/site", "/api/v1/health/scrapers"):
         assert paths[v1_path]["get"].get("deprecated", False) is False

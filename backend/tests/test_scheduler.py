@@ -11,6 +11,7 @@ from apscheduler.events import EVENT_JOB_ERROR, EVENT_JOB_MISSED, JobExecutionEv
 from apscheduler.triggers.cron import CronTrigger
 
 from app import scheduler as scheduler_module
+from app.cadence import CRON_HOURS
 from app.scheduler import _job_listener, configure_scheduler, scheduler
 
 # The job ids configure_scheduler() registers, and the set every test's cleanup is
@@ -38,6 +39,23 @@ def test_configured_jobs_use_the_site_configured_timezone():
             # Triangle's shipped pack pins America/New_York — the canonical IANA
             # form of the historical "US/Eastern" literal (same wall-clock zone).
             assert _tz_str(job.trigger) == "America/New_York"
+    finally:
+        _cleanup()
+
+
+def test_configured_jobs_use_the_shared_cadence_table():
+    """configure_scheduler() must build its CronTrigger hour fields from app.cadence
+    (issue #86 part 1), not a second hardcoded literal -- a drifted copy would give
+    the scrape-health evaluator's staleness threshold a cadence table that no longer
+    matches what actually runs.
+    """
+    configure_scheduler()
+    try:
+        jobs = {job.id: job for job in scheduler.get_jobs() if job.id in JOB_IDS}
+        tm_hours = {f.name: f for f in jobs["scrape_ticketmaster"].trigger.fields}["hour"]
+        indie_hours = {f.name: f for f in jobs["scrape_indie"].trigger.fields}["hour"]
+        assert str(tm_hours) == ",".join(str(h) for h in CRON_HOURS["ticketmaster"])
+        assert str(indie_hours) == ",".join(str(h) for h in CRON_HOURS["indie"])
     finally:
         _cleanup()
 

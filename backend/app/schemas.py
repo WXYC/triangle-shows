@@ -150,3 +150,26 @@ class HealthResponse(BaseModel):
     venue_count: int
     last_scrape: Optional[UTCDateTime] = None  # None if no scrape has run yet
     version: Optional[str] = None
+
+
+# --- Scrape Health Schema ---
+
+class ScraperHealthResponse(BaseModel):
+    """One venue's verdict, returned by GET /api/v1/health/scrapers (issue #86 part 1).
+
+    Deliberately excludes scraper_type: the public contract keeps internal scraping
+    machinery out of response bodies (the same rule VenueResponse follows, pinned by
+    test_openapi.py). `detail` may name a platform in prose where it aids triage
+    without widening the schema. It comes from app.services.scrape_health, already
+    scrubbed of any embedded query string (which can carry the Ticketmaster API key) --
+    this endpoint is unauthenticated, so raw ScrapeLog.error_message must never reach
+    it unredacted.
+    """
+    venue_slug: str
+    status: str  # "ok" | "warning" | "critical" | "unknown"
+    signal: Optional[str] = None
+    detail: Optional[str] = None
+    last_success_at: Optional[UTCDateTime] = None
+    last_attempt_at: Optional[UTCDateTime] = None
+
+    model_config = {"from_attributes": True}
