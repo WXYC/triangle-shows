@@ -20,12 +20,13 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from sqlalchemy import delete, select
 
-from app.cadence import CRON_HOURS, cron_hour_string
+from app.cadence import cron_hour_string
 from app.database import async_session
-from app.models import Event, ScrapeLog, Venue
+from app.models import Event, Venue
 from app.observability import report_error, send_alert
 from app.scrapers.manager import ScrapeManager
-from app.services.scrape_health import BASELINE_WINDOW_DAYS, ScrapeHealthVerdict, evaluate_venue_health
+from app.services.scrape_health import ScrapeHealthVerdict, evaluate_venue_health
+from app.services.scrape_health_query import fetch_venue_scrape_logs
 from app.site_config import load_site_config
 
 # --- Module-level setup ---
@@ -78,23 +79,6 @@ async def cleanup_past_events_job():
 
 # --- Scrape-health digest (issue #86 part 2) ---
 
-# Row cap for the per-venue scrape_logs query below. Mirrors app.api.v1's own
-# cap byte-for-byte (same rationale, same formula): bounding by wall-clock time
-# instead would break the staleness signal for a venue silent longer than the
-# window, since a `started_at >= cutoff` filter returns nothing at all for it.
-# Duplicated here rather than imported from app.api.v1 because the dependency
-# would run the wrong direction -- v1.py is the API layer, and scheduler.py
-# already sits below it (it imports app.database/app.models/app.scrapers.manager
-# directly, per app.cadence's own module docstring on why that's a one-way
-# street) and touching the already-reviewed endpoint module is out of scope for
-# this change.
-_MAX_SCHEDULED_RUNS_PER_DAY = max(len(hours) for hours in CRON_HOURS.values())
-_SCRAPE_LOG_FETCH_HEADROOM = 2
-_DIGEST_SCRAPE_LOG_LIMIT = (
-    BASELINE_WINDOW_DAYS * _MAX_SCHEDULED_RUNS_PER_DAY * _SCRAPE_LOG_FETCH_HEADROOM
-)
-
-
 def _format_digest(
     site_name: str, broke: list[ScrapeHealthVerdict], recovered: list[ScrapeHealthVerdict]
 ) -> str:
@@ -146,41 +130,15 @@ async def scrape_health_digest_job():
     recovered: list[ScrapeHealthVerdict] = []
     async with async_session() as session:
         venues = (await session.execute(select(Venue).order_by(Venue.city, Venue.name))).scalars().all()
-        baseline_cutoff = now - timedelta(days=BASELINE_WINDOW_DAYS)
 
         for venue in venues:
-            logs = list(
-                (
-                    await session.execute(
-                        select(ScrapeLog)
-                        .where(ScrapeLog.venue_id == venue.id, ScrapeLog.started_at <= now)
-                        .order_by(ScrapeLog.started_at.desc())
-                        .limit(_DIGEST_SCRAPE_LOG_LIMIT)
-                    )
-                ).scalars().all()
-            )
-            # The silent-zero baseline guard needs the venue's most recent healthy
-            # scrape inside the 30-day window, which the capped fetch above cannot
-            # promise to reach (unscheduled attempts -- startup scrapes, manual
-            # POST /api/scrape -- are unbounded). Fetch it directly, exactly as
-            # app.api.v1's endpoint does, rather than risk the guard silently
-            # inverting a warning into ok.
-            baseline_row = (
-                await session.execute(
-                    select(ScrapeLog)
-                    .where(
-                        ScrapeLog.venue_id == venue.id,
-                        ScrapeLog.status == "success",
-                        ScrapeLog.events_found > 0,
-                        ScrapeLog.started_at >= baseline_cutoff,
-                        ScrapeLog.started_at <= now,
-                    )
-                    .order_by(ScrapeLog.started_at.desc())
-                    .limit(1)
-                )
-            ).scalars().first()
-            if baseline_row is not None and not any(row is baseline_row for row in logs):
-                logs.append(baseline_row)
+            # The same fetch GET /api/v1/health/scrapers uses, from the shared leaf
+            # module both import -- one capped recent slice plus the separately-fetched
+            # 30-day baseline row. It is shared rather than reimplemented because the
+            # row cap and the baseline window must agree between the endpoint and this
+            # job: they answer the same question about the same venue, so two copies
+            # free to drift would let one report ok while the other pages.
+            logs = await fetch_venue_scrape_logs(session, venue.id, now=now)
 
             # evaluate_staleness=True literally, NOT settings.ENABLE_SCHEDULER.
             # This is not a shortcut standing in for the setting -- it's correct
