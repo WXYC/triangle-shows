@@ -29,13 +29,7 @@ import pytest
 
 from app.redaction import RedactingFormatter, redact_credentials, redact_handler
 
-# Shaped exactly like the URL the Ticketmaster scraper builds (app/scrapers/ticketmaster.py),
-# with a placeholder standing in for the live key.
-FAKE_KEY = "s3cr3tKEYvalue0123456789abcdefgh"
-TM_URL = (
-    "https://app.ticketmaster.com/discovery/v2/events.json"
-    f"?apikey={FAKE_KEY}&venueId=KovZpZAdEEvA&size=200&page=0&sort=date%2Casc"
-)
+from tests.conftest import FAKE_KEY, TM_URL  # noqa: E402  (the shared credential shape)
 
 
 # --- The shared helper ---
@@ -131,7 +125,7 @@ def test_formatter_redacts_the_message():
         name="httpx", level=logging.INFO, pathname=__file__, lineno=1,
         msg='HTTP Request: GET %s "HTTP/1.1 200 OK"', args=(TM_URL,), exc_info=None,
     )
-    out = _capture(RedactingFormatter("%(message)s"), record)
+    out = _capture(RedactingFormatter(logging.Formatter("%(message)s")), record)
     assert FAKE_KEY not in out
     assert "venueId=KovZpZAdEEvA" in out
 
@@ -153,7 +147,7 @@ def test_formatter_redacts_the_exception_traceback():
             lineno=1, msg="scrape failed", args=(), exc_info=sys.exc_info(),
         )
 
-    out = _capture(RedactingFormatter("%(message)s"), record)
+    out = _capture(RedactingFormatter(logging.Formatter("%(message)s")), record)
     assert "Traceback" in out, "the test is only meaningful if the traceback was rendered"
     assert FAKE_KEY not in out
 
@@ -307,17 +301,34 @@ def test_redact_handler_is_idempotent():
     assert handler.formatter is first
 
 
-def test_configure_logging_closes_the_uvicorn_traceback_sink(preserved_logging):
+@pytest.mark.parametrize(
+    "server_logger, child_logger",
+    [
+        ("uvicorn", "uvicorn.error"),
+        # gunicorn is named nowhere in app/**, which is the point: configure_logging
+        # sweeps every handler in the process rather than a list of dependency names,
+        # so swapping the server (`gunicorn -k UvicornWorker` is a deployment change
+        # touching no application code) cannot silently reopen the sink. A test that
+        # only ever reached for "uvicorn" would share the production code's blind spot
+        # instead of checking it.
+        ("gunicorn", "gunicorn.error"),
+    ],
+)
+def test_configure_logging_closes_any_servers_traceback_sink(
+    preserved_logging, server_logger, child_logger
+):
     """Starlette's ServerErrorMiddleware ALWAYS re-raises after invoking the
-    bare-Exception handler, so uvicorn logs the traceback itself on `uvicorn.error`.
-    That logger's parent (`uvicorn`) is configured with propagate=False and its own
-    handler, so nothing it writes ever passes a root handler — and RedactingFormatter
-    is installed only on root handlers. Without this, an httpx.HTTPStatusError
-    escaping any route writes a live ?apikey= to the log stream in full.
+    bare-Exception handler, so the ASGI server logs the traceback itself on its own
+    error logger. That logger's parent is configured with propagate=False and its own
+    handler, so nothing it writes ever passes a root handler. Without the sweep, an
+    httpx.HTTPStatusError escaping any route writes a live ?apikey= in full.
     """
     from app.main import configure_logging
 
-    uvicorn_logger = logging.getLogger("uvicorn")
+    uvicorn_logger = logging.getLogger(server_logger)
+    # Restored by hand rather than leaning on preserved_logging alone: that fixture
+    # snapshots the loggers existing when it runs, and `gunicorn` is created by this
+    # test, so it would otherwise leak its handler into the rest of the session.
     original_handlers = uvicorn_logger.handlers
     original_propagate = uvicorn_logger.propagate
 
@@ -337,7 +348,7 @@ def test_configure_logging_closes_the_uvicorn_traceback_sink(preserved_logging):
                 response=httpx.Response(401, request=httpx.Request("GET", TM_URL)),
             )
         except httpx.HTTPStatusError as exc:
-            logging.getLogger("uvicorn.error").error(
+            logging.getLogger(child_logger).error(
                 "Exception in ASGI application\n", exc_info=exc
             )
 
@@ -347,5 +358,5 @@ def test_configure_logging_closes_the_uvicorn_traceback_sink(preserved_logging):
         uvicorn_logger.propagate = original_propagate
 
     assert "Exception in ASGI application" in out, "the test did not exercise the handler"
-    assert FAKE_KEY not in out, "uvicorn's own handler leaked the credential"
+    assert FAKE_KEY not in out, f"{server_logger}'s own handler leaked the credential"
     assert "venueId=KovZpZAdEEvA" in out, "the diagnosis itself must survive"

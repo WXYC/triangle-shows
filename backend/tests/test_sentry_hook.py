@@ -33,13 +33,9 @@ from app.observability import report_error  # noqa: E402
 
 FAKE_DSN = "https://public@o0.ingest.sentry.io/1"
 
-# Shaped exactly like the URL the Ticketmaster scraper builds — same fixture data
-# as tests/test_redaction.py, reused deliberately so both suites pin the same shape.
-FAKE_KEY = "s3cr3tKEYvalue0123456789abcdefgh"
-TM_URL = (
-    "https://app.ticketmaster.com/discovery/v2/events.json"
-    f"?apikey={FAKE_KEY}&venueId=KovZpZAdEEvA&size=200&page=0&sort=date%2Casc"
-)
+# The same credential shape test_redaction and test_observability pin, imported rather
+# than restated so all three suites are provably asserting against one URL.
+from tests.conftest import FAKE_KEY, TM_URL  # noqa: E402
 
 
 class _CapturingTransport(Transport):
