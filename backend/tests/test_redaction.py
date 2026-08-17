@@ -23,6 +23,7 @@ manager are its two installation points.
 
 import io
 import logging
+import threading
 
 import httpx
 import pytest
@@ -360,3 +361,54 @@ def test_configure_logging_closes_any_servers_traceback_sink(
     assert "Exception in ASGI application" in out, "the test did not exercise the handler"
     assert FAKE_KEY not in out, f"{server_logger}'s own handler leaked the credential"
     assert "venueId=KovZpZAdEEvA" in out, "the diagnosis itself must survive"
+
+
+def test_configure_logging_survives_concurrent_logger_creation(preserved_logging):
+    """configure_logging sweeps every logger in the process, and the registry it reads
+    is a live dict that logging.getLogger() writes into. Walking it lazily meant any
+    thread creating a logger mid-sweep could raise "dictionary changed size during
+    iteration" — out of configure_logging, which runs at import, so the failure mode is
+    the app not booting at all.
+
+    Stress rather than a fixed scenario, because the window is a thread switch: this
+    can only ever miss the bug, never report one that isn't there, so a pass is always
+    legitimate. Against the unsnapshotted version it fires within a few dozen rounds.
+    """
+    from app.main import configure_logging
+
+    registry = logging.root.manager.loggerDict
+    names = [f"_race_probe_{n}" for n in range(500)]
+    stop = threading.Event()
+    failure: list[BaseException] = []
+
+    def churn() -> None:
+        # Adds and removes within a fixed name pool rather than creating new loggers
+        # without bound: the registry's *size* has to change to provoke the bug, but it
+        # must not grow, or the sweep under test gets slower every round and the whole
+        # suite crawls. PlaceHolder is what getLogger itself stores for intermediate
+        # names, so this is the shape the real registry churns through.
+        index = 0
+        while not stop.is_set():
+            name = names[index % len(names)]
+            if name in registry:
+                registry.pop(name, None)
+            else:
+                registry[name] = logging.PlaceHolder(logging.getLogger())
+            index += 1
+
+    churner = threading.Thread(target=churn, daemon=True)
+    churner.start()
+    try:
+        for _ in range(400):
+            try:
+                configure_logging()
+            except RuntimeError as exc:  # pragma: no cover - the bug this pins
+                failure.append(exc)
+                break
+    finally:
+        stop.set()
+        churner.join(timeout=5)
+        for name in names:
+            registry.pop(name, None)
+
+    assert not failure, f"configure_logging raced with logger creation: {failure[0]!r}"

@@ -78,9 +78,15 @@ def configure_logging() -> None:
     """
     logging.basicConfig(level=getattr(logging, settings.LOG_LEVEL), format=LOG_FORMAT)
 
+    # Snapshot the registry before walking it. loggerDict is the live dict that
+    # logging.getLogger() inserts into, and the filter below runs Python between
+    # iterations, so a thread creating a logger mid-sweep would raise "dictionary
+    # changed size during iteration" out of a function that runs at import — turning a
+    # logging refinement into the app failing to boot. list() materializes in one
+    # C-level pass, which cannot observe a concurrent resize.
     loggers = [logging.getLogger()] + [
         existing
-        for existing in logging.root.manager.loggerDict.values()
+        for existing in list(logging.root.manager.loggerDict.values())
         if isinstance(existing, logging.Logger)
     ]
     for each in loggers:
