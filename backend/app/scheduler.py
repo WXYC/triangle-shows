@@ -150,6 +150,15 @@ async def scrape_health_digest_job():
             current = evaluate_venue_health(venue, logs, now=now, evaluate_staleness=True)
             previous = evaluate_venue_health(venue, logs, now=previous_now, evaluate_staleness=True)
 
+            # "Broken" is warning or critical. `unknown` is deliberately grouped with
+            # `ok` on the not-broken side: the evaluator returns it only for a venue
+            # with no visible scrape history at all, and never-scraped is not broken
+            # (issue #86 says so outright). Grouping it with broken instead would page
+            # once for every venue added to venues.toml, in the window between the row
+            # existing and its first scrape finishing -- an alert on a normal step of
+            # onboarding a venue. A venue whose scrapes are actually failing is not
+            # affected: those attempts are visible rows, so it reaches critical on the
+            # consecutive-failure signal as soon as the streak fills the window.
             is_broken_now = current.status in ("warning", "critical")
             was_broken = previous.status in ("warning", "critical")
             if is_broken_now and not was_broken:

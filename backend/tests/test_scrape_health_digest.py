@@ -149,6 +149,46 @@ async def test_no_transitions_means_no_alert_at_all(session, make_venue, monkeyp
     assert sent == []
 
 
+async def test_a_never_scraped_venue_is_silent(session, make_venue, monkeypatch, _sessionmaker):
+    """A venue with no ScrapeLog rows at all evaluates to `unknown`, which the digest
+    groups with `ok` on the not-broken side -- never-scraped is not broken. Without
+    this, adding a venue to venues.toml would page once on its own, in the window
+    between the row existing and its first scrape finishing."""
+    monkeypatch.setattr("app.scheduler.async_session", _sessionmaker)
+    await make_venue(slug="brand-new", scraper_type="ticketmaster")
+    await session.commit()
+
+    sent = []
+    monkeypatch.setattr(scheduler_module, "send_alert", _capturing_send_alert(sent))
+
+    await scrape_health_digest_job()
+
+    assert sent == []
+
+
+async def test_a_venue_whose_first_scrapes_all_fail_still_alerts(session, make_venue, monkeypatch, _sessionmaker):
+    """The other half of the `unknown` rule: treating never-scraped as not-broken must
+    not also silence a venue that has been scraped and is failing. Its attempts are
+    visible rows, so it crosses unknown -> critical as soon as the streak fills the
+    consecutive-failure window, and that crossing is a transition like any other."""
+    monkeypatch.setattr("app.scheduler.async_session", _sessionmaker)
+    venue = await make_venue(slug="broken-from-birth", scraper_type="ticketmaster")
+    # The venue's entire history, all of it inside the last 24h -- so the replay at
+    # now - 24h sees no rows at all and reads `unknown`.
+    for hours_ago in (6, 4, 2):
+        await _log(session, venue, hours_ago=hours_ago, status="failed", error_message="boom")
+    await session.commit()
+
+    sent = []
+    monkeypatch.setattr(scheduler_module, "send_alert", _capturing_send_alert(sent))
+
+    await scrape_health_digest_job()
+
+    assert len(sent) == 1
+    assert "broken-from-birth" in sent[0]
+    assert "consecutive_failures" in sent[0]
+
+
 async def test_webhook_unset_logs_the_digest_instead(session, make_venue, monkeypatch, _sessionmaker, caplog):
     """With ALERT_WEBHOOK_URL unset (the test-suite default), the real
     observability.send_alert path logs the digest text rather than posting it --
