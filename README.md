@@ -188,6 +188,8 @@ See [GIT_CONVENTIONS.md](GIT_CONVENTIONS.md) for the branch/PR workflow if you w
 
 ## License / contact me
 
-GNU General Public License v3. See [LICENSE](LICENSE).
+[Functional Source License, Version 1.1, ALv2 Future License](LICENSE) (FSL-1.1-ALv2) — matching upstream, which relicensed from GPL v3 on 2026-08-26. Each version converts to Apache 2.0 two years after its release.
+
+This repository is a fork of [ty-fi/triangle-shows](https://github.com/ty-fi/triangle-shows). Commits before this change were published under GNU GPL v3; that grant is unaffected for anyone who received the code under it. Code from this point forward is FSL-1.1-ALv2.
 
 Contact me at [@tyfi](https://bsky.app/profile/tyfi.bsky.social) on Bluesky, or you can email [mail@triangle-shows.net](mailto:mail@triangle-shows.net)
