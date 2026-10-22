@@ -15,7 +15,6 @@ import pytest
 from sqlalchemy import select
 
 from app.models import Event, EventMissState
-from app.scheduler import cleanup_past_events_job
 from app.scrapers.base import ScrapedEvent
 from app.scrapers.manager import ScrapeManager
 from conftest import DEFAULT_EVENT_DATE as D  # a month in the future
@@ -347,31 +346,46 @@ async def test_updated_at_moves_only_on_client_visible_changes(session, make_ven
     assert rows["Jessica Pratt"].updated_at > tombstoned_at
 
 
-async def test_past_event_cleanup_survives_miss_state(session, make_venue, scrape, _sessionmaker, monkeypatch):
-    """The 7-day cleanup deletes via Core delete(Event), which bypasses ORM cascades —
-    the miss-state FK must cascade at the database level or the nightly job throws.
-
-    The job's sessionmaker is monkeypatched to the test's: the module-global engine's
-    pool is bound to another event loop (the same seam works for every scheduler job).
-    The backdate uses the job's own clock (utcnow) so a UTC-ahead host near midnight
-    can't land the date exactly on the strict cutoff.
-    """
-    monkeypatch.setattr("app.scheduler.async_session", _sessionmaker)
+async def test_a_delisted_event_is_tombstoned_never_deleted(session, make_venue, scrape):
+    """Regression for the upstream merge (WXYC/triangle-shows#129 I3). Upstream's
+    reconcile hard-deleted an in-window row on the first scrape that did not list it;
+    WXYC Backend-Service mirrors removed_at, so a deleted row would sit on_sale there
+    forever. Every scrape of a vanishing event must leave the row in place."""
     venue = await make_venue()
     keeper = _listing(venue.slug, "Juana Molina", D + timedelta(days=1))
     vanished = _listing(venue.slug, "Jessica Pratt", D)
 
     await scrape(venue, [keeper, vanished], on_day=DAY1)
-    await scrape(venue, [keeper], on_day=DAY2)  # miss state now exists
-    assert len((await session.execute(select(EventMissState))).scalars().all()) == 1
+    for day in (DAY2, DAY3):
+        await scrape(venue, [keeper], on_day=day)
+        rows = await _events_by_artist(session)
+        assert "Jessica Pratt" in rows, f"the delisted row was deleted on {day}"
 
-    # Simulate the show date passing beyond the cleanup buffer.
+    assert rows["Jessica Pratt"].removed_at is not None
+
+
+@pytest.mark.parametrize(
+    "flags",
+    [{"is_manually_created": True}, {"duplicate_of_id": "keeper"}],
+    ids=["hand-added", "flagged-duplicate"],
+)
+async def test_human_owned_rows_are_never_tombstoned(session, make_venue, scrape, flags):
+    """Upstream's scraper_must_not_delete rule, carried into the snapshot diff: a
+    hand-added event is never in a scrape's snapshot, and a row an admin folded into
+    another keeps its reversible judgement, so neither is stamped removed_at."""
+    venue = await make_venue()
+    keeper = _listing(venue.slug, "Juana Molina", D + timedelta(days=1))
+    owned = _listing(venue.slug, "Jessica Pratt", D)
+
+    await scrape(venue, [keeper, owned], on_day=DAY1)
     rows = await _events_by_artist(session)
-    rows["Jessica Pratt"].date = datetime.utcnow().date() - timedelta(days=8)
+    target = rows["Jessica Pratt"]
+    for column, value in flags.items():
+        setattr(target, column, rows["Juana Molina"].id if value == "keeper" else value)
     await session.commit()
 
-    await cleanup_past_events_job()
+    await scrape(venue, [keeper], on_day=DAY2)
+    await scrape(venue, [keeper], on_day=DAY3)
 
-    remaining = (await session.execute(select(Event))).scalars().all()
-    assert [e.artist for e in remaining] == ["Juana Molina"]
-    assert (await session.execute(select(EventMissState))).scalars().all() == []
+    await session.refresh(target)
+    assert target.removed_at is None

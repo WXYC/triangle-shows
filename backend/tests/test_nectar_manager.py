@@ -61,7 +61,7 @@ async def test_manager_scrapes_nectar_and_upserts_only_nectar_events(session, mo
         "JIMOTHY RAVE",
         "Mo' Jam Mondays",
         "Tyler McGinnis with Izzy Burns, Ray Baron, The Orphan 40",
-        "BIG BRASS EXTRAVAGANZA #14 feat:  This Much Brass, Chaotic Noise Marching Corps, AGAB, 8-Bit Brass Band",
+        "BIG BRASS EXTRAVAGANZA #14 feat: This Much Brass, Chaotic Noise Marching Corps, AGAB, 8-Bit Brass Band",
     }
 
     # The trailing numeric Tixr id must be the identity-bearing source_key

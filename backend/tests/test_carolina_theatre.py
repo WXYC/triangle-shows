@@ -20,7 +20,7 @@ from app.scrapers.carolina_theatre import CarolinaTheatreScraper
 # target, with a WXYC-representative act (Jessica Pratt) swapped in for the title.
 # Kept realistic so a future markup drift breaks this test.
 _CARD_HTML = """
-<div class="card eventCard event" data-filterme=" event ">
+<div class="card eventCard event" data-filterme=" event music ">
   <a href="https://carolinatheatre.org/jessica-pratt-26/">
     <div class="event__dateBox">
       <span class="day">9</span>
@@ -71,6 +71,14 @@ def test_parse_card_source_url_is_per_event_detail_page():
     parsed = _scraper()._parse_card(_card())
     assert parsed.source_url == "https://carolinatheatre.org/jessica-pratt-26/"
     assert parsed.ticket_url == "https://carolinatheatre.org/jessica-pratt-26/"
+
+
+def test_parse_card_skips_a_non_music_card():
+    """Upstream's music-only filter (b5336f2): the venue tags each card's categories in
+    data-filterme, and a card without "music" (comedy, dance, film) is not scraped."""
+    html = _CARD_HTML.replace('data-filterme=" event music "', 'data-filterme=" event comedy "')
+    card = BeautifulSoup(html, "lxml").select_one("div.eventCard")
+    assert _scraper()._parse_card(card) is None
 
 
 def test_parse_card_returns_none_when_title_missing():

@@ -13,10 +13,11 @@ shared helpers (app.api.common), the shared query service (app.services.events_q
 """
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.common import event_to_response, get_event, parse_date
+from app.config import settings
 from app.database import get_session
 from app.schemas import EventResponse, EventListResponse
 from app.services.events_query import query_events
@@ -24,6 +25,28 @@ from app.services.events_query import query_events
 # --- Router setup ---
 
 router = APIRouter(prefix="/api/events", tags=["events"], deprecated=True)  # superseded by /api/v1/events
+
+
+# --- Query-API gate (upstream #62), open in this fork ---
+
+async def require_query_api() -> None:
+    """Upstream's switch for pausing the queryable read endpoints (issue #62).
+
+    Applied to the deprecated GET /api/events and GET /api/events/{id} only — never to
+    /api/v1, which is the published contract WXYC Backend-Service imports from. Upstream
+    ships it closed; this fork defaults PUBLIC_QUERY_API_ENABLED to true, so the code is
+    here for a later sync to build on but the gate is off.
+    """
+    if settings.PUBLIC_QUERY_API_ENABLED:
+        return
+    raise HTTPException(
+        status_code=403,
+        detail=(
+            "Programmatic access to this endpoint is paused while a registration process "
+            "is set up. The calendar itself stays open at /api/v1/events and "
+            "/feeds/events.ics."
+        ),
+    )
 
 
 # --- Endpoints ---
@@ -35,10 +58,11 @@ router.add_api_route(
     methods=["GET"],
     response_model=EventResponse,
     summary="Get a single event by id (deprecated alias of /api/v1/events/{event_id})",
+    dependencies=[Depends(require_query_api)],
 )
 
 
-@router.get("")
+@router.get("", dependencies=[Depends(require_query_api)])
 async def list_events(
     start: Optional[str] = Query(None),
     end: Optional[str] = Query(None),

@@ -1,24 +1,27 @@
 """
-APScheduler job definitions for periodic scraping and data maintenance.
+APScheduler job definitions for periodic scraping.
 
 Role: Started during FastAPI app startup (main.py) when ENABLE_SCHEDULER=true.
       Runs scrape jobs on a fixed cron schedule as an alternative to Cloud Scheduler
-      HTTP triggers — both ultimately call the same ScrapeManager logic.
+      HTTP triggers — both ultimately call the same ScrapeManager logic. Every job here
+      only ever adds or updates events; nothing scheduled deletes them, deliberately
+      (see configure_scheduler).
 Requires: ENABLE_SCHEDULER env var (via config.py), app.scrapers.manager.ScrapeManager,
           app.database.async_session, and a running async event loop (provided by FastAPI).
 """
 
 # --- Imports ---
+#
+# No `delete`, no Event model, no date arithmetic: every import here is for scheduling or
+# scraping. That is a property worth noticing rather than an accident — this module cannot
+# delete a row without someone adding an import first.
 import logging
-from datetime import datetime, timedelta
 
 from apscheduler.events import EVENT_JOB_ERROR, EVENT_JOB_MISSED
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
-from sqlalchemy import delete
 
 from app.database import async_session
-from app.models import Event
 from app.observability import report_error
 from app.scrapers.manager import ScrapeManager
 from app.site_config import load_site_config
@@ -51,24 +54,6 @@ async def scrape_indie_job():
         results = await manager.scrape_indie()
         for r in results:
             logger.info(f"  {r}")
-
-
-async def cleanup_past_events_job():
-    """Delete events more than 7 days in the past.
-
-    Tests must monkeypatch this module's ``async_session`` to their own sessionmaker:
-    the module-global engine's connection pool is bound to the production event loop,
-    and borrowing its pooled connections across per-test loops breaks.
-    """
-    logger.info("Cleaning up past events")
-    # Keep a 7-day buffer so recently-ended events don't vanish immediately
-    cutoff = datetime.utcnow().date() - timedelta(days=7)
-    async with async_session() as session:
-        result = await session.execute(
-            delete(Event).where(Event.date < cutoff)
-        )
-        await session.commit()
-        logger.info(f"Deleted {result.rowcount} past events")
 
 
 # --- Error/missed-job reporting ---
@@ -133,10 +118,29 @@ def configure_scheduler():
         replace_existing=True,
     )
 
-    # Past event cleanup: 3 AM local
-    scheduler.add_job(
-        cleanup_past_events_job,
-        CronTrigger(hour=3, timezone=tz),
-        id="cleanup_past_events",
-        replace_existing=True,
-    )
+    # No past-event cleanup job, deliberately. Removed rather than left commented out,
+    # because commented-out code gets re-enabled by someone who reads the comment as a
+    # to-do rather than a decision.
+    #
+    # There used to be one deleting every event more than 7 days old, nightly at 3 AM ET.
+    # It never ran anywhere — ENABLE_SCHEDULER is false in cloudbuild.yaml, in
+    # backend/.env.example, in docs/SELF-HOSTING.md and by default in config.py — which is
+    # the only reason the archive still exists: production holds events back to January.
+    #
+    # Past events are wanted, and three separate parts of the app already assume so:
+    #
+    #   * the scrape's snapshot diff bounds tombstoning to `today <= date < horizon` and
+    #     never deletes, so a scrape cannot remove the archive (WXYC Backend-Service
+    #     imports past events with a back-dated start)
+    #   * the admin moderation queue and reclassify_all() both work from reclassify_floor(),
+    #     which is today minus 30 days — a 7-day cleanup would delete rows the admin UI is
+    #     built to display
+    #   * the public calendar can be scrolled backwards, and /api/events applies no floor
+    #
+    # The job also bypassed the two protections that make hand-added events and
+    # admin-flagged duplicates safe: it issued a bulk DELETE, so it never reached
+    # ScrapeManager.scraper_must_not_delete, and would have silently undone both a week
+    # after the fact.
+    #
+    # There is no operational pressure the other way. Production is at ~2,900 events after
+    # a year across 22 venues; the table is not going to become a problem.

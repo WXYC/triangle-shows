@@ -4,10 +4,16 @@ upserts events + scrape logs, and diffs each venue's snapshot against stored
 events to maintain the vanished-event signal (Event.removed_at tombstones and
 their event_miss_state streak bookkeeping).
 
+Nothing here hard-deletes a row. Upstream's reconcile pass (plan_upsert, which deleted
+rows a venue stopped listing and folded "superseded" rows away) does the same job as the
+tiered identity match plus the snapshot diff below, and was not taken in the merge: WXYC
+Backend-Service mirrors removed_at, so a deleted row would never reach it as a removal.
+
 Role: Triggered by POST /api/scrape (called by the scheduler every 6 hours or
 by Cloud Scheduler). Sits between the individual scrapers and the database —
-it owns the fan-out, error isolation, the upsert, the snapshot diff, and the
-per-venue write serialization (advisory lock).
+it owns the fan-out, error isolation, the upsert, the snapshot diff, the
+per-venue write serialization (advisory lock), and the live-music reclassify
+pass that follows every bulk scrape.
 Requires: TICKETMASTER_API_KEY (via app.config.settings), async PostgreSQL
 session, and all scraper modules in app.scrapers/.
 """
@@ -21,11 +27,12 @@ from sqlalchemy import delete, func, or_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.classifier import ALWAYS_LIVE_VENUE_SLUGS, classification_updates, reclassify_floor
 from app.config import settings
 from app.market_time import today_in_market
-from app.models import Venue, Event, EventMissState, ScrapeLog
+from app.models import MANUAL_SCRAPER_TYPE, Venue, Event, EventMissState, ScrapeLog, SeriesOverride
 from app.observability import report_error
-from app.redaction import redact_credentials
+from app.redaction import describe_exception
 from app.scrapers.base import BaseScraper, ScrapedEvent
 from app.scrapers.headliner import merge_support, parse_billing
 from app.scrapers.identity import (
@@ -58,6 +65,105 @@ MASS_DISAPPEARANCE_MIN = 5
 HEADLINER_MAX_LEN = Event.__table__.c.headliner.type.length
 
 
+def scraper_must_not_delete(row) -> bool:
+    """True for a row whose existence is a human decision, so the scrape must leave it.
+
+    Kept under upstream's name, though here it guards the snapshot diff's tombstone
+    rather than a delete (this manager never deletes). A hand-added event
+    (`is_manually_created`) is by definition never in a scrape's snapshot, so without
+    this every manual event at a scraped venue would be tombstoned two scrape days after
+    it was added. A row an admin folded into another (`duplicate_of_id`, upstream #63) is
+    already hidden, and its judgement should stay reversible rather than be overwritten
+    by a removal the venue never made.
+
+    The flags rather than `source`: the upsert writes scraper data onto a matched row, so
+    a source-based test stops protecting a row the first time the venue lists the same
+    show. Nothing in the scraper path writes these flags.
+    """
+    return bool(
+        getattr(row, "is_manually_created", False)
+        or getattr(row, "duplicate_of_id", None) is not None
+    )
+
+
+def derive_billing(se: ScrapedEvent) -> tuple[Optional[str], list[str]]:
+    """The stored (headliner, support_artists) for a scraped event (issues #18, #41).
+
+    A scraper-supplied structured performer (schema.org Event.performer, Ticketmaster
+    attractions) is ALREADY authoritative and clean, so it is trusted VERBATIM — only
+    whitespace-normalized and width-clamped. Running the billing-string heuristic over it
+    would mangle a real band whose name happens to match a strip/null pattern (e.g.
+    "Karaoke From Hell", or a name containing "feat."/"Presents:"). The heuristic applies
+    ONLY to the raw name fallback, where there is no structured performer to trust.
+
+    Support acts are derived twin to headliner: merge_support unions the scraper's
+    structured performer list with the billing tail ("… w/ Booster Club, Field Day"),
+    casefold-dedupes, and excludes the headliner. No width clamp — support_artists is an
+    unbounded text[]; only the headliner column is String(300)-bounded.
+    """
+    structured = (se.headliner or "").strip()
+    if structured:
+        # Its billing tail is still harvested for openers.
+        headliner = " ".join(structured.split())
+        tail = parse_billing(se.name)[1]
+    else:
+        # A single parse_billing over the name yields BOTH the heuristic headliner and the
+        # support tail (extract_headliner is exactly parse_billing(...)[0]).
+        headliner, tail = parse_billing(se.name)
+    if headliner:
+        headliner = headliner[:HEADLINER_MAX_LEN]
+    return headliner, merge_support(se.support_artists, tail, headliner)
+
+
+def event_from_scraped(
+    se: ScrapedEvent,
+    venue_id: int,
+    verdict: UrlIdentityVerdict = UrlIdentityVerdict.HASH_FALLBACK,
+) -> Event:
+    """Build a new Event row from a ScrapedEvent, identity fields included.
+
+    Shared by the upsert's insert branch and upstream's admin manual-add and submission
+    approval, so a hand-added row is built the way a scraped one is: the same cleaned
+    title, validated URLs, derived headliner/support, and a source_key from the same
+    derivation. Because the hash is computed identically, a venue that later lists a show
+    an admin already added matches the admin's row instead of inserting a second one.
+
+    `verdict` is the venue scraper's URL-identity verdict; the hash-fallback default is
+    right for a manual venue, which has no scraper to vouch for its URLs.
+
+    Does not set is_manually_created; the caller does. Nothing in the scraper path should
+    ever write that flag (see scraper_must_not_delete).
+    """
+    headliner, support = derive_billing(se)
+    h = se.hash
+    norm = normalize_source_url(se.source_url)
+    return Event(
+        external_id=se.external_id,
+        venue_id=venue_id,
+        name=se.name,
+        artist=se.artist,
+        headliner=headliner,
+        support_artists=support,
+        date=se.date,
+        doors_time=se.doors_time,
+        show_time=se.show_time,
+        ticket_url=se.ticket_url,
+        price_min=se.price_min,
+        price_max=se.price_max,
+        image_url=se.image_url,
+        genre=se.genre,
+        subgenre=se.subgenre,
+        status=se.status,
+        age_restriction=se.age_restriction,
+        description=se.description,
+        source=se.source,
+        source_url=se.source_url,
+        normalized_source_url=norm,
+        hash=h,
+        source_key=derive_source_key(se.external_id, norm, h, verdict),
+    )
+
+
 # --- ScrapeManager ---
 
 class ScrapeManager:
@@ -65,9 +171,20 @@ class ScrapeManager:
 
     def __init__(self, session: AsyncSession):
         self.session = session
+        # Result of the reclassify pass at the end of the last bulk scrape, so a caller
+        # can report what the classifier actually did instead of finding a log line.
+        self.last_reclassify: Optional[dict] = None
 
     def _get_scraper(self, venue: Venue) -> Optional[BaseScraper]:
-        """Instantiate the correct scraper for a venue."""
+        """Instantiate the correct scraper for a venue, or None if there is none.
+
+        A manual venue (a promoter, a one-off series) has no source to scrape, so None is
+        the correct and expected answer for it. scrape_all filters these out before
+        reaching here; this branch makes a manual venue arriving by some other path a
+        clear no-op rather than a broken scraper_type.
+        """
+        if venue.scraper_type == MANUAL_SCRAPER_TYPE:
+            return None
         if venue.scraper_type == "ticketmaster":
             if not venue.ticketmaster_venue_id:
                 logger.warning(f"No TM venue ID for {venue.slug}")
@@ -161,9 +278,14 @@ class ScrapeManager:
             # Ticketmaster scraper authenticates with an ?apikey= query parameter — so the
             # raw exception text is a live credential. It reaches three sinks from here:
             # this log line, the scrape_logs row below, and the dict returned to
-            # POST /api/scrape, which is unauthenticated. Redact once, at the top.
-            message = redact_credentials(str(e))
-            logger.error(f"[{venue_slug}] Scrape failed: {message}")
+            # POST /api/scrape, which is unauthenticated. describe_exception redacts
+            # once, at the top, and also names the exception class: every httpx
+            # transport error has an empty str(), so `error` used to come back as ""
+            # exactly when a venue was unreachable (upstream #15).
+            message = describe_exception(e)
+            # exc_info: the class name is not enough for the parser-broke case. Safe —
+            # RedactingFormatter scrubs rendered tracebacks too (app/redaction.py).
+            logger.error(f"[{venue_slug}] Scrape failed: {message}", exc_info=True)
             try:
                 # Roll back the failed transaction before writing the error log,
                 # otherwise the commit below will also fail.
@@ -312,35 +434,9 @@ class ScrapeManager:
         claimed: set[int] = set()
 
         for key, (se, h, norm, demoted) in batch.items():
-            # Best-effort clean performer (issue #18). A scraper-supplied structured
-            # performer (schema.org Event.performer, Ticketmaster attractions) is
-            # ALREADY authoritative and clean, so it is trusted VERBATIM — only
-            # whitespace-normalized and width-clamped. Running the billing-string
-            # heuristic over it would mangle a real band whose name happens to match
-            # a strip/null pattern (e.g. "Karaoke From Hell", or a name containing
-            # "feat."/"Presents:"). The heuristic applies ONLY to the raw name
-            # fallback, where there is no structured performer to trust.
-            structured = (se.headliner or "").strip()
-            if structured:
-                # Trusted structured performer (schema.org / TM attraction) — only
-                # whitespace-normalized, never re-derived. Its billing tail is still
-                # harvested below for openers.
-                headliner = " ".join(structured.split())
-                tail = parse_billing(se.name)[1]
-            else:
-                # No structured performer: a single parse_billing over the name yields
-                # BOTH the heuristic headliner and the support tail (extract_headliner is
-                # exactly parse_billing(...)[0], so this avoids parsing the name twice).
-                headliner, tail = parse_billing(se.name)
-            if headliner:
-                headliner = headliner[:HEADLINER_MAX_LEN]
-
-            # Support acts (issue #41), derived + assigned unconditionally, twin to
-            # headliner. merge_support unions the scraper's structured performer list with
-            # the billing tail ("… w/ Booster Club, Field Day"), casefold-dedupes, and
-            # excludes the headliner. No width clamp — support_artists is an unbounded
-            # text[]; only the headliner column is String(300)-bounded.
-            support = merge_support(se.support_artists, tail, headliner)
+            # Best-effort clean performer (issue #18) and support acts (issue #41); see
+            # derive_billing for why a structured performer is trusted verbatim.
+            headliner, support = derive_billing(se)
 
             existing = match(se, h, norm, key)
             if existing is not None and existing.id in claimed:
@@ -406,35 +502,11 @@ class ScrapeManager:
                 if self.session.is_modified(existing):
                     updated += 1
             else:
-                event = Event(
-                    external_id=se.external_id,
-                    venue_id=venue_id,
-                    name=se.name,
-                    artist=se.artist,
-                    headliner=headliner,
-                    # Derived support (issue #41): structured performers ∪ billing tail,
-                    # deduped, headliner excluded — see the derivation above.
-                    support_artists=support,
-                    date=se.date,
-                    doors_time=se.doors_time,
-                    show_time=se.show_time,
-                    ticket_url=se.ticket_url,
-                    price_min=se.price_min,
-                    price_max=se.price_max,
-                    image_url=se.image_url,
-                    genre=se.genre,
-                    subgenre=se.subgenre,
-                    status=se.status,
-                    age_restriction=se.age_restriction,
-                    description=se.description,
-                    source=se.source,
-                    source_url=se.source_url,
-                    normalized_source_url=norm,
-                    hash=h,
-                    # The batch key IS the identity: ext:/url: for stable tiers,
-                    # hash: for hash-tier and demoted events.
-                    source_key=key,
-                )
+                event = event_from_scraped(se, venue_id, verdict)
+                # The batch key IS the identity: ext:/url: for stable tiers, hash: for
+                # hash-tier and demoted events. event_from_scraped derives the same key
+                # except for demoted events and ambiguous URLs, so set it explicitly.
+                event.source_key = key
                 self.session.add(event)
                 created += 1
 
@@ -513,7 +585,10 @@ class ScrapeManager:
                 Event.removed_at.is_(None),
             )
         )
-        in_window = in_window_result.scalars().all()
+        # Human-owned rows (hand-added, or folded as a duplicate) are never tombstoned
+        # and do not count toward the mass guard either way — see
+        # scraper_must_not_delete.
+        in_window = [e for e in in_window_result.scalars().all() if not scraper_must_not_delete(e)]
         missing = [e for e in in_window if e.hash not in snapshot_hashes]
         if not missing:
             return 0, relisted
@@ -573,13 +648,102 @@ class ScrapeManager:
 
         return tombstoned, relisted
 
+    # --- Classification ---
+
+    async def reclassify_all(self) -> dict:
+        """Recompute is_live_music for upcoming events and the recent past.
+
+        Runs after every bulk scrape. Recurrence is a cross-event signal, so this
+        always considers the full set of events in range regardless of which venues
+        were just scraped. Admin decisions are respected: per-event manual overrides
+        (is_manual_override=True) are left untouched, and series-level overrides are
+        applied to every matching event — including instances scraped later.
+
+        The range reaches RECLASSIFY_PAST_DAYS behind today, not just forward: the
+        calendar can be scrolled back into recent dates, and those events need to
+        respond to live/non-live changes too. Returns {events, changed} counts.
+        """
+        result = await self.session.execute(
+            select(Event).where(Event.date >= reclassify_floor())
+        )
+        events = result.scalars().all()
+
+        # Load series-level overrides, keyed to match classifier.normalize_series_name.
+        so_result = await self.session.execute(select(SeriesOverride))
+        series_overrides = {
+            (so.venue_id, so.normalized_name): (so.is_live_music, so.note)
+            for so in so_result.scalars().all()
+        }
+
+        # Resolve always-live venues (e.g. DPAC) to their ids for the exemption.
+        venue_rows = await self.session.execute(select(Venue.id, Venue.slug))
+        exempt_venue_ids = {
+            vid for vid, slug in venue_rows.all() if slug in ALWAYS_LIVE_VENUE_SLUGS
+        }
+
+        # classification_updates omits manually-overridden rows (those flags survive),
+        # forces always-live venues, and applies series overrides above auto.
+        updates = classification_updates(
+            events,
+            series_overrides=series_overrides,
+            exempt_venue_ids=exempt_venue_ids,
+        )
+
+        changed = 0
+        unapproved = 0
+        for ev in events:
+            if ev.id not in updates:
+                continue
+            is_live, reason = updates[ev.id]
+            if ev.is_live_music != is_live or ev.classification_reason != reason:
+                # An approval records agreement with a specific verdict. If the verdict
+                # itself moves, that approval is stale — clear it so the event returns
+                # to the review queue instead of staying hidden behind an old decision.
+                # Only a change of is_live_music counts; a reworded reason is not a
+                # different answer and should not resurface work already reviewed.
+                if ev.is_live_music != is_live and ev.approved_at is not None:
+                    ev.approved_at = None
+                    unapproved += 1
+                ev.is_live_music = is_live
+                ev.classification_reason = reason
+                changed += 1
+
+        await self.session.commit()
+        logger.info(
+            f"Reclassified {len(events)} events in range; {changed} changed, "
+            f"{unapproved} approvals cleared (manual overrides preserved)"
+        )
+        return {"events": len(events), "changed": changed, "unapproved": unapproved}
+
     # --- Bulk scrape entry points ---
 
-    async def scrape_all(self, scraper_types: Optional[list[str]] = None) -> list[dict]:
-        """Scrape all venues (or those matching given scraper_types)."""
-        query = select(Venue)
+    async def scrape_all(
+        self,
+        scraper_types: Optional[list[str]] = None,
+        exclude_scraper_types: Optional[list[str]] = None,
+    ) -> list[dict]:
+        """Scrape all venues, optionally narrowed to or away from given scraper_types.
+
+        The single venue-selection query for the whole class — scrape_ticketmaster and
+        scrape_indie both come through here. That is deliberate: scrape_indie previously
+        built its own query and so missed the manual-venue exclusion below, which is the
+        kind of omission a second query invites.
+
+        Venues whose scraper_type is MANUAL_SCRAPER_TYPE are excluded unconditionally, and
+        this is a guardrail rather than an optimisation. There is no scraper for them by
+        design, so _get_scraper returns None, scrape_venue raises "No scraper available",
+        and every one of them would write a failed ScrapeLog row on every cycle — for each
+        promoter an admin adds, indefinitely. The scrape would still look broken in the logs
+        while working perfectly.
+
+        Excluded even when scraper_types names them explicitly: there is nothing to scrape,
+        so an explicit request is a mistake rather than an override.
+        """
+        query = select(Venue).where(Venue.scraper_type != MANUAL_SCRAPER_TYPE)
         if scraper_types:
             query = query.where(Venue.scraper_type.in_(scraper_types))
+        if exclude_scraper_types:
+            query = query.where(Venue.scraper_type.notin_(exclude_scraper_types))
         result = await self.session.execute(query)
         venues = result.scalars().all()
 
@@ -590,6 +754,9 @@ class ScrapeManager:
             r = await self.scrape_venue(venue)
             results.append(r)
 
+        # Recompute live-music flags across all upcoming events now that new data is in.
+        self.last_reclassify = await self.reclassify_all()
+
         return results
 
     async def scrape_ticketmaster(self) -> list[dict]:
@@ -597,13 +764,17 @@ class ScrapeManager:
         return await self.scrape_all(scraper_types=["ticketmaster"])
 
     async def scrape_indie(self) -> list[dict]:
-        """Scrape only non-Ticketmaster venues."""
-        query = select(Venue).where(Venue.scraper_type != "ticketmaster")
-        result = await self.session.execute(query)
-        venues = result.scalars().all()
+        """Scrape only non-Ticketmaster venues.
 
-        results = []
-        for venue in venues:
-            r = await self.scrape_venue(venue)
-            results.append(r)
-        return results
+        Delegates rather than running its own query. It used to build
+        `select(Venue).where(scraper_type != "ticketmaster")` and loop itself, which meant a
+        second venue query that did *not* pick up the manual-venue exclusion — so every
+        promerter an admin created would be scraped here, fail for want of a scraper, and
+        write a failed ScrapeLog three times a day (this is a scheduled job). Only dormant
+        in production because ENABLE_SCHEDULER is false there.
+
+        One query in this class is the fix, not a tidy-up: any venue-selection rule added in
+        future now applies to every entry point automatically instead of needing to be
+        remembered twice.
+        """
+        return await self.scrape_all(exclude_scraper_types=["ticketmaster"])

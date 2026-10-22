@@ -124,13 +124,48 @@ const PALETTES = {
       "--today-bg":     "rgba(191,106,40,0.06)",
     },
   },
+  // October only (see SEASONAL_PALETTES): pumpkin on purple-black, slime-green hearts.
+  halloween: {
+    label: "Halloween",
+    accent: "#ff7a1a",
+    vars: {
+      "--bg":           "#0d0812",
+      "--surface":      "#160d1c",
+      "--surface2":     "#1e1226",
+      "--border":       "#34203f",
+      "--text":         "#f0e6d8",
+      "--muted":        "#9a78b0",
+      "--dim":          "#4a2c5a",
+      "--accent":       "#ff7a1a",
+      "--accent-hover": "#ffa04d",
+      "--accent-bg":    "rgba(255,122,26,0.12)",
+      "--today-bg":     "rgba(255,122,26,0.06)",
+    },
+  },
 };
 
-function applyPalette(key) {
+// Seasonal palettes, keyed to the month they run (Date#getMonth, so October is 9).
+// In season, a seasonal palette is the default for anyone who hasn't picked one and its
+// swatch is offered; out of season the swatch is hidden and a saved choice of it falls
+// back to the default. The default is applied without being saved, so it lapses on its
+// own when the month ends rather than sticking to every visitor who never chose it.
+const SEASONAL_PALETTES = { halloween: 9 };
+
+function isPaletteInSeason(key, date = new Date()) {
+  return !(key in SEASONAL_PALETTES) || SEASONAL_PALETTES[key] === date.getMonth();
+}
+
+function seasonalDefaultPalette(date = new Date()) {
+  return Object.keys(SEASONAL_PALETTES).find((k) => SEASONAL_PALETTES[k] === date.getMonth()) || null;
+}
+
+// `persist: false` is for defaults the visitor didn't choose (the seasonal palette), so
+// they aren't remembered as a preference.
+function applyPalette(key, { persist = true } = {}) {
   if (!PALETTES[key]) return;
   // Drive palette entirely through CSS: html[data-palette="..."] selectors in styles.css
   document.documentElement.dataset.palette = key;
-  localStorage.setItem("triangle-shows-palette", key);
+  if (persist) localStorage.setItem("triangle-shows-palette", key);
   document.querySelectorAll(".palette-btn").forEach((btn) => {
     btn.classList.toggle("active", btn.dataset.palette === key);
   });
@@ -173,10 +208,28 @@ function fitAsciiTitle() {
 document.addEventListener("DOMContentLoaded", fitAsciiTitle);
 window.addEventListener("resize", fitAsciiTitle);
 
-// Per-subdomain site configuration. Detected once at load time from hostname.
-const SITE_CONFIG = (function () {
-  const host = window.location.hostname;
-  if (host.startsWith("durm.")) {
+// Per-site configuration, chosen from the hostname once at load time.
+//
+// The Durham variant answers on two kinds of host: its own domain, durm-shows.net, and
+// the older durm.* subdomain it grew out of. Both are kept working — the subdomain has
+// been linked to and bookmarked, and there is no reason to break it.
+//
+// Hostname detection is factored into a function taking the host explicitly rather than
+// reading window.location directly, so it can be exercised for a host other than the one
+// the page happens to be served from. Without that, the only way to check the Durham
+// variant is to deploy and visit it.
+// durm-shows.localhost is here so the Durham variant can be opened locally. Browsers
+// resolve *.localhost to the loopback address without a hosts-file entry, so
+// http://durm-shows.localhost:8090 reaches the local preview server and picks the variant
+// up from the hostname. Harmless in production: the name is unreachable from anywhere
+// except the machine serving it.
+const DURM_HOSTS = ["durm-shows.net", "www.durm-shows.net", "durm-shows.localhost"];
+
+function detectSiteConfig(host) {
+  host = String(host || "").toLowerCase();
+  // durm-shows.net is matched exactly; durm.* covers the subdomain form. Note these are
+  // genuinely different prefixes — "durm-shows.net" does not start with "durm.".
+  if (host.startsWith("durm.") || DURM_HOSTS.includes(host)) {
     return {
       city:      "Durham",
       title:     "durm-shows",
@@ -186,9 +239,11 @@ const SITE_CONFIG = (function () {
     };
   }
   return { city: null };
-})();
+}
 
-// Apply subdomain-specific title, subtitle, and default palette.
+const SITE_CONFIG = detectSiteConfig(window.location.hostname);
+
+// Apply site-specific title, subtitle, and default palette.
 // Runs after DOM is ready; palette is only defaulted if the user has no saved preference.
 function applySiteConfig() {
   if (!SITE_CONFIG.city) return;

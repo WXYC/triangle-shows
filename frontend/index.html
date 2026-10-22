@@ -8,9 +8,15 @@
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' fill='%23f0922e'/%3E%3C/svg%3E">
 
   <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@900&family=Space+Mono:ital,wght@0,400;0,700;1,400;1,700&display=swap" rel="stylesheet">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <!-- Space Mono: identity layer (ASCII title, labels, chrome).
+       IBM Plex Mono: data layer (event titles, venue lines, list view) - drawn for
+       interface density, so it holds shape at 11-13px where Space Mono's tight counters
+       fill in. Silkscreen: true bitmap face, currently used only for the equalizer's
+       week ruler; loaded so pixel treatments can be tried elsewhere without a round trip. -->
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:ital,wght@0,400;0,500;0,600;1,400&family=Orbitron:wght@900&family=Silkscreen:wght@400;700&family=Space+Mono:ital,wght@0,400;0,700;1,400;1,700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.15/index.global.min.css">
-  <link rel="stylesheet" href="/css/styles.css">
+  <link rel="stylesheet" href="/css/styles.css?v={{ASSET_VERSION}}">
 
   <!-- Google Analytics -->
   <script async src="https://www.googletagmanager.com/gtag/js?id=G-S37F3PHK0R"></script>
@@ -39,7 +45,7 @@
     <!-- Header -->
     <header class="app-header">
       <div class="ascii-title">   __       _                   __               __                                    __
-  / /______(_)___ _____  ____ _/ /__       _____/ /_  ____ _      _______  ____  ___  / /_
+  / /______(_)___  ____  ____ _/ /__       _____/ /_  ____ _      _______  ____  ___  / /_
  / __/ ___/ / __ `/ __ \/ __ `/ / _ \_____/ ___/ __ \/ __ \ | /| / / ___/ / __ \/ _ \/ __/
 / /_/ /  / / /_/ / / / / /_/ / /  __/_____\__ / / / / /_/ / |/ |/ /\__ / / / / /  __/ /_
 \__/_/  /_/\__,_/_/ /_/\__, /_/\___/    /____/_/ /_/\____/|__/|__/____(_)_/ /_/\___/\__/<span class="cursor"></span>
@@ -63,18 +69,40 @@
         <input type="text" id="search-input" placeholder="search artists/events...">
       </div>
 
-      <!-- City Filter -->
-      <div class="filter-section">
-        <div class="filter-label">City</div>
-        <div class="chip-group" id="city-filters"></div>
+      <!-- Night-density equalizer. Sits above the filters it responds to, so changing a
+           filter and watching the bars redraw reads as one motion. -->
+      <div class="filter-section eq-section">
+        <div class="filter-label">Next 14 nights</div>
+        <div class="eq-strip">
+          <div class="equalizer" id="equalizer" role="img" aria-label="Show density for the next 14 nights"></div>
+          <div class="eq-ruler" aria-hidden="true"><span>today</span><span>+1wk</span></div>
+        </div>
+        <p class="eq-readout" id="eq-readout" aria-live="polite"></p>
       </div>
 
-      <!-- Venue Filter -->
+      <!-- Cities & Venues.
+           Replaces the former separate "City" chip row and flat "Venues" list: every
+           venue belongs to a city, so the venues now sit under theirs and each city
+           collapses. Rendered together by renderVenueFilters() in js/filters.js.
+           #venue-filters keeps its id because _updateVenueRestoreBtn() appends to it. -->
       <div class="filter-section">
-        <div class="filter-label">Venues</div>
-        <div class="venue-list" id="venue-filters"></div>
+        <div class="filter-label">Cities &amp; Venues</div>
+        <!-- Cross-cutting chips that aren't a city — currently only Spotify's
+             "★ for you", appended here by js/spotify.js. Collapses to zero height
+             while empty. -->
+        <div class="chip-group quick-filters" id="quick-filters"></div>
+        <div class="city-groups" id="venue-filters"></div>
         <button class="btn-subscribe-venues" onclick="subscribeToVenues()">↗ get a cal for these venues</button>
         <p class="subscribe-hint">new shows will appear automatically!</p>
+      </div>
+
+      <!-- Live-music filter -->
+      <div class="filter-section">
+        <div class="filter-label">Show</div>
+        <div class="chip-group">
+          <button class="chip" id="chip-non-music" onclick="toggleNonMusic()">include non-live shows</button>
+        </div>
+        <p class="subscribe-hint">karaoke, trivia, theme nights &amp; other recurring events are hidden by default</p>
       </div>
 
       <!-- Friends & Feeds -->
@@ -100,6 +128,8 @@
           <button class="palette-btn"        data-palette="phosphor" onclick="applyPalette('phosphor')" title="Phosphor" style="background:#44c754"></button>
           <button class="palette-btn"        data-palette="midnight" onclick="applyPalette('midnight')" title="Midnight" style="background:#4888e8"></button>
           <button class="palette-btn"        data-palette="wisteria" onclick="applyPalette('wisteria')" title="Wisteria" style="background:#c060d0"></button>
+          <!-- October only: app.js unhides it in season. Purple ring so it isn't read as amber. -->
+          <button class="palette-btn" data-palette="halloween" onclick="applyPalette('halloween')" title="Halloween" style="background:#ff7a1a; box-shadow: inset 0 0 0 2px #4a2c5a" hidden></button>
         </div>
         <div class="mode-toggle-wrap">
           <button class="mode-toggle" id="mode-toggle" onclick="toggleMode()">☀ light</button>
@@ -121,13 +151,19 @@
     <!-- Calendar -->
     <main class="calendar-container">
       <div id="calendar"></div>
-      <footer class="site-credit">made by <a href="http://bsky.app/profile/tyfi.bsky.social" target="_blank" rel="noopener">@tyfi</a>. it's on <a href="https://github.com/ty-fi/triangle-shows" target="_blank" rel="noopener">github</a>.</footer>
+      <footer class="site-credit">made by <a href="http://bsky.app/profile/tyfi.bsky.social" target="_blank" rel="noopener">@tyfi</a> and the gang at <a href="https://github.com/triangle-shows" target="_blank" rel="noopener">triangle-shows</a>. it's on <a href="https://github.com/triangle-shows/triangle-shows" target="_blank" rel="noopener">github</a>.</footer>
     </main>
   </div>
 
   <!-- Bottom-left utility bar: appears when shows are hearted or hidden -->
   <div class="favorites-bar" id="favorites-bar">
+    <!-- A view toggle, so it sits above the export action. aria-pressed rather than a
+         plain button: it has an on/off state, and the label alone doesn't convey which. -->
+    <button class="btn-favorites-only" id="btn-favorites-only" aria-pressed="false"
+            onclick="toggleFavoritesOnly()">♡ only my shows</button>
     <button class="btn-download-shows" onclick="downloadFavorites()">↓ download my shows</button>
+    <button class="btn-lineup-graphic" id="btn-lineup-graphic"
+            onclick="makeLineupPoster()">▣ share a poster</button>
     <button class="btn-restore-hidden" id="btn-restore-hidden" onclick="restoreHidden()">↺ restore hidden</button>
   </div>
 
@@ -142,13 +178,16 @@
   <script defer src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.15/index.global.min.js"></script>
 
   <!-- App JS -->
-  <script defer src="/js/config.js"></script>
-  <script defer src="/js/analytics.js"></script>
-  <script defer src="/js/city-groups.js"></script>
-  <script defer src="/js/filters.js"></script>
-  <script defer src="/js/modal.js"></script>
-  <script defer src="/js/favorites.js"></script>
-  <script defer src="/js/fullcalendar-adapter.js"></script>
-  <script defer src="/js/app.js"></script>
+  <script defer src="/js/design.js?v={{ASSET_VERSION}}"></script>
+  <script defer src="/js/equalizer.js?v={{ASSET_VERSION}}"></script>
+  <script defer src="/js/config.js?v={{ASSET_VERSION}}"></script>
+  <script defer src="/js/analytics.js?v={{ASSET_VERSION}}"></script>
+  <script defer src="/js/city-groups.js?v={{ASSET_VERSION}}"></script>
+  <script defer src="/js/filters.js?v={{ASSET_VERSION}}"></script>
+  <script defer src="/js/modal.js?v={{ASSET_VERSION}}"></script>
+  <script defer src="/js/lineup.js?v={{ASSET_VERSION}}"></script>
+  <script defer src="/js/favorites.js?v={{ASSET_VERSION}}"></script>
+  <script defer src="/js/fullcalendar-adapter.js?v={{ASSET_VERSION}}"></script>
+  <script defer src="/js/app.js?v={{ASSET_VERSION}}"></script>
 </body>
 </html>

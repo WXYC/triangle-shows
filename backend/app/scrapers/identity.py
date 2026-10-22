@@ -109,6 +109,8 @@ SCRAPER_REGISTRY: dict[str, tuple[str, str]] = {
     "crocodile": ("app.scrapers.crocodile", "CrocodileScraper"),
     "aeg_venue": ("app.scrapers.aeg_venue", "AEGVenueScraper"),
     "nectar": ("app.scrapers.nectar", "NectarScraper"),
+    "instantseats": ("app.scrapers.instantseats", "InstantSeatsScraper"),
+    "duke_bedework": ("app.scrapers.duke_bedework", "DukeBedeworkScraper"),
 }
 
 

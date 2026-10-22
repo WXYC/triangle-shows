@@ -4,16 +4,23 @@ Role: shared by every sink a request URL can escape through — :func:`redact_ha
 which ``app.main.configure_logging`` applies to every log handler in the process
 (covering messages, exception tracebacks, and the handlers owned by whatever ASGI
 server is running, which log unhandled-request tracebacks on loggers that set
-``propagate=False`` and so are invisible to any root handler), and the two non-logging
-sinks in ``app.scrapers.manager.scrape_venue``: the ``scrape_logs.error_message``
-column and the error body returned by ``POST /api/scrape``, which is unauthenticated.
+``propagate=False`` and so are invisible to any root handler), and the non-logging
+sinks: the ``scrape_logs.error_message`` column and the per-venue result dict in
+``app.scrapers.manager.scrape_venue``, plus the ``detail`` of the 500 that
+``app.main.trigger_scrape`` raises — ``POST /api/scrape`` is unauthenticated unless
+``SCRAPE_ALLOWED_SERVICE_ACCOUNTS`` is set.
 
 Why this exists: the Ticketmaster Discovery API authenticates with a query parameter
 rather than a header, so the scraper's request URL *is* a credential. ``httpx`` logs
 that URL in full at INFO on every request, and ``httpx.HTTPStatusError`` embeds it in
 its ``str()`` — which the scrape manager interpolates into a log line, persists to the
-database, and returns to the caller. Redacting in one place would have closed one of
-three routes.
+database, and returns to the caller. Redacting in one place would have closed one
+route out of four.
+
+Call :func:`describe_exception` rather than ``redact_credentials(str(exc))`` when the
+text being emitted *is* an exception. It applies the same scrubbing and additionally
+names the exception class, without which the majority of scrape failures describe
+themselves as the empty string.
 
 This is the backstop, not the primary defense. ``configure_logging`` also pins the
 ``httpx`` logger to WARNING so the high-volume emitter is switched off outright: a
@@ -74,12 +81,44 @@ def redact_credentials(text):
     # match — a provable short-circuit, not a heuristic. Worth the line because the
     # pattern is deliberately anchorless (a leading `(?i)`, an alternation, and a
     # lookbehind leave the engine no literal prefix to seek on), so it costs roughly
-    # 50ns per character and retries at every position. Tracebacks reach tens of KB
-    # once a tracker event carries source context, and this function now runs over
-    # every one of them at two sinks; the miss case is the overwhelmingly common one.
+    # 50ns per character and retries at every position. This now runs over every line
+    # every handler in the process renders, tracebacks included; the miss case is the
+    # overwhelmingly common one.
     if "=" not in text:
         return text
     return _CREDENTIAL_QUERY_RE.sub(rf"\g<1>{REDACTED}", text)
+
+
+def describe_exception(exc):
+    """Render `exc` as a one-line, credential-free description that is never empty.
+
+    ``str(exception)`` returns the exception's *message*, and a large class of exceptions
+    carry none — every httpx transport error (``ReadTimeout``, ``ConnectTimeout``,
+    ``ConnectError``, ``RemoteProtocolError``) plus the bare ``IndexError`` /
+    ``AttributeError`` / ``KeyError`` shapes a parser throws. All stringify to ``""``.
+    Those are also the *most common* ways a scrape fails, so the sinks that reported
+    ``str(e)`` reported nothing precisely when a venue went down or its markup changed
+    (issue #15: ``{"venue":"the-pinhook","status":"failed","error":""}``).
+
+    Prefixing the class name fixes that, and is worth doing even when a message exists:
+    ``ValueError: No scraper available for x`` says more than the message alone, and a
+    uniform ``Type: message`` shape is what makes a log store greppable by failure kind.
+    The name is omitted-from-nothing — ``type(exc).__name__`` is always populated — so
+    the result cannot be blank however little the exception carries.
+
+    Redaction is folded in rather than left to the caller. Every sink that wants an
+    exception description also needs it scrubbed, and the two-call version is one a
+    future call site can half-remember; see the module docstring for what leaks when it
+    does. Idempotent, because :func:`redact_credentials` is.
+
+    Traceback text is deliberately *not* included. This return value goes to a database
+    column, an API response body and a log line; only the log line should carry a
+    traceback, and it gets one from ``exc_info=True`` at the call site, where the
+    formatter can scrub it.
+    """
+    message = redact_credentials(str(exc))
+    name = type(exc).__name__
+    return f"{name}: {message}" if message else name
 
 
 # --- Logging installation point ---

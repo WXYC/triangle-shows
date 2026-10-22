@@ -2,34 +2,94 @@
 
 The Ticketmaster Discovery API authenticates with a query parameter (``?apikey=``),
 so every request URL the scraper builds carries a live credential. That URL escapes
-the process by three independent routes, and a fix that closes one leaves the others
+the process by four independent routes, and a fix that closes one leaves the others
 open:
 
 1. ``httpx`` logs every request at INFO with the full query string, so a *healthy*
-   scrape writes the key to the log store four times per cycle (once per Ticketmaster
-   venue). This is the route that actually fired: the key was readable in Railway's
-   log store within a minute of being set.
+   scrape writes the key to the log store once per Ticketmaster venue per cycle.
 2. ``httpx.HTTPStatusError`` embeds the request URL in its ``str()``, and
    ``manager.scrape_venue`` interpolates that into ``logger.error`` — so a *failed*
    scrape logs the key even with httpx itself silenced.
 3. That same exception string is persisted to ``scrape_logs.error_message`` and
-   returned in the body of ``POST /api/scrape``, which is unauthenticated. A
-   Ticketmaster 429 would hand the key to an anonymous caller.
+   returned in the per-venue result dict, which ``POST /api/scrape`` hands back.
+4. An exception escaping a route is re-raised by Starlette's ``ServerErrorMiddleware``
+   and logged by the ASGI server on a logger it configures with ``propagate=False``
+   and its own handler, which no root handler ever sees.
 
-Route 3 is why redaction cannot live in the logging layer alone: two of the three
-sinks are not logs. The shared helper is the contract; the formatter and the
-manager are its two installation points.
+Route 3 is why redaction cannot live in the logging layer alone: that sink is not a
+log. Route 4 is why the logging half has to sweep every handler in the process rather
+than root's. The shared helper is the contract; the formatter and the manager are its
+installation points.
 """
 
+import asyncio
+import contextlib
 import io
 import logging
+import threading
 
 import httpx
 import pytest
 
-from app.redaction import RedactingFormatter, redact_credentials, redact_handler
+from app.redaction import (
+    REDACTED,
+    RedactingFormatter,
+    describe_exception,
+    redact_credentials,
+    redact_handler,
+)
 
-from tests.conftest import FAKE_KEY, TM_URL  # noqa: E402  (the shared credential shape)
+
+# Shaped exactly like the URL the Ticketmaster scraper builds
+# (app/scrapers/ticketmaster.py), with a placeholder standing in for the live key.
+FAKE_KEY = "s3cr3tKEYvalue0123456789abcdefgh"
+TM_URL = (
+    "https://app.ticketmaster.com/discovery/v2/events.json"
+    f"?apikey={FAKE_KEY}&venueId=KovZpZAdEEvA&size=200&page=0&sort=date%2Casc"
+)
+
+
+@pytest.fixture
+def preserved_logging():
+    """Snapshot and restore global logging state around a test that reconfigures it.
+
+    ``app.main.configure_logging`` mutates process-wide state — root's level and
+    handlers, and the level, handlers and formatter of every pre-existing logger.
+    Without this, a test that trips it takes the rest of the session down with it.
+    """
+    root = logging.getLogger()
+    saved_root_level = root.level
+    saved_root_handlers = root.handlers[:]
+    saved_formatters = [(handler, handler.formatter) for handler in root.handlers]
+    saved_loggers = [
+        (logger, logger.level, logger.disabled, logger.handlers[:], logger.propagate)
+        for logger in logging.Logger.manager.loggerDict.values()
+        if isinstance(logger, logging.Logger)
+    ]
+    try:
+        yield
+    finally:
+        root.setLevel(saved_root_level)
+        root.handlers[:] = saved_root_handlers
+        # configure_logging() swaps formatters in place on handlers it did not create,
+        # so restoring the handler list alone would leave the new formatter installed.
+        for handler, formatter in saved_formatters:
+            handler.setFormatter(formatter)
+        for logger, level, disabled, handlers, propagate in saved_loggers:
+            logger.setLevel(level)
+            logger.disabled = disabled
+            logger.handlers[:] = handlers
+            logger.propagate = propagate
+
+
+def _tm_error() -> httpx.HTTPStatusError:
+    """The exact exception httpx raises on a Ticketmaster 401, key and all."""
+    request = httpx.Request("GET", TM_URL)
+    return httpx.HTTPStatusError(
+        f"Client error '401 Unauthorized' for url '{TM_URL}'",
+        request=request,
+        response=httpx.Response(401, request=request),
+    )
 
 
 # --- The shared helper ---
@@ -131,14 +191,12 @@ def test_formatter_redacts_the_message():
 
 
 def test_formatter_redacts_the_exception_traceback():
-    """The manager logs failures by interpolation, but any exc_info=True call site would
-    put the URL in the traceback text instead — where a message-only filter never looks."""
+    """The manager logs failures by interpolation, but an exc_info=True call site puts the
+    URL in the traceback text instead — where a message-only filter never looks. That is
+    not hypothetical here: app.main.trigger_scrape logs its catch-all with exc_info=True.
+    """
     try:
-        raise httpx.HTTPStatusError(
-            f"Client error '401 Unauthorized' for url '{TM_URL}'",
-            request=httpx.Request("GET", TM_URL),
-            response=httpx.Response(401, request=httpx.Request("GET", TM_URL)),
-        )
+        raise _tm_error()
     except httpx.HTTPStatusError:
         import sys
 
@@ -180,10 +238,14 @@ def test_configure_logging_silences_httpx_request_logging(preserved_logging):
     logging.getLogger("httpx").setLevel(logging.NOTSET)
     configure_logging()
 
-    assert not logging.getLogger("httpx").isEnabledFor(logging.INFO)
-    assert logging.getLogger("httpx").isEnabledFor(logging.WARNING), (
-        "a genuine httpx failure must still reach the log"
-    )
+    # Assert on the logger's *own* level rather than isEnabledFor(INFO). An effective
+    # level falls back to root's, and pytest installs its own root handlers before the
+    # app is imported — which makes logging.basicConfig() a no-op, because the standard
+    # library only applies its `level` argument when root has no handlers yet. Root
+    # therefore sits at pytest's WARNING for the whole session, and isEnabledFor(INFO)
+    # would report httpx silenced whether or not this pin exists. Equality (not <=) also
+    # pins the level from above: a genuine httpx failure must still reach the log.
+    assert logging.getLogger("httpx").level == logging.WARNING
 
 
 # --- The non-logging installation point ---
@@ -266,9 +328,6 @@ async def test_trigger_scrape_catch_all_redacts_and_reports_the_credential(clien
     assert len(reported) == 1, "the catch-all must route through the funnel too"
 
 
-# --- The uvicorn sink: a non-propagating logger the root formatter cannot reach ----
-
-
 def test_redact_handler_scrubs_without_changing_the_existing_format():
     """redact_handler *wraps* the handler's formatter rather than replacing it, so a
     handler owned by someone else (uvicorn installs its own DefaultFormatter and an
@@ -301,6 +360,9 @@ def test_redact_handler_is_idempotent():
     assert handler.formatter is first
 
 
+# --- The ASGI server sink: a non-propagating logger no root handler can reach ---
+
+
 @pytest.mark.parametrize(
     "server_logger, child_logger",
     [
@@ -325,28 +387,24 @@ def test_configure_logging_closes_any_servers_traceback_sink(
     """
     from app.main import configure_logging
 
-    uvicorn_logger = logging.getLogger(server_logger)
+    server = logging.getLogger(server_logger)
     # Restored by hand rather than leaning on preserved_logging alone: that fixture
     # snapshots the loggers existing when it runs, and `gunicorn` is created by this
     # test, so it would otherwise leak its handler into the rest of the session.
-    original_handlers = uvicorn_logger.handlers
-    original_propagate = uvicorn_logger.propagate
+    original_handlers = server.handlers
+    original_propagate = server.propagate
 
     buf = io.StringIO()
     handler = logging.StreamHandler(buf)
     handler.setFormatter(logging.Formatter("%(levelname)s: %(message)s"))
-    uvicorn_logger.handlers = [handler]
-    uvicorn_logger.propagate = False
+    server.handlers = [handler]
+    server.propagate = False
 
     try:
         configure_logging()
 
         try:
-            raise httpx.HTTPStatusError(
-                f"Client error '401 Unauthorized' for url '{TM_URL}'",
-                request=httpx.Request("GET", TM_URL),
-                response=httpx.Response(401, request=httpx.Request("GET", TM_URL)),
-            )
+            raise _tm_error()
         except httpx.HTTPStatusError as exc:
             logging.getLogger(child_logger).error(
                 "Exception in ASGI application\n", exc_info=exc
@@ -354,9 +412,151 @@ def test_configure_logging_closes_any_servers_traceback_sink(
 
         out = buf.getvalue()
     finally:
-        uvicorn_logger.handlers = original_handlers
-        uvicorn_logger.propagate = original_propagate
+        server.handlers = original_handlers
+        server.propagate = original_propagate
 
     assert "Exception in ASGI application" in out, "the test did not exercise the handler"
     assert FAKE_KEY not in out, f"{server_logger}'s own handler leaked the credential"
     assert "venueId=KovZpZAdEEvA" in out, "the diagnosis itself must survive"
+
+
+def test_configure_logging_survives_concurrent_logger_creation(preserved_logging):
+    """configure_logging sweeps every logger in the process, and the registry it reads
+    is a live dict that logging.getLogger() writes into. Walking it lazily meant any
+    thread creating a logger mid-sweep could raise "dictionary changed size during
+    iteration" — out of configure_logging, which runs at import, so the failure mode is
+    the app not booting at all.
+
+    Stress rather than a fixed scenario, because the window is a thread switch: this
+    can only ever miss the bug, never report one that isn't there, so a pass is always
+    legitimate. The round count is set where the unsnapshotted version failed on every
+    one of eight consecutive runs while the whole module still finished in about a
+    second.
+    """
+    from app.main import configure_logging
+
+    registry = logging.root.manager.loggerDict
+    # logging.Manager.getLogger mutates the registry while holding the module lock, and
+    # Manager._clear_cache iterates it lazily under that same lock on exactly that
+    # assumption — so a churn thread that skipped the lock would provoke a RuntimeError
+    # inside the standard library instead of inside the sweep, and this test would fail
+    # for a reason that has nothing to do with the code under test. Falling back to a
+    # no-op context manager keeps the test honest rather than erroring if a future
+    # release renames the private lock: the sweep is still exercised concurrently.
+    registry_lock = getattr(logging, "_lock", None) or contextlib.nullcontext()
+    names = [f"_race_probe_{n}" for n in range(500)]
+    stop = threading.Event()
+    failure: list[BaseException] = []
+
+    def churn() -> None:
+        # Adds and removes within a fixed name pool rather than creating new loggers
+        # without bound: the registry's *size* has to change to provoke the bug, but it
+        # must not grow, or the sweep under test gets slower every round and the whole
+        # suite crawls. PlaceHolder is what getLogger itself stores for intermediate
+        # names, so this is the shape the real registry churns through.
+        index = 0
+        while not stop.is_set():
+            name = names[index % len(names)]
+            with registry_lock:
+                if name in registry:
+                    registry.pop(name, None)
+                else:
+                    registry[name] = logging.PlaceHolder(logging.getLogger())
+            index += 1
+
+    churner = threading.Thread(target=churn, daemon=True)
+    churner.start()
+    try:
+        for _ in range(3000):
+            try:
+                configure_logging()
+            except RuntimeError as exc:  # pragma: no cover - the bug this pins
+                failure.append(exc)
+                break
+    finally:
+        stop.set()
+        churner.join(timeout=5)
+        for name in names:
+            registry.pop(name, None)
+
+    assert not failure, f"configure_logging raced with logger creation: {failure[0]!r}"
+
+
+class TestDescribeException:
+    """``describe_exception`` must never return the empty string.
+
+    Issue #15 reported ``{"venue":"the-pinhook","status":"failed","error":""}``. The cause
+    was not the redaction helper or the logging config — it was ``str(exception)`` on an
+    exception carrying no message, which is the normal shape of every httpx transport
+    error. The scrape reported nothing precisely when the venue was unreachable.
+    """
+
+    # The failure modes a scraper actually hits. Every one of these stringifies to "",
+    # which is the entire bug: these are also the most common ways a scrape fails.
+    EMPTY_STR_EXCEPTIONS = [
+        httpx.ConnectTimeout(""),
+        httpx.ReadTimeout(""),
+        httpx.ConnectError(""),
+        httpx.RemoteProtocolError(""),
+        TimeoutError(),
+        asyncio.TimeoutError(),
+        IndexError(),
+        AttributeError(),
+        ValueError(),
+        KeyError(),
+    ]
+
+    @pytest.mark.parametrize(
+        "exc", EMPTY_STR_EXCEPTIONS, ids=lambda e: type(e).__name__
+    )
+    def test_the_premise_that_str_is_empty(self, exc):
+        """Guard the premise. If a future httpx gives these a default message, the bug
+        this helper exists for has changed shape and these tests should be re-read rather
+        than trusted."""
+        assert str(exc) == ""
+
+    @pytest.mark.parametrize(
+        "exc", EMPTY_STR_EXCEPTIONS, ids=lambda e: type(e).__name__
+    )
+    def test_never_returns_empty(self, exc):
+        assert describe_exception(exc) == type(exc).__name__
+
+    def test_a_message_is_kept_and_prefixed(self):
+        assert describe_exception(ValueError("No scraper available for x")) == (
+            "ValueError: No scraper available for x"
+        )
+
+    def test_the_class_name_is_added_even_when_a_message_exists(self):
+        """Uniform `Type: message` is what makes the log store greppable by failure kind,
+        so the prefix is not conditional on the message being useless."""
+        assert describe_exception(KeyError("date")).startswith("KeyError: ")
+
+    def test_credentials_in_the_message_are_still_scrubbed(self):
+        """The whole point of routing exception text through this module. A helper that
+        added the class name but dropped the redaction would be a regression."""
+        described = describe_exception(_tm_error())
+        assert FAKE_KEY not in described
+        assert REDACTED in described
+
+    def test_the_class_name_survives_redaction(self):
+        described = describe_exception(_tm_error())
+        assert described.startswith("HTTPStatusError: ")
+
+    def test_no_traceback_is_included(self):
+        """This return value goes to a database column and an API response body, not only
+        to a log line. The traceback belongs to `exc_info=True` at the log call site,
+        where the formatter can scrub it."""
+        try:
+            raise ValueError("boom")
+        except ValueError as exc:
+            described = describe_exception(exc)
+        assert described == "ValueError: boom"
+        assert "Traceback" not in described
+        assert "\n" not in described
+
+    def test_idempotent_against_a_second_redaction_pass(self):
+        """A failed Ticketmaster scrape passes through this helper and then through
+        RedactingFormatter on the way to a handler. The second pass must not mangle the
+        placeholder the first one wrote."""
+        once = describe_exception(_tm_error())
+        assert redact_credentials(once) == once

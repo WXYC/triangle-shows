@@ -3,7 +3,13 @@ GET /api/health — returns current status, event/venue counts, last scrape time
 
 Role: Deprecated alias for GET /api/v1/health; both routes register the same shared
 handler (app.api.common.health_check) so the two surfaces cannot drift. Consumed by
-Cloud Run, uptime monitors, and the /deploy skill to confirm a new revision is live.
+Railway's deploy healthcheck (railway.json), uptime monitors, and tools/wait_for_deploy.py
+to confirm a new revision is live.
+
+Upstream's 503-when-stale behaviour is deliberately not adopted: this path is Railway's
+deploy healthcheck, so a stale ScrapeLog would block every deploy, including the one that
+fixes the scrape.
+
 Requires: the shared handler's dependencies (async DB session, ORM models,
 HealthResponse schema, GIT_COMMIT env var).
 """
@@ -18,7 +24,9 @@ router = APIRouter(prefix="/api/health", tags=["health"], deprecated=True)  # su
 router.add_api_route(
     "",
     health_check,
-    methods=["GET"],
+    # HEAD as well as GET: UptimeRobot sends HEAD, and a GET-only route answers it with
+    # 404. Starlette drops the body for HEAD.
+    methods=["GET", "HEAD"],
     response_model=HealthResponse,
     summary="Health check (deprecated alias of /api/v1/health)",
 )

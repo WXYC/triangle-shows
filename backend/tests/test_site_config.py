@@ -1,6 +1,6 @@
 """Tests for the region-pack venue config loader (region-pack epic, issue #62/#63).
 
-Covers the shipped Triangle pack (parses to exactly 22 valid VenueConfig, every
+Covers the shipped Triangle pack (parses to exactly 24 valid VenueConfig, every
 observed scraper_config shape round-trips) and the Pydantic validation contract
 (unknown scraper_type, duplicate slug, malformed color, ticketmaster-without-id all
 raise precise errors) — the two things Phase 1's acceptance criteria call out.
@@ -16,9 +16,9 @@ from app.scrapers.identity import SCRAPER_REGISTRY
 # --- The shipped Triangle pack ---
 
 
-def test_shipped_triangle_pack_parses_to_exactly_22_venues():
+def test_shipped_triangle_pack_parses_to_exactly_24_venues():
     config = site_config.load_venue_config()
-    assert len(config.venue) == 22
+    assert len(config.venue) == 24
     assert config.removed_slugs == []
 
 
