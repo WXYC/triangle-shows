@@ -152,12 +152,19 @@ class RHPEventsScraper(BaseScraper):
             support_el = wrapper.select_one(
                 ".eventSupport, .support, .event-support, .opener, .supporting"
             )
-            if support_el is None:
-                # Fallback only: select_one returns the first match in document order,
-                # so the subheader is tried separately, after the selectors above. On
-                # Cat's Cradle it holds the clean support line; a <br> separates acts.
+            # .eventSubHeader is a per-venue opt-in fallback (support_from_subheader):
+            # Cat's Cradle puts the clean support line there, but Lincoln Theatre uses
+            # it for venue notes. It is tried separately because select_one returns the
+            # first match in document order.
+            if support_el is None and self.config.get("support_from_subheader"):
                 support_el = wrapper.select_one(".eventSubHeader")
-            support = ", ".join(support_el.stripped_strings) if support_el else None
+            support = None
+            if support_el is not None:
+                # Only a <br> separates acts; other inline tags ("<a>Wim Tapley</a> and
+                # The Cannons") are part of the text.
+                for br in support_el.find_all("br"):
+                    br.replace_with(", ")
+                support = " ".join(support_el.get_text().split())
 
             # --- Doors / Show time ---
             doors_time = None
@@ -234,8 +241,8 @@ class RHPEventsScraper(BaseScraper):
                 venue_slug=self.venue_slug,
                 source="rhp_events",
                 artist=name,
-                # .eventSupport is one opaque DOM blob (e.g. "A, B") — pass it as a
-                # single verbatim element, NOT comma-split; blob-splitting is deferred.
+                # The support line is one free-text string ("A, B"); split it into one
+                # act per element at the source (issue #130).
                 support_artists=normalize_structured_support(support),
                 doors_time=doors_time,
                 show_time=show_time,

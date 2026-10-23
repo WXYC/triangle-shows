@@ -44,6 +44,7 @@ def test_shipped_triangle_pack_scraper_types_are_all_registered():
                 "url": "https://catscradle.com/events/",
                 "venue_filter": "Cat's Cradle",
                 "venue_filter_not": "Back Room",
+                "support_from_subheader": True,
             },
         ),
         (
