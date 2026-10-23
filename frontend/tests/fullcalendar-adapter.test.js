@@ -63,7 +63,7 @@ test("toFullCalendarEvent produces the exact shape the calendar + modal read", (
   // these by name and are not otherwise tested.
   assert.deepEqual(Object.keys(fc.extendedProps).sort(), [
     "age_restriction", "artist", "date", "description", "doors_time", "event_id",
-    "genre", "image_url", "name", "price", "price_max", "price_min", "show_time",
+    "genre", "image_url", "is_live_music", "name", "price", "price_max", "price_min", "show_time",
     "status", "subgenre", "support_artists", "ticket_url", "venue_city",
     "venue_color", "venue_name", "venue_slug",
   ]);
@@ -74,6 +74,12 @@ test("toFullCalendarEvent produces the exact shape the calendar + modal read", (
   assert.equal(fc.extendedProps.price_min, 20); // raw number preserved alongside the string
   // support_artists rides through as an array (lossless); the modal joins it for display.
   assert.deepEqual(fc.extendedProps.support_artists, ["Support Act"]);
+});
+
+test("is_live_music rides into extendedProps so the non-music toggle can read it", () => {
+  const base = { id: 1, name: "x", date: "2026-08-01", status: "on_sale", source: "manual" };
+  assert.equal(toFullCalendarEvent({ ...base, is_live_music: false }).extendedProps.is_live_music, false);
+  assert.equal(toFullCalendarEvent({ ...base, is_live_music: true }).extendedProps.is_live_music, true);
 });
 
 test("falls back to name for the title and to the default color when venue_color is absent", () => {
