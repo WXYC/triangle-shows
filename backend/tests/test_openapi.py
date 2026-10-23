@@ -33,6 +33,8 @@ def test_openapi_exposes_v1_paths_and_neutral_schemas():
 
     # is_live_music is an additive bool on the shared event response (issue #133).
     assert schemas["EventResponse"]["properties"]["is_live_music"]["type"] == "boolean"
+    # Non-null in the contract, so generated client types read it as required.
+    assert "is_live_music" in schemas["EventResponse"]["required"]
 
     # source_key is the stable per-event identity contract (issue #8).
     assert "source_key" in schemas["EventResponse"]["properties"]
