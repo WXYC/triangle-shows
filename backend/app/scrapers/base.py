@@ -255,8 +255,9 @@ class ScrapedEvent:
     headliner: Optional[str] = None
     # Structured support/opening acts the scraper pulled from source data (schema.org
     # Event.performer[1:], Ticketmaster attractions[1:]) — one atomic name per element,
-    # NOT comma-joined. Opaque-string scrapers (rhp .eventSupport, VenuePilot) pass a
-    # 1-element list verbatim. The scrape manager unions this with the billing tail
+    # NOT comma-joined. The two scrapers whose source gives one free-text support
+    # string (rhp_events, venuepilot) split it with headliner.normalize_structured_support
+    # before building this list (issue #130). The scrape manager unions this with the billing tail
     # (headliner.parse_billing) and dedupes to derive the stored Event.support_artists.
     support_artists: list[str] = field(default_factory=list)
     doors_time: Optional[time] = None

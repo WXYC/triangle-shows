@@ -14,6 +14,7 @@ from typing import Optional
 import httpx
 
 from app.scrapers.base import BaseScraper, ScrapedEvent, BROWSER_HEADERS
+from app.scrapers.headliner import normalize_structured_support
 from app.scrapers.identity import UrlIdentityVerdict
 
 # --- Module Setup ---
@@ -124,9 +125,9 @@ class VenuePilotScraper(BaseScraper):
                 source="venuepilot",
                 external_id=external_id,
                 artist=name,
-                # VenuePilot's `support` is one opaque platform string — pass it as a
-                # single verbatim element (empty list when absent), never comma-split.
-                support_artists=[support] if support else [],
+                # VenuePilot's `support` is one free-text string ("w/ A, B"); split it
+                # into one act per element at the source (issue #130).
+                support_artists=normalize_structured_support(support),
                 doors_time=doors_time,
                 show_time=show_time,
                 ticket_url=ticket_url,
