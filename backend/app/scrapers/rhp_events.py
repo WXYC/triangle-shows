@@ -17,6 +17,7 @@ from typing import Optional
 import httpx
 
 from app.scrapers.base import BaseScraper, ScrapedEvent
+from app.scrapers.headliner import normalize_structured_support
 from app.scrapers.identity import UrlIdentityVerdict
 
 # --- Module-level setup ---
@@ -151,7 +152,12 @@ class RHPEventsScraper(BaseScraper):
             support_el = wrapper.select_one(
                 ".eventSupport, .support, .event-support, .opener, .supporting"
             )
-            support = support_el.get_text(strip=True) if support_el else None
+            if support_el is None:
+                # Fallback only: select_one returns the first match in document order,
+                # so the subheader is tried separately, after the selectors above. On
+                # Cat's Cradle it holds the clean support line; a <br> separates acts.
+                support_el = wrapper.select_one(".eventSubHeader")
+            support = ", ".join(support_el.stripped_strings) if support_el else None
 
             # --- Doors / Show time ---
             doors_time = None
@@ -230,7 +236,7 @@ class RHPEventsScraper(BaseScraper):
                 artist=name,
                 # .eventSupport is one opaque DOM blob (e.g. "A, B") — pass it as a
                 # single verbatim element, NOT comma-split; blob-splitting is deferred.
-                support_artists=[support] if support else [],
+                support_artists=normalize_structured_support(support),
                 doors_time=doors_time,
                 show_time=show_time,
                 ticket_url=ticket_url,

@@ -72,6 +72,27 @@ _COMBINED_SUPPORT_TAIL_RE = re.compile(
     "|".join(f"(?:{r.pattern})" for r in _SUPPORT_TAIL_RES), re.IGNORECASE
 )
 
+# A billing tail's list delimiters: a comma, or a slash with spaces on both sides
+# ("A / B"; "AC/DC" is untouched). Only ever applied INSIDE an isolated tail, never to
+# the headliner prefix, so a " / " co-bill ("Wednesday 13 / Dead on a Sunday") keeps its
+# headliner.
+_TAIL_LIST_SPLIT_RE = re.compile(r",|\s+/\s+")
+# A list's Oxford-comma "and"/"&" belongs to the list. Lowercase only, so a name that
+# starts with a capitalized "And" ("And Also The Trees") keeps it.
+_OXFORD_AND_RE = re.compile(r"^(?:and|&)\s+")
+
+# Structured support blobs (issue #130). A leading joiner: "w/" in any case (never
+# "w/o"/"w/out"), a lowercase "with " (so "With Honor" survives), or a "special guests"
+# lead-in ("with special guests", "Special Guests:").
+_STRUCTURED_LEAD_IN_RE = re.compile(
+    r"^(?:(?i:(?:with\s+)?(?:very\s+)?special\s+guests?)\s*:?\s*|(?i:w/(?!o(?:ut)?\b))\s*|with\s+)"
+)
+# Entries that name no act.
+_PLACEHOLDER_RE = re.compile(
+    r"(?:(?:and|&)\s+)?(?:(?:(?:very\s+)?special\s+)?guests?(?:\s+tba)?|friends|more|tba|tbd)",
+    re.IGNORECASE,
+)
+
 # Events where nobody on the marquee is performing.
 _NON_PERFORMANCE_RE = re.compile(
     r"\b(?:karaoke|listening party|trivia|bingo|open mic(?:rophone)?)\b",
@@ -140,8 +161,9 @@ def parse_billing(billing: Optional[str]) -> tuple[Optional[str], list[str]]:
        headliner prefix; every later piece is a support segment. Splitting on the
        combined pattern (vs the old per-delimiter loop) is what preserves interleaved
        tails — "A w/ B // C" yields prefix "A" and segments ["B", "C"].
-    4. Build the tail: split each support segment on commas (commas split ONLY inside
-       tails, never the headliner prefix), strip each name, drop empties, left to right.
+    4. Build the tail: split each support segment on commas and spaced slashes (ONLY
+       inside tails, never the headliner prefix), drop an Oxford-comma "and"/"&", strip
+       each name, drop empties, left to right.
     5. Derive the headliner from the prefix: a non-performance framing (karaoke,
        listening party) or a bare "Tribute to Y" nulls it, then a tribute act before
        the framing is recovered, then a final edge-punctuation tidy. May be ``None``.
@@ -178,8 +200,8 @@ def parse_billing(billing: Optional[str]) -> tuple[Optional[str], list[str]]:
     #    strip each name, drop empties, left to right.
     tail_support: list[str] = []
     for piece in tail_pieces:
-        for name in piece.split(","):
-            name = name.strip()
+        for name in _TAIL_LIST_SPLIT_RE.split(piece):
+            name = _OXFORD_AND_RE.sub("", name.strip())
             if name:
                 tail_support.append(name)
 
@@ -200,6 +222,27 @@ def parse_billing(billing: Optional[str]) -> tuple[Optional[str], list[str]]:
     # are untouched.
     headliner = headliner_prefix.strip(" \t:;,-–—|") or None
     return headliner, tail_support
+
+
+def normalize_structured_support(raw: Optional[str]) -> list[str]:
+    """Split one scraper-supplied free-text support blob into act names (issue #130).
+
+    For the two scrapers whose support field is a single opaque string (VenuePilot's
+    ``support``, RHP's support line): strip a leading joiner (``w/``, a lowercase
+    ``with``, a "special guests" lead-in), split on commas and spaced slashes (an
+    Oxford-comma "and"/"&" goes with the delimiter), and drop placeholder entries
+    ("& more", "TBA"). "and" alone never splits ("Wim Tapley and The Cannons").
+
+    Called only at those two call sites. Other scrapers already supply one name per
+    element, and a comma inside such a name ("Earth, Wind & Fire") must stay whole.
+    """
+    body = _STRUCTURED_LEAD_IN_RE.sub("", (raw or "").strip())
+    names: list[str] = []
+    for part in _TAIL_LIST_SPLIT_RE.split(body):
+        name = _OXFORD_AND_RE.sub("", part.strip())
+        if name and not _PLACEHOLDER_RE.fullmatch(name):
+            names.append(name)
+    return names
 
 
 def extract_headliner(billing: Optional[str]) -> Optional[str]:
