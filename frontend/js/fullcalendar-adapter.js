@@ -81,6 +81,7 @@ function toFullCalendarEvent(ev) {
       status: ev.status,
       age_restriction: ev.age_restriction,
       description: ev.description,
+      is_live_music: ev.is_live_music,
     },
   };
 }

@@ -3,6 +3,7 @@
 import contextlib
 from datetime import date, datetime, timedelta
 
+import pytest
 from conftest import DEFAULT_EVENT_DATE as D  # shared with the make_event factory default
 
 
@@ -37,6 +38,21 @@ async def test_v1_events_headliner_is_null_when_never_derived(client, make_event
     await make_event(artist="Juana Molina", date=D)
     ev = (await client.get("/api/v1/events")).json()[0]
     assert ev["headliner"] is None
+
+
+@pytest.mark.parametrize("is_live_music", [True, False])
+async def test_v1_events_expose_is_live_music_bool_on_list_and_detail(client, make_event, is_live_music):
+    # Additive field (issue #133): non-music rows (a Duke Arts exhibition) are still
+    # returned, just flagged false so consumers can tell them from concerts.
+    e = await make_event(name="Exhibition Opening", date=D, is_live_music=is_live_music)
+    listed = (await client.get("/api/v1/events")).json()
+    assert [ev["is_live_music"] for ev in listed] == [is_live_music]
+    assert (await client.get(f"/api/v1/events/{e.id}")).json()["is_live_music"] is is_live_music
+
+
+async def test_deprecated_events_expose_is_live_music(client, make_event):
+    await make_event(name="Lecture", date=D, is_live_music=False)
+    assert (await client.get("/api/events")).json()["events"][0]["is_live_music"] is False
 
 
 async def test_v1_events_support_artists_serializes_as_array(client, make_event):

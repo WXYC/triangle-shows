@@ -31,6 +31,9 @@ def test_openapi_exposes_v1_paths_and_neutral_schemas():
     deprecated_params = {p["name"] for p in paths["/api/events"]["get"]["parameters"]}
     assert "include_removed" not in deprecated_params
 
+    # is_live_music is an additive bool on the shared event response (issue #133).
+    assert schemas["EventResponse"]["properties"]["is_live_music"]["type"] == "boolean"
+
     # source_key is the stable per-event identity contract (issue #8).
     assert "source_key" in schemas["EventResponse"]["properties"]
 
