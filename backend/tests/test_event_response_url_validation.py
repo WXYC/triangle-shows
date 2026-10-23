@@ -24,6 +24,7 @@ def _min_fields(**overrides):
         status="on_sale",
         source="manual",
         source_key="hash:abc123",
+        is_live_music=True,
     )
     fields.update(overrides)
     return fields

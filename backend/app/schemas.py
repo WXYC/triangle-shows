@@ -119,9 +119,10 @@ class EventResponse(BaseModel):
     # the detail endpoint always resolves them by id. Observation, not
     # interpretation — status is never inferred from a delisting.
     removed_at: Optional[UTCDateTime] = None
-    # Live-music classifier verdict (a heuristic, set at upsert and by reclassify,
-    # pinned by is_manual_override). Additive: non-music rows are still returned.
-    is_live_music: bool = True
+    # Live-music classifier verdict (a heuristic, recomputed by reclassify and pinned
+    # by a manual or series override). Additive: non-music rows are still returned.
+    # Required, with no default, so the published contract marks it non-null.
+    is_live_music: bool
 
     # Denormalized venue fields — joined in the query so clients don't need
     # a separate /api/venues request to display venue info alongside events
