@@ -214,7 +214,7 @@ async def test_v1_venues_ordered_by_city(client, make_venue):
 # Characterization pin (region-pack epic, issue #62/#63): today's shipped venue
 # roster, end to end through the real seed path and the v1 API. Must stay green
 # unmodified through Phases 1-3.
-async def test_v1_venues_returns_all_22_shipped_venues_with_real_municipalities(client, session, monkeypatch):
+async def test_v1_venues_returns_all_24_shipped_venues_with_real_municipalities(client, session, monkeypatch):
     from app.seed import seed_venues
 
     @contextlib.asynccontextmanager
@@ -229,7 +229,7 @@ async def test_v1_venues_returns_all_22_shipped_venues_with_real_municipalities(
     await seed_venues()
 
     data = (await client.get("/api/v1/venues")).json()
-    assert len(data) == 22
+    assert len(data) == 24
     assert {v["city"] for v in data} == {
         "Raleigh", "Durham", "Chapel Hill", "Carrboro", "Cary", "Saxapahaw",
     }
@@ -276,3 +276,15 @@ async def test_v1_events_serves_a_malformed_stored_url_as_null_without_dropping_
     assert ev["artist"] == "Duke Ellington & John Coltrane"
     assert ev["ticket_url"] is None
     assert ev["image_url"] is None
+
+
+async def test_v1_events_answers_an_unauthenticated_caller(client, make_event):
+    """WXYC/triangle-shows#129 I1: the upstream merge brings origin gates (Cloudflare
+    Access on /admin and /new-shows-form, an OIDC token on POST /api/scrape, a query-API
+    gate on the deprecated /api/events), and none of them may reach /api/v1. Backend-
+    Service's nightly import sends no credentials, with exactly these parameters."""
+    await make_event(artist="Juana Molina", date=D)
+    start = (D - timedelta(days=8)).isoformat()
+    resp = await client.get(f"/api/v1/events?dedup=false&include_removed=true&start={start}")
+    assert resp.status_code == 200
+    assert [e["artist"] for e in resp.json()] == ["Juana Molina"]

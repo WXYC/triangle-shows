@@ -54,15 +54,15 @@ def test_venues_straddling_the_chapel_hill_carrboro_line_carry_their_actual_town
 # the schema.
 
 
-async def test_seed_venues_loads_exactly_22_venues(session, monkeypatch):
-    assert len(VENUES) == 22
+async def test_seed_venues_loads_exactly_24_venues(session, monkeypatch):
+    assert len(VENUES) == 24
     monkeypatch.setattr("app.seed.init_db", _noop_init_db)
     monkeypatch.setattr("app.seed.async_session", _session_stub(session))
 
     await seed_venues()
 
     count = await session.scalar(select(func.count()).select_from(Venue))
-    assert count == 22
+    assert count == 24
 
     cities = await session.scalars(select(Venue.city).distinct())
     assert set(cities.all()) == REAL_MUNICIPALITIES
@@ -80,9 +80,9 @@ async def test_seed_venues_is_idempotent(session, monkeypatch, caplog):
         await seed_venues()
         second_count = await session.scalar(select(func.count()).select_from(Venue))
 
-    assert first_count == 22
-    assert second_count == 22
-    assert "Seed complete: 0 new, 22 updated venues" in caplog.text
+    assert first_count == 24
+    assert second_count == 24
+    assert "Seed complete: 0 new, 24 updated venues" in caplog.text
 
 
 async def _noop_init_db():

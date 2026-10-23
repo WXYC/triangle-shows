@@ -14,6 +14,7 @@ Requires: httpx and beautifulsoup4/lxml (for fetch_soup), nh3 (for description
 sanitization); no env vars or external services.
 """
 import hashlib
+import html
 import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
@@ -21,12 +22,69 @@ from datetime import date, time, datetime
 from functools import cached_property
 from html import unescape
 from typing import Optional
+from urllib.parse import unquote
+
+
+# --- Title normalization ---
+
+# A percent-escape: '%' followed by exactly two hex digits, e.g. '%26' for '&'.
+_PCT_ESCAPE = re.compile(r"%[0-9A-Fa-f]{2}")
+
+
+def clean_title(text: Optional[str]) -> Optional[str]:
+    """Decode escape sequences a source left in a human-readable title.
+
+    Venue sites hand us the same title in different encodings depending on which page
+    it came from — Shadowbox's listing page yields 'A &#038; B' while its detail page
+    yields 'A %26 B' for the same show. Because the dedup hash is built from the title,
+    two encodings of one title produce two database rows. Normalizing here means every
+    scraper hashes the same string, and users stop seeing raw escape codes.
+
+    Percent-decoding the whole string (rather than each escape separately) is what makes
+    multi-byte UTF-8 sequences like '%E2%80%99' come back as one character. The tradeoff
+    is that a literal '%' followed by two hex digits would be mangled; that does not
+    happen in practice in event titles, and leaving '%26' on screen is the worse failure.
+    """
+    if not text:
+        return text
+
+    # WordPress feeds sometimes double-escape ('&amp;#038;'), so unescape until stable.
+    for _ in range(3):
+        decoded = html.unescape(text)
+        if decoded == text:
+            break
+        text = decoded
+
+    if _PCT_ESCAPE.search(text):
+        text = unquote(text)
+
+    return re.sub(r"\s+", " ", text).strip()
+
 
 import httpx
 import nh3
 from bs4 import BeautifulSoup
 
 from app.scrapers.identity import UrlIdentityVerdict
+
+
+# --- Support-artist lists ---
+
+
+def split_support_artists(value) -> list[str]:
+    """Coerce a support-artist value to this fork's list[str] shape.
+
+    The fork stores support acts as a lossless list (Event.support_artists is text[],
+    migration 0007). Upstream's admin and show-submission paths still carry them as one
+    comma-joined string (show_submissions.support_artists is Text), so a string is split
+    on commas here — the same comma-split the API surface used before the list landed. A
+    list passes through; None and anything else become [].
+    """
+    if isinstance(value, str):
+        return [part.strip() for part in value.split(",") if part.strip()]
+    if isinstance(value, (list, tuple)):
+        return [v for v in value if isinstance(v, str)]
+    return []
 
 
 # --- Description cleaning ---
@@ -227,6 +285,19 @@ class ScrapedEvent:
         # and would fail the varchar column bind — treat it as no URL.
         if self.source_url is not None and not isinstance(self.source_url, str):
             self.source_url = None
+        # Decode HTML entities and percent-escapes a source left in human-readable
+        # text ('A &#038; B', 'A %26 B') before anything hashes or stores it, so two
+        # encodings of one title hash alike and nobody sees raw escape codes
+        # (upstream clean_title). support_artists is a list here, cleaned per element;
+        # an element that cleans to empty is dropped.
+        self.name = clean_title(self.name)
+        self.artist = clean_title(self.artist)
+        self.headliner = clean_title(self.headliner)
+        self.support_artists = [
+            cleaned
+            for cleaned in (clean_title(n) for n in split_support_artists(self.support_artists))
+            if cleaned
+        ]
         # ticket_url/image_url are scraper-sourced and rendered into HTML
         # attributes by the web client — normalize both to an absolute http(s)
         # URL or None at this single choke point (issue #94), the same pattern
@@ -376,9 +447,10 @@ class BaseScraper(ABC):
         if not text:
             return None, None
         text = text.strip().lower()
-        if text in ("free", "free!", "no cover"):
+        if any(free_words in text for free_words in ["free", "free!", "no cover"]):
             return 0.0, 0.0
-        prices = re.findall(r'\$?\s*(\d+(?:\.\d{2})?)', text)
+
+        prices = re.findall(r'[$€]{1}(?P<amount>[\d,\.]+(?>\.\d{2}){0,})\b', text)
         if len(prices) >= 2:
             return float(prices[0]), float(prices[1])
         elif len(prices) == 1:
@@ -536,4 +608,4 @@ class BaseScraper(ABC):
     @staticmethod
     def normalize_name(name: str) -> str:
         """Normalize event/artist name for comparison."""
-        return re.sub(r'\s+', ' ', name.strip())
+        return re.sub(r'\s+', ' ', name.strip()) #this is essentially dead code, only used by ticketmaster

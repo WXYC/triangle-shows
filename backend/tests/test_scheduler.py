@@ -15,7 +15,9 @@ from app.scheduler import _job_listener, configure_scheduler, scheduler
 
 # The job ids configure_scheduler() registers, and the set every test's cleanup is
 # derived from — so the assertion and the teardown can never drift apart.
-JOB_IDS = {"scrape_ticketmaster", "scrape_indie", "cleanup_past_events"}
+# No cleanup_past_events: upstream removed the past-event delete job (c969a17), and
+# the fork keeps every scraped row (WXYC/triangle-shows#129 I3).
+JOB_IDS = {"scrape_ticketmaster", "scrape_indie"}
 
 
 def _tz_str(trigger: CronTrigger) -> str:

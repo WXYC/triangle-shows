@@ -132,13 +132,10 @@ class MotorcoScraper(BaseScraper):
     ) -> Optional[ScrapedEvent]:
         """Parse raw JS-extracted strings into a ScrapedEvent, or return None on failure."""
         try:
-            # Unescape HTML entities in title
-            title = title.replace("&#038;", "&").replace("&amp;", "&").replace("&#8217;", "'")
-
-            # Collapse JS string escapes the extractor preserved (esc_js turns an
-            # apostrophe into \' inside the single-quoted title). Independent of
-            # the entity pass above — escapes carry backslashes, entities don't.
+            # Collapse JS string escapes (esc_js turns an apostrophe into \'),
+            # then unescape HTML entities in title
             title = _JS_ESCAPE_PATTERN.sub(r"\1", title)
+            title = title.replace("&#038;", "&").replace("&amp;", "&").replace("&#8217;", "'")
 
             # Parse datetime — format is "2026-04-03 21:00" or "2026-04-03"
             dt = None

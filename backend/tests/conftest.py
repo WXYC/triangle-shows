@@ -73,6 +73,9 @@ TEST_DATABASE_URL = _resolve_test_db_url()
 os.environ["DATABASE_URL"] = TEST_DATABASE_URL
 os.environ.setdefault("RUN_STARTUP_SCRAPE", "false")
 os.environ.setdefault("ENABLE_SCHEDULER", "false")
+# Upstream's show-submission form ships off in the fork (app.config); its own tests
+# exercise it switched on. tests/test_show_submissions.py pins the off-by-default.
+os.environ.setdefault("SHOW_SUBMISSIONS_ENABLED", "true")
 # A fixed, non-empty salt so the suite exercises the salted feed-telemetry path
 # (app.api.feeds.record_feed_fetch no-ops when this is empty). Tests that need the
 # unsalted behavior monkeypatch settings.TELEMETRY_SALT themselves.

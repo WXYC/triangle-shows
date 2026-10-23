@@ -32,6 +32,7 @@ from app.models import FeedFetch
 from app.observability import report_error
 from app.services.events_query import query_events
 from app.site_config import load_site_config
+from app.timefmt import format_time_12h
 
 logger = logging.getLogger(__name__)
 
@@ -136,6 +137,11 @@ async def record_feed_fetch(
 async def get_ical_feed(
     request: Request,
     venue: Optional[str] = Query(None, description="Comma-separated venue slugs. Omit for all venues."),
+    include_non_music: bool = Query(
+        False,
+        description="Include non-live-music events (karaoke, trivia, theme nights, etc.). "
+                    "Off by default so subscribers get live music only.",
+    ),
     session: AsyncSession = Depends(get_session),
 ) -> Response:
     """Live iCal subscription feed. Add to Apple Calendar, Google Calendar, or Outlook once;
@@ -157,6 +163,15 @@ async def get_ical_feed(
         venue_slugs=venue_slugs,
         dedup=False,
     )
+    # Upstream's feed filters, applied here rather than in the shared query service so
+    # /api/v1 keeps neither (WXYC/triangle-shows#129 I1). A row an admin folded into
+    # another as a duplicate never reaches a subscriber (upstream #63), and non-live-music
+    # events (karaoke, trivia, theme nights) are hidden unless the subscriber opted in,
+    # mirroring the on-site calendar toggle.
+    events = [
+        e for e in events
+        if e.duplicate_of_id is None and (include_non_music or e.is_live_music)
+    ]
 
     # --- Build the iCal Calendar object ---
 
@@ -216,9 +231,9 @@ async def get_ical_feed(
             # still skips it. Join the names for human-readable display.
             desc_parts.append(f"w/ {', '.join(event.support_artists)}")
         if event.doors_time:
-            desc_parts.append(f"Doors: {event.doors_time.strftime('%-I:%M %p')}")
+            desc_parts.append(f"Doors: {format_time_12h(event.doors_time)}")
         if event.show_time:
-            desc_parts.append(f"Show: {event.show_time.strftime('%-I:%M %p')}")
+            desc_parts.append(f"Show: {format_time_12h(event.show_time)}")
         if event.price_min is not None:
             if event.price_min == 0:
                 desc_parts.append("Free")

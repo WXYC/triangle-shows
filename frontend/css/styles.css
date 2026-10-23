@@ -8,6 +8,32 @@
 /* === Variables === */
 :root {
   --sidebar-width: 270px;
+
+  /* Type scale. Replaces 19 ad-hoc rem values that included 0.62 / 0.63 / 0.65 -- sizes
+     nobody can tell apart but every one of which had to be maintained. Six steps, named
+     by role, on whole pixels so a monospace grid stays crisp. */
+  --fs-2xs: 0.625rem;   /* 10px — micro labels only, never running text */
+  --fs-xs:  0.6875rem;  /* 11px — venue line, chips, buttons */
+  --fs-sm:  0.75rem;    /* 12px — utility text */
+  --fs-md:  0.8125rem;  /* 13px — event titles, body */
+  --fs-lg:  0.9375rem;  /* 15px — toolbar title, modal headings */
+  --fs-xl:  1.125rem;   /* 18px — modal title */
+
+  /* Two font stacks with different jobs: Space Mono carries the identity, IBM Plex Mono
+     carries the data. Plex holds its counters at 11-13px where Space Mono's fill in. */
+  --font-identity: 'Space Mono', ui-monospace, monospace;
+  --font-data:     'IBM Plex Mono', 'Space Mono', ui-monospace, monospace;
+  --font-pixel:    'Silkscreen', 'Space Mono', ui-monospace, monospace;
+
+
+  /* Hearted shows in the equalizer. Deliberately off-palette -- it is the one thing in
+     the strip that is not "how busy is that night", so it should not be a shade of the
+     accent. Matches the heart on an event tile (#ff8fa8), which is where the association
+     is learned. Overridden below for wisteria, where pink on pink says nothing, and
+     darkened for light mode, where the bright pink measures 2.0:1 on warm paper and
+     graphics want 3:1. */
+  --eq-fav:       #ff8fa8;
+  --eq-fav-hover: #ffb3c4;
   --bg:           #1a1008;
   --surface:      #241609;
   --surface2:     #2e1d0c;
@@ -79,6 +105,23 @@ html[data-palette="durham"] {
   --today-bg:     rgba(191,106,40,0.06);
 }
 
+/* Halloween (October only -- see SEASONAL_PALETTES in config.js): pumpkin on a
+   purple-black, bone text, witchy-purple secondary text. --surface2 is kept darker than
+   durham's, the lightest dark tile the venue rule colours are tuned against. */
+html[data-palette="halloween"] {
+  --bg:           #0d0812;
+  --surface:      #160d1c;
+  --surface2:     #1e1226;
+  --border:       #34203f;
+  --text:         #f0e6d8;
+  --muted:        #9a78b0;
+  --dim:          #4a2c5a;
+  --accent:       #ff7a1a;
+  --accent-hover: #ffa04d;
+  --accent-bg:    rgba(255,122,26,0.12);
+  --today-bg:     rgba(255,122,26,0.06);
+}
+
 /* === Light mode palette overrides ===
    data-mode="light" triggers warm-paper versions of each accent family.
    Compound selectors [data-mode="light"][data-palette="..."] have higher
@@ -138,6 +181,91 @@ html[data-mode="light"][data-palette="wisteria"] {
   --accent-hover: #6a1888;
   --accent-bg:    rgba(136,40,168,0.10);
   --today-bg:     rgba(136,40,168,0.06);
+}
+
+/* Halloween light: parchment, burnt orange, purple-black text. Accent is darker than the
+   dark-mode pumpkin to clear 4.5:1 as button text on parchment (5.46). */
+html[data-mode="light"][data-palette="halloween"] {
+  --bg:           #fbf3e6;
+  --surface:      #f5e6d0;
+  --surface2:     #eed8b8;
+  --border:       #d8bc94;
+  --text:         #1e0f24;
+  --muted:        #5e3878;
+  --dim:          #c0a080;
+  --accent:       #a84400;
+  --accent-hover: #8f3800;
+  --accent-bg:    rgba(168,68,0,0.10);
+  --today-bg:     rgba(168,68,0,0.06);
+}
+
+/* === Equalizer favorite color =============================================
+   Order matters and the specificities are deliberate. The two single-attribute rules
+   are both (0,1,1), so wisteria is written second to win in dark mode; the compound
+   rule is (0,2,1) and so still wins for wisteria + light. */
+
+/* Light mode: #ff8fa8 measures 2.0:1 against the warm-paper background, under the 3:1
+   graphics floor. This one is 3.66:1 and still reads as the same pink. */
+html[data-mode="light"] {
+  --eq-fav:       #d94f74;
+  --eq-fav-hover: #b83a5c;
+}
+
+/* Wisteria is a pink-purple palette, so a pink overlay would say nothing. Soft sky blue
+   is the opposite side of the wheel and stays gentle rather than alarming. */
+html[data-palette="wisteria"] {
+  --eq-fav:       #8ad5f0;
+  --eq-fav-hover: #b0e6f8;
+}
+
+html[data-mode="light"][data-palette="wisteria"] {
+  --eq-fav:       #1f7fa8;
+  --eq-fav-hover: #12617f;
+}
+
+/* Halloween: slime green for hearted shows. Off-palette like the pink it replaces, and
+   pink would muddy against the purple. Measured: bars 12.6:1 dark / 3.92:1 light on --bg. */
+html[data-palette="halloween"] {
+  --eq-fav:       #8fe36b;
+  --eq-fav-hover: #b2f08f;
+}
+html[data-mode="light"][data-palette="halloween"] {
+  --eq-fav:       #3d8a26;
+  --eq-fav-hover: #2f6e1c;
+}
+
+/* The "strong" favourite colour: same hue family as --eq-fav, taken darker.
+   Used by the favourites-only button's pressed background and by a hearted heart icon
+   on an event tile. Both need something --eq-fav cannot give them, for the same reason:
+   --eq-fav is tuned as a *graphic* sitting on --bg, because it paints equalizer bars.
+   Against a tile (--surface2) or behind button text it is too light — measured at
+   3.37-4.05 behind the button label (needs 4.5) and 2.64-2.96 as a heart on a light
+   tile (needs 3). These values clear both floors everywhere: worst 4.73 for the button
+   label and 3.70 for the heart, both on durham/light. */
+:root {
+  --fav-strong:       #ff8fa8;
+  --fav-strong-hover: #ffb3c4;
+}
+html[data-mode="light"] {
+  --fav-strong:       #b83a5c;
+  --fav-strong-hover: #9c2a48;
+}
+html[data-palette="wisteria"] {
+  --fav-strong:       #8ad5f0;
+  --fav-strong-hover: #b0e6f8;
+}
+html[data-mode="light"][data-palette="wisteria"] {
+  --fav-strong:       #12617f;
+  --fav-strong-hover: #0d4d66;
+}
+/* Halloween: button label 12.6 dark / 6.01 light; heart on tile 11.4 dark / 4.77 light. */
+html[data-palette="halloween"] {
+  --fav-strong:       #8fe36b;
+  --fav-strong-hover: #b2f08f;
+}
+html[data-mode="light"][data-palette="halloween"] {
+  --fav-strong:       #2a6a18;
+  --fav-strong-hover: #1f5212;
 }
 
 /* Durham Bulls light: warm desaturated brown bg, navy text */
@@ -465,11 +593,85 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
   opacity: 0.45;
 }
 
-/* Venue list (rendered by JS as .venue-checkbox labels) */
-.venue-list {
+/* ── Cities & venues ───────────────────────────────────────────────────────────
+   Venues nest under a collapsible city header. Replaces the former flat .venue-list
+   and the separate city chip row. */
+
+.city-groups { display: flex; flex-direction: column; gap: 0.6rem; }
+
+/* Row for non-city chips (Spotify's "★ for you"). Takes no space while empty, so an
+   unconnected visitor sees no gap. */
+.quick-filters:not(:empty) { margin-bottom: 0.6rem; }
+
+.city-group-head { display: flex; align-items: center; gap: 0.3rem; }
+/* The chip fills the row so the whole width is a city filter target, with the caret a
+   separate leading hit area — one row, two distinct actions that can't steal each
+   other's clicks. */
+.city-group-head .city-chip { flex: 1 1 auto; text-align: left; }
+
+/* Disclosure caret, leading the row like a tree view. */
+.city-collapse {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 1px;
+  cursor: pointer;
+  /* --muted, not --dim. This is the control the whole feature hangs on, and --dim
+     measures 1.83:1 against --surface in dark mode — under the 3:1 an interactive
+     element needs. --dim is fine for inert decoration, not for this. */
+  color: var(--muted);
+  /* 0.6rem was legible only if you already knew it was there. */
+  font-size: 0.95rem;
+  line-height: 1;
+  /* Square, and at the 24px hit-target minimum. */
+  width: 24px;
+  min-height: 24px;
+  padding: 0;
+  transition: color 0.12s, border-color 0.12s;
+}
+.city-collapse:hover { color: var(--accent); border-color: var(--border); }
+.city-collapse:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
+
+/* Venue count — a readout, not a control, so it sits outside both buttons. */
+.city-count {
+  flex-shrink: 0;
+  font-family: 'Space Mono', monospace;
+  font-size: 0.6rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+  opacity: 0.75;
+  min-width: 1.4em;
+  text-align: right;
+}
+
+.city-caret { display: inline-block; transition: transform 0.15s ease; }
+.city-group.collapsed .city-caret { transform: rotate(-90deg); }
+
+/* Venues indented under their city. The rule is positioned to descend from the middle
+   of the 24px caret, so it reads as a tree line rather than an arbitrary margin. */
+.city-venues {
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
+  padding: 0.4rem 0 0.1rem 0.8rem;
+  margin-left: 11px;
+  border-left: 1px solid var(--border);
+}
+
+/* Collapse uses display:none deliberately, and the inputs must stay in the DOM.
+   _getFilteredEvents() builds its venue map with
+   querySelectorAll(".venue-checkbox input[type=checkbox]"), so unmounting a collapsed
+   city would silently drop its venues from the filter — the calendar would disagree
+   with a sidebar the visitor cannot see. display:none keeps them queryable while
+   removing them from layout and from the tab order, which is the same thing
+   `.venue-checkbox input { display: none }` already relies on further down. */
+.city-group.collapsed .city-venues { display: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  .city-caret { transition: none; }
 }
 
 .venue-checkbox {
@@ -582,11 +784,16 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
 
 /* === Calendar === */
 .calendar-container {
-  padding: 1.1rem 1.25rem;
+  /* Top spacing is a margin on .fc rather than padding here. A sticky element pins to the
+     padding box, so with padding-top the toolbar stopped 1.1rem below the container's top
+     edge and scrolling rows showed through the strip above it. As a margin the same gap
+     scrolls away with the content, and the toolbar pins flush. */
+  padding: 0 1.25rem 1.1rem;
   background: var(--bg);
   overflow-y: auto;
   height: 100%;
 }
+.calendar-container > .fc { margin-top: 1.1rem; }
 
 /* FullCalendar overrides */
 .fc {
@@ -696,70 +903,107 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
   position: relative;
   display: flex;
   flex-direction: column;
-  padding: 2px 32px 2px 4px; /* right padding reserves space for heart + hide */
+  padding: 2px 44px 2px 4px; /* right padding reserves space for heart + hide */
   overflow: hidden;
 }
+
+/* Only reserve room for the icons while they are actually on screen.
+   The icons are absolutely positioned, so changing this padding re-ellipsizes the title
+   without resizing the tile — nothing around it moves, the text just gets shorter. That
+   buys back roughly a character and a half in every month cell for the 99% of the time
+   the pointer is elsewhere.
+   Gated on (hover: hover) rather than a width: on touch devices the icons are permanently
+   visible, so the reserve has to be permanent too, and there is no hover to restore it.
+   Selector carries .fc to reach (0,2,0), so it wins over the width-based .ev override in
+   the responsive block below regardless of source order. */
+@media (hover: hover) {
+  .fc .ev          { padding-right: 6px; }
+  .fc .ev:hover    { padding-right: 44px; }
+}
+/* Event title.
+   Was Space Mono 700 at 12px, which is the readability complaint that started this branch.
+   Bold works against a monospace at this size: Space Mono's counters are tight to begin
+   with, and at 12px on a saturated field they close up, so the letterforms lose the shapes
+   that tell them apart. The fix is the opposite of the instinct -- less weight, slightly
+   more size, and a little tracking to open the rhythm. */
 .ev-title {
-  font-family: 'Space Mono', monospace;
-  font-size: 0.75rem;
-  font-weight: 700;
+  font-family: var(--font-data);
+  font-size: var(--fs-md);       /* 13px, up from 12 */
+  font-weight: 500;              /* down from 700 */
+  letter-spacing: 0.005em;
+  line-height: 1.35;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  color: #fff;
+  color: var(--text);
 }
+/* Venue line.
+   Was 10.1px at 78% alpha. Two problems: 10px is under the floor for a mono, and
+   compositing white over 22 different saturated hues shifted the result differently on
+   every tile. Now 11px in a solid mixed ink, so it reads the same everywhere. */
 .ev-venue {
-  font-family: 'Space Mono', monospace;
-  font-size: 0.63rem;
-  color: rgba(255,255,255,0.78);
+  font-family: var(--font-data);
+  font-size: var(--fs-xs);       /* 11px, up from ~10.1 */
+  font-weight: 400;
+  letter-spacing: 0.015em;
+  line-height: 1.3;
+  color: color-mix(in srgb, var(--muted) 60%, var(--text));
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-/* Heart / favorite button — shows on hover, 20% bigger than original */
+/* Heart / favorite button — revealed when the tile is hovered.
+   Colors are palette tokens, not the hardcoded rgba(255,255,255,…) they used to be.
+   That white was correct while tiles were saturated dark fills; once the gutter
+   treatment moved tile text onto --surface2 it became near-invisible in light mode. */
 .ev-heart {
   position: absolute;
   top: 50%;
-  right: 17px;
+  right: 24px;
   transform: translateY(-50%);
   background: none;
   border: none;
   cursor: pointer;
-  font-size: 0.84rem;
+  font-size: 0.95rem;
   line-height: 1;
-  color: rgba(255,255,255,0.5);
-  padding: 1px 2px;
+  color: var(--muted);
+  padding: 2px 3px;
   opacity: 0;
   transition: opacity 0.15s, color 0.12s;
   z-index: 1;
   user-select: none;
 }
 .ev:hover .ev-heart        { opacity: 1; }
-.ev-heart.hearted          { opacity: 1 !important; color: #ff8fa8; }
-.ev-heart:hover            { color: rgba(255,255,255,0.9); }
-.ev-heart.hearted:hover    { color: #ff5580; }
+/* --fav-strong rather than a literal #ff8fa8, and rather than --eq-fav: the token
+   carries the light-mode and wisteria variants, so a hearted show stays visible on warm
+   paper and stops clashing on the pink palette. --eq-fav itself measures only 2.64-2.96
+   against a light tile, because it is tuned to sit on --bg rather than on --surface2. */
+.ev-heart.hearted          { opacity: 1 !important; color: var(--fav-strong); }
+.ev-heart:hover            { color: var(--accent); }
+.ev-heart.hearted:hover    { color: var(--fav-strong-hover); }
 
 /* Hide button — dismiss event until page refresh */
 .ev-hide {
   position: absolute;
   top: 50%;
-  right: 2px;
+  right: 3px;
   transform: translateY(-50%);
   background: none;
   border: none;
   cursor: pointer;
-  font-size: 0.62rem;
+  /* Was 0.62rem — roughly 10px, and the smallest interactive thing on the page. */
+  font-size: 0.78rem;
   line-height: 1;
-  color: rgba(255,255,255,0.4);
-  padding: 1px 2px;
+  color: var(--muted);
+  padding: 2px 3px;
   opacity: 0;
   transition: opacity 0.15s, color 0.12s;
   z-index: 1;
   user-select: none;
 }
 .ev:hover .ev-hide  { opacity: 1; }
-.ev-hide:hover      { color: rgba(255,255,255,0.9); }
+.ev-hide:hover      { color: var(--accent); }
 
 /* Past events — greyed out */
 .fc-event.ev-past { opacity: 0.45; }
@@ -901,6 +1145,11 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
   font-size: 0.8rem;
   color: var(--muted);
   line-height: 1.5;
+  /* Descriptions are plain text with blank lines between paragraphs (see
+     clean_html_text in the backend) — pre-line renders those breaks instead of
+     collapsing every description into one run-on line, while still collapsing
+     ordinary runs of spaces the way normal HTML text does. */
+  white-space: pre-line;
 }
 /* Server-sanitized rich text: tighten the default block margins so multi-paragraph
    blurbs read as spaced paragraphs, not double-height gaps, and keep links legible. */
@@ -981,12 +1230,90 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
   transform: translateY(0);
 }
 
+.btn-favorites-only,
 .btn-download-shows,
+.btn-lineup-graphic,
 .btn-restore-hidden {
   display: inline-block;
   padding: 0.38rem 0.85rem;
+  /* The calendar's data face at the token size for buttons. Space Mono at ~10px bold
+     caps was the hardest text on the page to read. */
+  font-family: var(--font-data);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  /* Solid, not transparent: the bar floats over the calendar, and a see-through button
+     let event titles show through behind its label. */
+  background: var(--bg);
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  cursor: pointer;
+  border-radius: 1px;
+  transition: background 0.15s, color 0.15s;
+}
+.btn-favorites-only:hover,
+.btn-download-shows:hover,
+.btn-lineup-graphic:hover,
+.btn-restore-hidden:hover {
+  background: var(--accent);
+  color: var(--bg);
+  opacity: 1;
+}
+/* Restore button: slightly subdued by default. Subdued by colour rather than opacity,
+   which would make the background see-through again. */
+.btn-restore-hidden { border-color: var(--border); color: var(--muted); }
+
+/* Poster button disabled state — it carries a "drawing..." label while the canvas is
+   rendered, and must not look pressable during that. */
+.btn-lineup-graphic:disabled { opacity: 0.4; cursor: progress; }
+.btn-lineup-graphic:disabled:hover { background: var(--bg); color: var(--accent); }
+
+/* === Lineup poster preview === */
+.lineup-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+  background: rgba(0, 0, 0, 0.72);
+  backdrop-filter: blur(2px);
+}
+.lineup-panel {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.9rem;
+  max-height: 100%;
+}
+/* The poster is 1080x1350 regardless of screen; height drives the fit so the whole
+   poster is visible without scrolling, which is the point of a preview. */
+.lineup-poster {
+  max-height: calc(100vh - 8rem);
+  max-width: 100%;
+  height: auto;
+  width: auto;
+  border: 1px solid var(--border);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+}
+.lineup-hint {
+  margin: 0;
   font-family: 'Space Mono', monospace;
-  font-size: 0.62rem;
+  font-size: 0.68rem;
+  color: var(--muted);
+}
+.lineup-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.5rem;
+}
+.lineup-btn {
+  padding: 0.45rem 1rem;
+  font-family: 'Space Mono', monospace;
+  font-size: 0.68rem;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.08em;
@@ -996,16 +1323,34 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
   cursor: pointer;
   border-radius: 1px;
   transition: background 0.15s, color 0.15s;
-  opacity: 0.72;
 }
-.btn-download-shows:hover,
-.btn-restore-hidden:hover {
-  background: var(--accent);
+.lineup-btn:hover { background: var(--accent); color: var(--bg); }
+.lineup-btn-quiet { border-color: var(--border); color: var(--muted); }
+.lineup-btn-quiet:hover { background: var(--border); color: var(--text); }
+
+/* Favourites-only toggle.
+   The other two buttons are actions — press and something happens. This one is a mode,
+   and the pressed state has to be unmistakable: a filtered calendar that looks
+   unfiltered is the failure worth designing against. So the active state is a filled
+   button in the heart pink rather than another accent outline, which also stops it
+   reading as "hovered". */
+.btn-favorites-only.active {
+  background: var(--fav-strong);
+  border-color: var(--fav-strong);
   color: var(--bg);
   opacity: 1;
 }
-/* Restore button: slightly subdued by default */
-.btn-restore-hidden { opacity: 0.55; }
+.btn-favorites-only.active:hover {
+  background: var(--fav-strong-hover);
+  border-color: var(--fav-strong-hover);
+  color: var(--bg);
+}
+.btn-favorites-only:focus-visible,
+.btn-download-shows:focus-visible,
+.btn-restore-hidden:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
 
 /* First-appear bounce for the buttons */
 .favorites-bar.visible .btn-download-shows,
@@ -1084,8 +1429,10 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
 
   /* List view: clip overflow on mobile; title fills all available width */
   .fc { overflow: hidden; }
-  /* Reduce ev right padding on mobile */
-  .ev { padding-right: 20px; }
+  /* List view keeps the reserve: the icons are permanently visible here (no hover to
+     reveal them), and titles wrap rather than truncate, so the reserve costs a little
+     line width and never hides text. 20px used to be under the icons' own width. */
+  .fc-list-event .ev { padding-right: 40px; }
 
   /* Ko-fi: hide from header, show at bottom of sidebar */
   .app-header .kofi-wrap { display: none; }
@@ -1109,12 +1456,25 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
   .palette-btn { width: 26px; height: 26px; }
 
   /* Heart + hide: always slightly visible on mobile (no real hover) */
-  .ev-heart { opacity: 0.4; font-size: 0.84rem; }
-  .ev-hide  { opacity: 0.3; }
+  .ev-heart { opacity: 0.75; font-size: 0.95rem; }
+  .ev-hide  { opacity: 0.6;  font-size: 0.78rem; }
   .venue-hide-btn { opacity: 0.3; }
 
   /* Bottom bar: left edge on mobile (sidebar is hidden) */
   .favorites-bar { left: 0.75rem; }
+}
+
+/* Month view on a phone: drop the icons entirely.
+   A day cell is ~52px there and a tile ~47px, so two permanently-visible controls plus
+   a title does not fit — measured, the title was allotted 0px and the tile rendered as
+   nothing but a heart and a cross. The month grid on a phone is a density overview;
+   hearting and hiding belong to the list view, which is the default at that width
+   anyway. Also gated on (hover: none) so a merely narrow desktop window keeps its
+   hover-revealed icons instead of losing them. */
+@media (max-width: 768px) and (hover: none) {
+  .fc-daygrid-event .ev-heart,
+  .fc-daygrid-event .ev-hide { display: none; }
+  .fc-daygrid-event .ev { padding-right: 4px; }
 }
 
 /* Light mode: darken the modal overlay slightly less */
@@ -1128,18 +1488,15 @@ html[data-mode="light"] .modal-overlay {
 /* Light mode: list view needs dark text (events have no colored bg in list view) */
 html[data-mode="light"] .fc-list-event .ev-title { color: var(--text); }
 html[data-mode="light"] .fc-list-event .ev-venue { color: var(--muted); }
-html[data-mode="light"] .fc-list-event .ev-heart { color: rgba(0,0,0,0.35); }
-html[data-mode="light"] .fc-list-event .ev-hide  { color: rgba(0,0,0,0.25); }
-html[data-mode="light"] .venue-hide-btn          { color: rgba(0,0,0,0.35); }
+/* The .ev-heart / .ev-hide light-mode overrides that were here are gone: they existed
+   only to undo a hardcoded white base, and the base is now --muted, which is already
+   palette- and mode-correct. */
+html[data-mode="light"] .venue-hide-btn          { color: var(--muted); }
 
-/* Light mode: daygrid event chips — light bg + accent text so venue colors aren't washed */
-html[data-mode="light"] .fc .fc-daygrid-event {
-  background-color: var(--surface2) !important;
-}
-html[data-mode="light"] .fc-daygrid-event .ev-title { color: var(--venue-color, var(--accent)); }
-html[data-mode="light"] .fc-daygrid-event .ev-venue { color: var(--muted); }
-html[data-mode="light"] .fc-daygrid-event .ev-heart { color: rgba(0,0,0,0.35); }
-html[data-mode="light"] .fc-daygrid-event .ev-hide  { color: rgba(0,0,0,0.3);  }
+/* Light mode needs nothing special for daygrid events now. The block that used to live
+   here put them on --surface2 and colored the title with the venue color, to rescue the
+   filled tile in light mode. The gutter treatment already does that in both modes, and
+   these rules were (0,3,1) -- high enough to override it. */
 
 /* === Spotify === */
 .spotify-connect-wrap { margin-top: 0.55rem; }
@@ -1252,3 +1609,277 @@ html[data-mode="light"] .fc-daygrid-event .ev-hide  { color: rgba(0,0,0,0.3);  }
 }
 .site-credit a { color: var(--accent); text-decoration: none; }
 .site-credit a:hover { color: var(--accent-hover); }
+
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   VISUAL REFRESH — feature/visual-refresh
+   Tile treatments, CRT texture, and the night-density equalizer.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ── Tile treatment: gutter ──────────────────────────────────────────────────
+   Alternative to the filled tile. The venue color moves to a 3px left rule and the
+   tile sits on the surface, so event text is never on a saturated field and contrast
+   is identical for all 22 venues. Reads like a log gutter or a diff marker, which
+   suits the terminal frame.
+
+   Specificity note: the light-mode rules further up are (0,3,1). These carry .fc as
+   well to reach (0,4,1) so they win in both modes rather than only in dark.
+   background-color needs !important because FullCalendar writes the venue color to
+   the element as an inline style. */
+
+.fc .fc-daygrid-event {
+  background-color: var(--surface2) !important;
+  border: none !important;
+}
+.fc .fc-daygrid-event .ev,
+.fc .fc-list-event .ev {
+  border-left: 3px solid var(--venue-rule-dark, var(--venue-color, var(--accent)));
+  padding-left: 6px;
+}
+html[data-mode="light"] .fc .fc-daygrid-event .ev,
+html[data-mode="light"] .fc .fc-list-event .ev {
+  border-left-color: var(--venue-rule-light, var(--venue-color, var(--accent)));
+}
+.fc .fc-daygrid-event .ev-title { color: var(--text); }
+/* Not plain --muted: measured at 4.07:1 on --surface2, which is under the 4.5 floor for
+   11px text. Lifted toward --text until it clears, in every palette and both modes. */
+.fc .fc-daygrid-event .ev-venue {
+  color: color-mix(in srgb, var(--muted) 60%, var(--text));
+}
+.fc .fc-daygrid-event:hover {
+  background-color: color-mix(in srgb, var(--venue-color, var(--accent)) 14%, var(--surface2)) !important;
+}
+/* No daygrid-specific colour for the icons any more. This block set them to --dim,
+   which measures 1.83:1 against --surface2 in dark mode -- under the 3:1 an interactive
+   control needs, and the reason they were hard to read on hover. The base .ev-heart /
+   .ev-hide rules now use --muted, which works in both modes. */
+
+/* The list view's own dot is drawn by FullCalendar from the event's border color, which
+   is the unbrightened seed value -- same invisibility problem on a dark surface. */
+.fc .fc-list-event-dot { border-color: var(--venue-rule-dark, var(--venue-color)) !important; }
+html[data-mode="light"] .fc .fc-list-event-dot {
+  border-color: var(--venue-rule-light, var(--venue-color)) !important;
+}
+
+
+/* ── CRT texture: phosphor glow ──────────────────────────────────────────────
+   Accent-colored bloom on identity text only. Never applied to event text, where it
+   would undo the readability work above. */
+
+/* Four layers rather than two: a tight hot core, a bright inner bloom, then two wide
+   falloffs. Real phosphor bloom is a steep core with a long tail, and stacking the radii
+   gets closer to that than turning one shadow up would -- a single wide shadow at high
+   opacity just goes muddy. */
+html[data-glow="on"] .ascii-title {
+  text-shadow: 0 0 2px  color-mix(in srgb, var(--accent) 51%, transparent),
+               0 0 9px  color-mix(in srgb, var(--accent) 44%, transparent),
+               0 0 22px color-mix(in srgb, var(--accent) 25%, transparent),
+               0 0 42px color-mix(in srgb, var(--accent) 11%, transparent);
+}
+html[data-glow="on"] .site-title,
+html[data-glow="on"] .site-subtitle,
+html[data-glow="on"] .fc .fc-toolbar-title,
+html[data-glow="on"] .filter-label,
+html[data-glow="on"] .ls-text {
+  text-shadow: 0 0 2px  color-mix(in srgb, var(--accent) 34%, transparent),
+               0 0 8px  color-mix(in srgb, var(--accent) 34%, transparent),
+               0 0 18px color-mix(in srgb, var(--accent) 16%, transparent);
+}
+html[data-glow="on"] .cursor,
+html[data-glow="on"] .ls-cursor {
+  box-shadow: 0 0 4px  color-mix(in srgb, var(--accent) 52%, transparent),
+              0 0 12px color-mix(in srgb, var(--accent) 30%, transparent);
+}
+
+/* Calendar chrome: weekday headers, day numbers, and the list view's date headers.
+   These glow in currentColor rather than --accent, because unlike the identity text they
+   are not all accent-colored -- day numbers are --muted, today's is --accent, and the
+   list headers are --accent. Phosphor emits the color it is already showing, so
+   currentColor is both more accurate and self-maintaining. Radii stay tight: these sit
+   at 11-12px, and a wide falloff at that size costs legibility. */
+html[data-glow="on"] .fc .fc-col-header-cell-cushion,
+html[data-glow="on"] .fc .fc-daygrid-day-number,
+html[data-glow="on"] .fc .fc-list-day-text,
+html[data-glow="on"] .fc .fc-list-day-side-text {
+  text-shadow: 0 0 4px  color-mix(in srgb, currentColor 30%, transparent),
+               0 0 10px color-mix(in srgb, currentColor 14%, transparent);
+}
+
+/* Today's number is the one number that is meant to catch the eye, so it gets a little
+   more than its neighbours rather than the same amount. */
+html[data-glow="on"] .fc .fc-day-today .fc-daygrid-day-number {
+  text-shadow: 0 0 3px  color-mix(in srgb, var(--accent) 44%, transparent),
+               0 0 11px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+
+/* Footer. Radius is kept tight here on purpose: bloom has to scale with type size, and
+   the wide falloff that reads as phosphor on the 14px ASCII art smears 10px italic into
+   mush. Same effect, sized for the text it sits on. */
+html[data-glow="on"] .site-credit,
+html[data-glow="on"] .site-credit a {
+  text-shadow: 0 0 3px color-mix(in srgb, var(--accent) 33%, transparent),
+               0 0 9px color-mix(in srgb, var(--accent) 15%, transparent);
+}
+
+/* Light mode stays much weaker: bloom on a paper-white ground reads as a printing error
+   rather than as phosphor, because there is no dark surround for light to spill into. */
+html[data-glow="on"][data-mode="light"] .ascii-title {
+  text-shadow: 0 0 4px color-mix(in srgb, var(--accent) 15%, transparent);
+}
+html[data-glow="on"][data-mode="light"] .site-credit,
+html[data-glow="on"][data-mode="light"] .site-credit a {
+  text-shadow: 0 0 3px color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+
+/* Scanlines were tried here and cut: a 1-in-3 duty cycle lands on the same scale as the
+   ASCII art's own strokes and the 11px sidebar text, so it read as interference rather
+   than as texture. The glow above carries the CRT reference on its own. */
+
+
+/* ── Sticky calendar chrome ──────────────────────────────────────────────────
+   The toolbar and the weekday header are both sticky, and FullCalendar pins both at
+   top: 0 of the scroll container. The toolbar wins on z-index (5 against 3) and has an
+   opaque background, so it sat directly on top of SUN/MON/TUE and hid it completely.
+   Invisible until now, because nothing scrolled the month grid far enough to notice --
+   opening the view at today is what surfaced it.
+
+   Offsetting the header by the toolbar's height stacks them instead. The height is
+   measured rather than hardcoded: the toolbar wraps to two rows at narrow widths, and a
+   fixed value would leave a gap there or overlap again. app.js keeps --fc-toolbar-h
+   current with a ResizeObserver; the fallback covers the frame before it first runs.
+
+   The selector carries .fc-scrollgrid-section-sticky only to win the cascade. FullCalendar
+   sets this with `.fc .fc-scrollgrid-section-header.fc-scrollgrid-section-sticky > *`,
+   which is (0,3,0); the obvious `.fc .fc-scrollgrid-section-header > th` is (0,2,1) and
+   loses, because three classes outrank two classes and an element. It also injects its CSS
+   into a runtime <style> tag, so source order is not reliably ours either. */
+.fc .fc-scrollgrid-section-header.fc-scrollgrid-section-sticky > th {
+  top: var(--fc-toolbar-h, 40px);
+}
+
+
+/* ── Night-density equalizer ─────────────────────────────────────────────────
+   Fourteen bars, one per night, height = number of shows. Sits above the filters it
+   answers to, so changing a filter and watching the bars redraw is a single glance.
+   Built from discrete cells rather than a scaled height so the pixel grid is real. */
+
+.eq-section { padding-bottom: 0.15rem; }
+
+.eq-strip {
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  background: var(--bg);
+  padding: 7px 7px 5px;
+}
+
+.equalizer {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 54px;           /* 8 cells × 5px + 7 gaps × 2px */
+}
+
+.eq-bar {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 0;
+  background: none;
+  border: none;
+  cursor: pointer;
+  height: 100%;
+}
+
+/* Sunday gets a hairline so a fortnight reads as two weeks rather than fourteen days. */
+.eq-bar.eq-week-start { box-shadow: -2px 0 0 -1px var(--border); }
+
+.eq-cell {
+  flex: 1 1 0;
+  border-radius: 0;                        /* square cells — this is a pixel grid */
+  background: var(--surface2);
+  transition: background-color 0.22s ease, opacity 0.22s ease;
+  /* Bars fill left to right, cells bottom to top, so a redraw sweeps rather than snaps. */
+  transition-delay: calc(var(--bar-index) * 18ms + (7 - var(--cell-index)) * 12ms);
+}
+.eq-cell.on  { background: var(--accent); }
+.eq-cell.cap { background: var(--accent-hover); }
+
+/* Hearted shows fill the base of each bar in --eq-fav, so a bar reads bottom-up as
+   "this many are mine, this many more are on". Declared after .cap so a bar that is
+   entirely hearted stays pink rather than taking the accent cap color.
+
+   The inset rim is not decoration. Pink and the phosphor palette's green sit at almost
+   identical luminance (1.02:1), which is the red-green colorblind failure case exactly --
+   they would flatten to the same grey. The rim makes hearted cells legible as a texture
+   rather than only as a hue. Position carries it too: hearted cells are always the
+   contiguous base of a bar, and the readout and aria-label both say "N hearted" in
+   words, so the color is the third cue rather than the only one. */
+.eq-cell.fav,
+.eq-cell.fav.cap {
+  background: var(--eq-fav);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, white 45%, transparent);
+}
+
+.eq-bar:hover  .eq-cell.on,
+.eq-bar:focus-visible .eq-cell.on,
+.eq-bar.is-active .eq-cell.on { background: var(--accent-hover); }
+
+.eq-bar:hover .eq-cell,
+.eq-bar.is-active .eq-cell { background: color-mix(in srgb, var(--accent) 22%, var(--surface2)); }
+
+/* Must come after the .on hover rules above. Both are (0,4,0), so order decides, and
+   written any earlier the hearted cells would flip to the accent color on hover. */
+.eq-bar:hover .eq-cell.fav,
+.eq-bar:focus-visible .eq-cell.fav,
+.eq-bar.is-active .eq-cell.fav { background: var(--eq-fav-hover); }
+
+.eq-bar:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
+
+/* Idle shimmer on the top lit cell only — a slow phosphor flicker, not a bounce. The
+   per-bar delay keeps the fourteen out of lockstep. */
+.eq-cell.cap {
+  animation: eqFlicker 3.4s ease-in-out infinite;
+  animation-delay: calc(var(--bar-index) * 240ms);
+}
+@keyframes eqFlicker {
+  0%, 84%, 100% { opacity: 1; }
+  90%           { opacity: 0.55; }
+}
+
+.eq-ruler {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 5px;
+  font-family: var(--font-pixel);
+  font-size: 6px;
+  letter-spacing: 0.06em;
+  color: var(--dim);
+  text-transform: lowercase;
+  user-select: none;
+}
+
+.eq-readout {
+  font-family: var(--font-data);
+  font-size: var(--fs-2xs);
+  color: var(--muted);
+  margin-top: 0.35rem;
+  min-height: 1.2em;
+  letter-spacing: 0.02em;
+}
+
+
+/* ── Reduced motion ──────────────────────────────────────────────────────────
+   The equalizer's meaning is in the bar heights, which survive intact. Only the
+   sweep and the flicker are dropped. */
+
+@media (prefers-reduced-motion: reduce) {
+  .eq-cell {
+    transition-delay: 0ms !important;
+    transition-duration: 0ms !important;
+    animation: none !important;
+  }
+  .cursor, .ls-cursor { animation: none !important; }
+}

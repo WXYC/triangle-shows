@@ -11,11 +11,25 @@ Requires: app.database (Base), PostgreSQL via asyncpg/SQLAlchemy async.
 
 from datetime import datetime, date, time
 from typing import Optional
-from sqlalchemy import ARRAY, String, Integer, Float, Text, Date, Time, DateTime, ForeignKey, JSON, Index, text
+from sqlalchemy import ARRAY, String, Integer, Float, Text, Date, Time, DateTime, ForeignKey, JSON, Boolean, UniqueConstraint, CheckConstraint, Index, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 import enum
 
 from app.database import Base
+
+
+# --- Constants ---
+
+# Venue.scraper_type for a venue nothing scrapes: a promoter, a festival, a one-off series
+# an admin created by hand so that events can hang off something.
+#
+# A string in an existing column rather than a new boolean, so this needed no migration —
+# but it is load-bearing in two places and must not be spelled inline in either.
+# ScrapeManager.scrape_all() excludes these venues, without which each one would write a
+# failed ScrapeLog on every cycle (there is deliberately no scraper for them), and
+# app.api.venues hides them from the public venue list while they have no upcoming events,
+# so an empty promoter is not offered as a filter.
+MANUAL_SCRAPER_TYPE = "manual"
 
 
 # --- Enums ---
@@ -33,6 +47,13 @@ class ScrapeStatus(str, enum.Enum):
     running = "running"
     success = "success"
     failed = "failed"
+
+
+class SubmissionStatus(str, enum.Enum):
+    """Where a proposed show is in review. See ShowSubmission."""
+    pending = "pending"
+    approved = "approved"
+    rejected = "rejected"
 
 
 # --- Models ---
@@ -57,6 +78,14 @@ class Venue(Base):
 
     events: Mapped[list["Event"]] = relationship(back_populates="venue", cascade="all, delete-orphan")
     scrape_logs: Mapped[list["ScrapeLog"]] = relationship(back_populates="venue", cascade="all, delete-orphan")
+    # Retiring a venue must not be blocked by its series rules. seed_venues() deletes
+    # venues listed in REMOVED_SLUGS on every startup via session.delete(), which cascades
+    # only through relationships SQLAlchemy knows about — so without this, the first
+    # retirement of a venue holding a series override raises ForeignKeyViolation inside the
+    # lifespan handler and the container never becomes healthy.
+    series_overrides: Mapped[list["SeriesOverride"]] = relationship(
+        back_populates="venue", cascade="all, delete-orphan"
+    )
 
 
 class Event(Base):
@@ -114,14 +143,77 @@ class Event(Base):
     # interpretation — status is never inferred from it, and nothing hard-deletes on it).
     # Stamped/cleared by the scrape diff (manager.py), which also bumps updated_at.
     removed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    # --- Live-music classification (see app/classifier.py) ---
+    # Effective flag the calendar and iCal feeds filter on. Materialized (not computed
+    # on read) so filtering is a simple `WHERE is_live_music = true`. Recomputed after
+    # every scrape by ScrapeManager.reclassify_all() — except on rows an admin has
+    # manually overridden (is_manual_override=True), which are left untouched.
+    is_live_music: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    is_manual_override: Mapped[bool] = mapped_column(Boolean, default=False)  # True once an admin sets the flag by hand
+    # True when an admin created this row by hand rather than a scraper finding it.
+    #
+    # Distinct from is_manual_override above, which records a hand-set live-music
+    # *verdict*. A row can be manually created and auto-classified, or scraped and
+    # manually overridden; conflating the two makes either signal unreadable.
+    #
+    # Load-bearing for the snapshot diff: it tombstones any row inside the scraped date
+    # window that the scrape stopped returning, and a hand-added event never is returned
+    # (see scrapers/manager.scraper_must_not_delete). Nothing in the scraper path writes
+    # this flag — deliberately, because the upsert writes scraper data onto a matched row,
+    # so filtering on `source` would lose the protection the first time a venue listed a
+    # show that had already been added by hand.
+    is_manually_created: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    # Set by an admin to the id of the surviving row when this event is a duplicate of it
+    # (issue #63). Null means "not a duplicate", which is every scraped row.
+    #
+    # A pointer rather than a `hidden_as_duplicate` boolean, so the judgement stays
+    # auditable and undoable: the admin UI can show what was folded into a survivor, and
+    # ON DELETE SET NULL means deleting the survivor un-hides this row rather than leaving
+    # it hidden behind a row that no longer exists.
+    #
+    # Exempt from the snapshot diff's tombstone in the same way is_manually_created is
+    # (upstream's reconcile would otherwise have deleted it, destroying the audit trail
+    # the column exists to keep). See scrapers/manager.scraper_must_not_delete.
+    #
+    # No self-referential relationship() yet: nothing reads the pointer until #63 adds the
+    # admin controls, and an unused relationship on a self-join is a configuration to
+    # maintain rather than a convenience.
+    duplicate_of_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("events.id", ondelete="SET NULL"), nullable=True
+    )
+    classification_reason: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)  # human-readable why, e.g. "recurring: 6 dates", "keyword: trivia", "manual"
+    # Set when an admin confirms the current classification is correct; the admin list
+    # hides approved events by default. Records agreement with a *verdict*, not the
+    # event: reclassify_all() clears this whenever it changes is_live_music, so a
+    # re-classified event returns to the review queue rather than staying hidden.
+    approved_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True, index=True)
+
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
+    venue: Mapped["Venue"] = relationship(back_populates="events")
+
+    # Declared here as well as in migration 0013 so `alembic revision --autogenerate`
+    # compares equal against a live database and does not propose dropping either one.
+    # The index is partial because the read paths ask `duplicate_of_id IS NULL`, which
+    # matches nearly every row and is better served by a scan; the lookup that needs an
+    # index is the admin's "what was folded into this row", which only touches non-nulls.
+    #
     # Identity is per-venue: external_id/source_url uniqueness is only assumed within a
     # venue (e.g. VenuePilot ids are small integers that can collide across venues).
-    __table_args__ = (Index("uq_events_venue_source_key", "venue_id", "source_key", unique=True),)
-
-    venue: Mapped["Venue"] = relationship(back_populates="events")
+    __table_args__ = (
+        Index("uq_events_venue_source_key", "venue_id", "source_key", unique=True),
+        CheckConstraint(
+            "duplicate_of_id IS NULL OR duplicate_of_id <> id",
+            name="ck_events_duplicate_of_not_self",
+        ),
+        Index(
+            "ix_events_duplicate_of_id",
+            "duplicate_of_id",
+            postgresql_where=text("duplicate_of_id IS NOT NULL"),
+        ),
+    )
 
 
 class EventMissState(Base):
@@ -187,3 +279,107 @@ class FeedFetch(Base):
     venue_filter: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     __table_args__ = (Index("ix_feed_fetches_fetched_at_client_hash", "fetched_at", "client_hash"),)
+
+
+class SeriesOverride(Base):
+    """An admin decision that applies to a whole recurring series, not one event.
+
+    A recurring series (weekly karaoke, a standing jazz jam, a monthly comedy
+    showcase, ...) produces many Event rows over time, and new ones appear on each
+    scrape. A per-event override can't cover future instances, so a series-level
+    rule is keyed by (venue_id, normalized_name) — the same key the recurrence
+    detector groups on (see app.classifier.normalize_series_name). During
+    ScrapeManager.reclassify_all(), a matching rule forces is_live_music for every
+    event in the series, including instances scraped later.
+
+    Precedence, most specific first: a per-event Event.is_manual_override wins over
+    a SeriesOverride, which in turn wins over automatic classification.
+    """
+    __tablename__ = "series_overrides"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    # ondelete="CASCADE" as well as the ORM relationship on Venue: the relationship covers
+    # session.delete(), the database constraint covers everything else (a manual DELETE, a
+    # future bulk query that bypasses the ORM's cascade).
+    venue_id: Mapped[int] = mapped_column(
+        ForeignKey("venues.id", ondelete="CASCADE"), index=True
+    )
+    normalized_name: Mapped[str] = mapped_column(String(200))  # matches app.classifier.normalize_series_name(event.name)
+    display_name: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)  # a readable example name for the admin UI
+    is_live_music: Mapped[bool] = mapped_column(Boolean)  # the value forced onto every event in the series
+    note: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)  # optional admin note explaining the decision
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    venue: Mapped["Venue"] = relationship(back_populates="series_overrides")
+
+    # One rule per (venue, series name); the admin endpoint upserts on this key.
+    __table_args__ = (
+        UniqueConstraint("venue_id", "normalized_name", name="uq_series_override_key"),
+    )
+
+
+class ShowSubmission(Base):
+    """A show someone proposed through /new-shows-form, waiting for an admin.
+
+    A table of its own rather than Event rows with a "pending" marker, and that is the
+    point of it. Every public read path — the calendar feed, the iCal feed, the venue
+    list's counts, the duplicate queue, reclassify, reconcile — reads `events` and would
+    each have to remember to exclude a pending row; one that forgot would publish an
+    unreviewed show. A pending Event would also occupy the unique hash a scraper matches
+    on, so a venue listing the same show would quietly adopt the unreviewed row. Kept
+    here, a submission cannot reach the site by any path except approval, which builds
+    the Venue and Event through the same code an admin's own hand-add uses.
+
+    The proposed venue is either an existing one (venue_id) or fields for a new one
+    (new_venue_*), which approval creates as a manual venue. Neither is enforced by a
+    CHECK: venue_id is ON DELETE SET NULL, and a constraint requiring one or the other
+    would make deleting a venue fail on any pending submission that pointed at it. The
+    API validates instead, and the admin can repoint a submission whose venue vanished.
+
+    Rows are kept after review, approved or rejected, so a submitter can see what became
+    of what they sent, and so an approved event can say who proposed it.
+    """
+    __tablename__ = "show_submissions"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    status: Mapped[str] = mapped_column(String(20), default=SubmissionStatus.pending.value, index=True)
+    # The Cloudflare Access identity that submitted it — an email for a person.
+    submitted_by: Mapped[str] = mapped_column(String(320), index=True)
+    submitted_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    # --- Venue: an existing one, or a proposed new one ---
+    venue_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("venues.id", ondelete="SET NULL"), nullable=True
+    )
+    new_venue_name: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    new_venue_city: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    new_venue_website: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+
+    # --- The proposed event; same shapes as the Event columns they become ---
+    name: Mapped[str] = mapped_column(String(500))
+    artist: Mapped[Optional[str]] = mapped_column(String(300), nullable=True)
+    support_artists: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    date: Mapped[date] = mapped_column(Date)
+    doors_time: Mapped[Optional[time]] = mapped_column(Time, nullable=True)
+    show_time: Mapped[Optional[time]] = mapped_column(Time, nullable=True)
+    ticket_url: Mapped[Optional[str]] = mapped_column(String(1000), nullable=True)
+    price_min: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    price_max: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    genre: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    age_restriction: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    is_live_music: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Free text to the admin: where they heard about it, anything that does not fit a field.
+    note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # --- Review ---
+    reviewed_by: Mapped[Optional[str]] = mapped_column(String(320), nullable=True)
+    reviewed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    # The event approval created. SET NULL so deleting that event later does not take
+    # the record of the submission with it.
+    event_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("events.id", ondelete="SET NULL"), nullable=True
+    )
+
+    venue: Mapped[Optional["Venue"]] = relationship()

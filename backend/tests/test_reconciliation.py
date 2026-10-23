@@ -10,6 +10,8 @@ Venue scraper_type choices are load-bearing: "mec" carries a TRUSTED URL
 verdict, "manual" is unregistered and therefore HASH_FALLBACK.
 """
 
+import hashlib
+import re
 from datetime import timedelta
 
 from sqlalchemy import select
@@ -299,3 +301,69 @@ async def test_forced_hash_key_prefers_row_already_holding_it(session, make_venu
     await session.refresh(older)
     assert holder.price_min == 42.0  # the hash-keyed row took the update
     assert older.source_key == "url:/event/jp"  # untouched
+
+
+# --- Upstream merge (WXYC/triangle-shows#129 I2) ---
+#
+# Upstream's clean_title decodes HTML entities and percent-escapes in the title before it
+# is hashed. These pin what that does to source_key, which WXYC Backend-Service keys on.
+
+
+async def test_retitled_ext_event_keeps_its_source_key(session, make_venue):
+    """An ext: key survives a rename, including the entity-decoding retitle clean_title
+    applies to every stored title after the merge."""
+    venue = await make_venue(scraper_type="ticketmaster")
+    manager = ScrapeManager(session)
+
+    await manager._upsert_events(venue.id, [_scraped(venue.slug, external_id="Z7r9jZ1A7")])
+    await session.commit()
+    original_key = (await _all_events(session))[0].source_key
+
+    await manager._upsert_events(
+        venue.id,
+        [_scraped(venue.slug, external_id="Z7r9jZ1A7", name="Juana Molina &#038; Cat Power")],
+    )
+    await session.commit()
+
+    events = await _all_events(session)
+    assert len(events) == 1
+    assert events[0].name == "Juana Molina & Cat Power"
+    assert events[0].source_key == original_key == "ext:Z7r9jZ1A7"
+
+
+async def test_entity_bearing_hash_title_rekeys_once(session, make_venue, make_event):
+    """The accepted I2 exception. A hash: row stored before the merge hashed the raw,
+    entity-bearing title (the hash keeps digits, so "&#8217;" contributes "8217"); the
+    first post-merge scrape hashes the decoded title, finds no row holding that hash,
+    and inserts one. The pre-merge row is left in place for the snapshot diff to
+    tombstone, never deleted, so Backend-Service sees one tombstone plus one correct
+    new row. A later scrape of the same listing changes no key."""
+    venue = await make_venue()  # unregistered scraper_type -> HASH_FALLBACK
+    raw_title = "Curtis Eller&#8217;s American Circus"
+    decoded = _scraped(venue.slug, name=raw_title)
+    assert decoded.name == "Curtis Eller’s American Circus"
+
+    # The pre-merge row, hashed the way ScrapedEvent.hash did before clean_title ran.
+    pre_merge_hash = hashlib.sha256(
+        f"{venue.slug}|{D.isoformat()}|{re.sub(r'[^a-z0-9]', '', raw_title.lower())}".encode()
+    ).hexdigest()
+    assert pre_merge_hash != decoded.hash
+    old = await make_event(
+        venue=venue, name=raw_title, artist=raw_title, date=D,
+        hash=pre_merge_hash, source_key=f"hash:{pre_merge_hash}",
+    )
+
+    manager = ScrapeManager(session)
+    created, _ = await manager._upsert_events(venue.id, [_scraped(venue.slug, name=raw_title)])
+    await session.commit()
+
+    assert created == 1
+    by_key = {e.source_key: e for e in await _all_events(session)}
+    assert set(by_key) == {f"hash:{pre_merge_hash}", f"hash:{decoded.hash}"}
+    assert by_key[f"hash:{decoded.hash}"].name == decoded.name
+    assert by_key[f"hash:{pre_merge_hash}"].id == old.id  # kept, not deleted
+
+    created, _ = await manager._upsert_events(venue.id, [_scraped(venue.slug, name=raw_title)])
+    await session.commit()
+    assert created == 0
+    assert {e.source_key for e in await _all_events(session)} == set(by_key)

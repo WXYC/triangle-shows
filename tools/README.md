@@ -1,6 +1,19 @@
 # Tools
 
-Dev and ops scripts for triangle-shows. Run from the repo root.
+Dev and ops scripts for triangle-shows, plus the design mockups. Scripts are run from the repo root.
+
+## Local preview
+
+### `preview_server.py`
+Serves `frontend/` on localhost and passes API reads through to production, so frontend changes can be tried against real events without Docker or a local database. The page only talks to localhost, so production's CORS allowlist (which excludes localhost) never applies. Forwards GET/HEAD only, so it can't write to production. Admin pages don't work through it.
+
+```
+python tools/preview_server.py                              # http://localhost:8090
+python tools/preview_server.py --port 8091
+python tools/preview_server.py --upstream http://localhost:8000
+```
+
+The Durham variant is at http://durm-shows.localhost:8090.
 
 ## Deployment
 
@@ -50,3 +63,20 @@ Fetches raw HTML from a URL and prints excerpts around a search pattern. Used to
 
 ### `inspect_js_venues.py`
 Similar to `inspect_html.py` but also extracts inline `<script>` blocks and looks for embedded JSON. Originally used for Motorco, Kings, and Carolina Theatre.
+
+## Mockups
+
+`mockups/` holds static HTML design explorations from before the frontend was built. Each file is self-contained — open it directly in a browser, no server or build step needed.
+
+Files are named `mockup-<number><letter>-<name>.html`, where the number is a design direction and the letter is a refinement of it:
+
+| Direction | Variants |
+|-----------|----------|
+| `1` Broadsheet | dark, editorial, stark |
+| `3` Terminal | warm, cyan, parchment, ASCII, plus two light treatments (parchment, waveform) |
+| `5` Modern | dark, coral |
+
+`palette-a-phosphor.html`, `palette-b-midnight.html`, and `palette-c-wisteria.html` are color studies rather than full layouts.
+
+### `mockups/archive/`
+Directions that were explored and dropped — Newsprint (2), Velvet (4), and Poster (6). Kept for reference; not maintained.

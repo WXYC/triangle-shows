@@ -44,7 +44,7 @@ async def test_scrape_end_to_end_on_fixture_returns_only_nectar_events(monkeypat
         "JIMOTHY RAVE",
         "Mo' Jam Mondays",
         "Tyler McGinnis with Izzy Burns, Ray Baron, The Orphan 40",
-        "BIG BRASS EXTRAVAGANZA #14 feat:  This Much Brass, Chaotic Noise Marching Corps, AGAB, 8-Bit Brass Band",
+        "BIG BRASS EXTRAVAGANZA #14 feat: This Much Brass, Chaotic Noise Marching Corps, AGAB, 8-Bit Brass Band",
     }
     # The fixture's 4 Hidden Hall events must never surface as Nectar events.
     assert "KHU.ÉEX'" not in names

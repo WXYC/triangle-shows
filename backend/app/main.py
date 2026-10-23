@@ -12,10 +12,13 @@ Requires: DATABASE_URL, LOG_LEVEL, ENABLE_SCHEDULER, RUN_STARTUP_SCRAPE env vars
 # --- Imports ---
 import asyncio
 import logging
+import os
 from contextlib import asynccontextmanager, suppress
+from functools import lru_cache
 from pathlib import Path
+from typing import Optional
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -23,11 +26,12 @@ from fastapi.staticfiles import StaticFiles
 from app.config import settings
 from app.database import async_session
 from app.observability import flush_errors, init_error_tracking, report_error
-from app.redaction import redact_credentials, redact_handler
+from app.redaction import describe_exception, redact_handler
 from app.seed import seed_venues
 from app.scheduler import scheduler, configure_scheduler
 from app.site_config import load_site_config
-from app.api import events, venues, health, feeds, v1
+from app.api import events, venues, health, feeds, v1, admin, submissions
+from app import notify, tokens
 
 # --- Logging setup ---
 
@@ -41,9 +45,10 @@ def configure_logging() -> None:
     parameter and so every request URL the scraper builds is a live credential:
 
     * ``httpx`` is pinned to WARNING. It logs the full URL of every request at INFO,
-      which put the key in the log store four times per scrape cycle. Our scrapers
-      already emit their own per-request line naming the venue, so what is lost is the
-      HTTP status of a *successful* request; a failure still raises and is logged.
+      which put the key in the log store once per Ticketmaster venue per scrape cycle.
+      Our scrapers already emit their own per-request line naming the venue, so what is
+      lost is the HTTP status of a *successful* request; a failure still raises and is
+      logged.
     * **Every handler in the process** — root's and everybody else's — is wrapped by
       :func:`~app.redaction.redact_handler`, which scrubs the values out of anything
       that renders a URL, including the exception tracebacks the httpx pin cannot
@@ -66,21 +71,35 @@ def configure_logging() -> None:
       formatter, a structured/JSON handler a deployment installs on root) keeps its
       exact layout, and the wrap is idempotent, so repeat calls never nest.
 
-    Called at import so configuration is in place before any other module logs, and
-    exposed as a function so tests can assert on it without importing for its side
-    effects alone. uvicorn builds its logging config in ``Config.__init__``, before it
-    imports the app, so its handlers already exist by the time this runs under a real
-    server; the sweep simply finds fewer of them under pytest or a bare interpreter.
+    Called at import, where the plain ``basicConfig`` call it replaces used to sit, so
+    the configuration is in place before the app serves anything — and exposed as a
+    function so tests can assert on it rather than importing for its side effects
+    alone. uvicorn builds its logging config in ``Config.__init__``, before it imports
+    the app, so its handlers already exist by the time this runs under a real server;
+    the sweep simply finds fewer of them under pytest or a bare interpreter.
 
     Residue worth knowing: handlers installed *after* this runs are not covered. That
     is a narrower bet than the one a name-based enumeration makes, but it is still a
     bet — if a future dependency installs a handler lazily, call this again once it has.
     """
     logging.basicConfig(level=getattr(logging, settings.LOG_LEVEL), format=LOG_FORMAT)
+    # basicConfig is a no-op once root has a handler, so on any call after the first it
+    # sets neither handler nor level. The level has to be asserted separately for a repeat
+    # call to mean anything: applying migrations in-process runs alembic.ini through
+    # fileConfig, which pins [logger_root] to WARN, and app.* loggers inherit from root.
+    # Without this line a post-migration configure_logging() leaves every INFO line
+    # suppressed while looking like it had restored things.
+    logging.getLogger().setLevel(getattr(logging, settings.LOG_LEVEL))
 
+    # Snapshot the registry before walking it. loggerDict is the live dict that
+    # logging.getLogger() inserts into, and the filter below runs Python between
+    # iterations, so a thread creating a logger mid-sweep would raise "dictionary
+    # changed size during iteration" out of a function that runs at import — turning a
+    # logging refinement into the app failing to boot. list() materializes in one
+    # C-level pass, which cannot observe a concurrent resize.
     loggers = [logging.getLogger()] + [
         existing
-        for existing in logging.root.manager.loggerDict.values()
+        for existing in list(logging.root.manager.loggerDict.values())
         if isinstance(existing, logging.Logger)
     ]
     for each in loggers:
@@ -122,6 +141,7 @@ async def _startup_scrape():
             results = await manager.scrape_all()
             for r in results:
                 logger.info(f"  [startup] {r}")
+            logger.info(f"Startup scrape: reclassify {manager.last_reclassify}")
         logger.info("Startup scrape: complete")
     except Exception as e:
         # Non-fatal: the API should still serve cached data even if the scrape fails
@@ -153,8 +173,19 @@ async def lifespan(app: FastAPI):
     logger.info(f"Starting {_site.name} API...")
 
     try:
+        # Report which origin gates are live before serving anything, so a gate that is
+        # configured wrong (and therefore doing nothing) is visible in the boot logs
+        # rather than mistaken for protection.
+        tokens.log_enforcement_state()
+        notify.log_state()
+
         # Apply any pending Alembic migrations — creates tables on fresh DBs, updates schema on existing ones
         await asyncio.to_thread(_run_migrations)
+        # Re-apply logging after migrations. alembic/env.py declines to reconfigure
+        # logging when run in-process, but Alembic is exactly the "dependency that
+        # installs a handler lazily" configure_logging's docstring warns about, and
+        # calling it again is the remedy it prescribes. Idempotent.
+        configure_logging()
         logger.info("Migrations applied")
 
         # Seed venues
@@ -234,13 +265,146 @@ app = FastAPI(
 )
 
 # CORS
+#
+# allow_credentials is False, and that single flag is what makes the "*" safe. The exact
+# mechanics, measured rather than assumed (see tests/test_cors.py):
+#
+#   Starlette replaces the "*" with the caller's own Origin whenever the request carries a
+#   Cookie header. That happens either way and is not the problem. The problem was pairing
+#   it with allow_credentials=True, which adds Access-Control-Allow-Credentials: true —
+#   the header a browser requires before it will hand a credentialed cross-origin response
+#   back to the page that asked for it. Origin echo plus that header is what let a hostile
+#   page read authenticated responses, leaving the admin cookie's samesite="lax" as the
+#   only control. Without the header the echo is inert: the browser discards the response.
+#
+# Nothing here needs cross-origin credentials, or cross-origin requests of any kind.
+# frontend/js/config.js sets API_BASE to window.location.origin and the admin UI fetches
+# relative paths, so every in-app request is same-origin, where CORS does not apply.
+#
+# The "*" is now an allowlist. That is the product decision this comment used to describe as
+# available — taken deliberately, alongside #62's gate on the queryable endpoints.
+#
+# What it stops: a third party building a browser app whose JavaScript calls this API from
+# *their* users' browsers — a competing calendar with no infrastructure and all our
+# bandwidth. Their users' browsers now refuse to hand the response back.
+#
+# What it does not stop, and must not be mistaken for: a server-side scraper. CORS is a
+# browser protection. A script is not a browser, never reads the header, and is unaffected.
+# Neither would an Origin or Referer check be — both are client-set, so
+# `curl -H "Origin: https://triangle-shows.net"` defeats them in one line. Requests carrying
+# no Origin at all — every calendar client polling /feeds/events.ics — are outside CORS
+# entirely and stay unaffected.
+#
+# Note this costs the site nothing, because every in-app request is already same-origin (see
+# above), where CORS does not apply. The allowlist is what a cross-origin caller is measured
+# against, and the site is never one. Listing the real origins rather than an empty list
+# keeps a future cross-origin case working and documents what the sites actually are.
+#
+# allow_credentials stays False regardless. That flag is what made the old "*" merely
+# permissive rather than dangerous, and narrowing origins is not a reason to relax it.
+ALLOWED_ORIGINS = [
+    "https://triangle-shows.net",
+    "https://www.triangle-shows.net",
+    "https://durm.triangle-shows.net",  # the older Durham subdomain, still served
+    "https://durm-shows.net",
+    "https://www.durm-shows.net",
+]
+
+# triangle-shows.org is deliberately absent: Cloudflare 301s it to triangle-shows.net, so a
+# document is never served from that origin and a browser never sends it.
+#
+# Local origins only outside production, so a deployment cannot end up trusting localhost.
+# The frontend-only preview (tools/preview_server.py) needs no entry: it passes API reads
+# through itself, so the page's requests are same-origin. The old :8080 entries served a
+# preview that pointed at production, where they were never in effect.
+if settings.APP_ENV != "production":
+    ALLOWED_ORIGINS += [
+        "http://localhost:8000",
+    ]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=ALLOWED_ORIGINS,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# --- Origin enforcement on /admin ---
+
+@app.middleware("http")
+async def enforce_admin_access(request: Request, call_next):
+    """Require a valid Cloudflare Access token on /admin/*, when configured.
+
+    Guarding by path rather than inside the admin router is deliberate. The admin
+    subsite arrives with a separate branch (PR #36); a path check protects those routes
+    from the moment they land, so the admin surface cannot reach production without the
+    origin gate in front of it. Until then this is inert — /admin merely 404s.
+
+    The login page is guarded too, not just the API beneath it. Reaching a password
+    prompt on the origin is the exposure being closed; an unauthenticated caller should
+    not see that the admin subsite exists at all.
+    """
+    if not request.url.path.startswith("/admin"):
+        return await call_next(request)
+
+    if not tokens.cloudflare_access_configured():
+        return await call_next(request)
+
+    try:
+        claims = tokens.verify_cloudflare_access(
+            request.headers.get("cf-access-jwt-assertion")
+        )
+    except tokens.TokenError as exc:
+        # Logged at info, not warning: on a public origin, unauthenticated probes of
+        # /admin are background noise rather than incidents.
+        logger.info(f"[admin] rejected {request.method} {request.url.path}: {exc}")
+        return JSONResponse(
+            {"detail": "This surface is reachable only through Cloudflare Access."},
+            status_code=403,
+        )
+
+    # Downstream handlers can attribute an action to a person rather than to whoever
+    # holds a shared password.
+    request.state.access_email = tokens.access_identity(claims)
+    return await call_next(request)
+
+
+# --- Origin enforcement on /new-shows-form ---
+
+@app.middleware("http")
+async def enforce_submit_access(request: Request, call_next):
+    """Require a valid Cloudflare Access token for the form's own application.
+
+    The same shape as the /admin gate above, against a different audience — a separate
+    Access application with its own policy. So the identity set here is stored under its
+    own name, never `access_email`: admin handlers trust that attribute as proof of an
+    admin, and it must only ever be set from an admin-audience token.
+
+    Inert when unconfigured, like the admin gate; what an unconfigured form then does is
+    the router's decision (app.api.submissions.require_submitter), which fails closed in
+    production because, unlike /admin, there is no password to fall back on.
+    """
+    if not submissions.is_submit_path(request.url.path):
+        return await call_next(request)
+
+    if not tokens.submit_access_configured():
+        return await call_next(request)
+
+    try:
+        claims = tokens.verify_cloudflare_submit_access(
+            request.headers.get("cf-access-jwt-assertion")
+        )
+    except tokens.TokenError as exc:
+        logger.info(f"[submit] rejected {request.method} {request.url.path}: {exc}")
+        return JSONResponse(
+            {"detail": "This surface is reachable only through Cloudflare Access."},
+            status_code=403,
+        )
+
+    request.state.submit_email = tokens.access_identity(claims)
+    return await call_next(request)
 
 # --- Route registration ---
 
@@ -250,14 +414,53 @@ app.include_router(events.router)
 app.include_router(venues.router)
 app.include_router(health.router)
 app.include_router(feeds.router)
+# Admin subsite — must be registered before the "/" static mount below so its
+# routes take priority over the catch-all StaticFiles handler.
+app.include_router(admin.router)
+# Same reason: /new-shows-form must win over the static catch-all.
+app.include_router(submissions.router)
 
-# Manual scrape trigger (dev only)
+# --- Origin enforcement on POST /api/scrape ---
+
+async def require_scrape_token(request: Request) -> Optional[str]:
+    """Require a Google-issued OIDC token from an allowlisted service account.
+
+    Cloud Scheduler already attaches this token; Cloud Run cannot enforce it, because the
+    service has to accept unauthenticated requests for the public site to work. So the
+    check belongs here.
+
+    Inert until SCRAPE_ALLOWED_SERVICE_ACCOUNTS names at least one account, which keeps
+    local dev and CI working. Returns the calling service account for the audit log.
+    """
+    from fastapi import HTTPException
+
+    if not tokens.scrape_token_configured():
+        return None
+
+    token = tokens.bearer_token(request.headers.get("authorization"))
+    try:
+        claims = tokens.verify_scrape_token(token)
+    except tokens.TokenError as exc:
+        logger.warning(f"[scrape] rejected trigger: {exc}")
+        raise HTTPException(status_code=403, detail="Not authorized to trigger a scrape.")
+
+    return claims.get("email")
+
+
+# Scrape trigger. Called by Cloud Scheduler every 6 hours in production; also usable by
+# hand in local dev, where the gate above is inert.
 @app.post("/api/scrape")
-async def trigger_scrape(scraper_type: str = None):
-    """Manually trigger a scrape (development use)."""
+async def trigger_scrape(
+    scraper_type: str = None,
+    caller: Optional[str] = Depends(require_scrape_token),
+):
+    """Trigger a scrape of every venue, or of one scraper_type."""
     from app.database import async_session
     from app.scrapers.manager import ScrapeManager
     from fastapi import HTTPException
+
+    if caller:
+        logger.info(f"[scrape] triggered by {caller}")
 
     try:
         async with async_session() as session:
@@ -266,14 +469,20 @@ async def trigger_scrape(scraper_type: str = None):
                 results = await manager.scrape_all(scraper_types=[scraper_type])
             else:
                 results = await manager.scrape_all()
-            return {"results": results}
+            # Report the reclassify pass alongside the per-venue results. A caller that
+            # triggers a scrape by hand can then see whether the classifier actually did
+            # anything, instead of having to find a log line — which is how a pass that
+            # classified nothing went unnoticed through a whole release.
+            return {"results": results, "reclassified": manager.last_reclassify}
     except Exception as e:
         report_error(e, where="main.trigger_scrape")
         # This endpoint is unauthenticated, and failures here happen *outside*
         # scrape_venue (session construction, a scraper import) — before manager's
         # own redaction runs — so this catch-all must scrub independently rather
         # than rely on the per-venue result dict's redaction.
-        raise HTTPException(status_code=500, detail=redact_credentials(str(e)))
+        # describe_exception also names the exception class, so a failure whose
+        # message is empty no longer reports a bare "" (upstream #15).
+        raise HTTPException(status_code=500, detail=describe_exception(e))
 
 
 async def _unhandled_exception_handler(request, exc: Exception):
@@ -310,8 +519,92 @@ frontend_candidates = [
     Path(__file__).parent.parent.parent / "frontend",  # local dev
     Path("/frontend"),  # Docker
 ]
-for frontend_dir in frontend_candidates:
-    if frontend_dir.exists():
-        # Mounted last so API routes take priority over the catch-all html=True handler
-        app.mount("/", StaticFiles(directory=str(frontend_dir), html=True), name="frontend")
+
+_frontend_dir: Optional[Path] = None
+for candidate in frontend_candidates:
+    if candidate.exists():
+        _frontend_dir = candidate
         break
+
+
+# --- Asset versioning on index.html ---
+#
+# index.html references /css/*.css and /js/*.js at fixed URLs. Cloudflare caches those at
+# the edge for hours on the free plan, while index.html itself is never edge-cached
+# (cf-cache-status: DYNAMIC). After a deploy that combination serves *new* HTML against
+# *old* assets, which is worse than serving an entirely stale page: on the 2026-08-28
+# release the new markup loaded a new equalizer.js against a styles.css that had no rules
+# for it, and visitors got a row of unstyled buttons in the sidebar.
+#
+# Substituting {{ASSET_VERSION}} with the commit SHA gives every deploy fresh asset URLs,
+# so the edge treats them as new objects and there is nothing left to purge by hand.
+#
+# Done at request time from the env var rather than by rewriting the file at image build:
+# GIT_COMMIT is already in the container (cloudbuild.yaml passes it as a build arg,
+# Dockerfile promotes it to ENV, health.py reads it), and this way the checked-in
+# index.html stays a file that runs as-is in local dev.
+
+ASSET_VERSION_PLACEHOLDER = "{{ASSET_VERSION}}"
+
+
+def _asset_version() -> str:
+    """Cache-busting token for static asset URLs.
+
+    The commit SHA in production. Unset locally and in CI, where "dev" is correct: there is
+    no CDN in front of either, and the browser revalidates against the local server.
+    """
+    return os.environ.get("GIT_COMMIT", "dev")[:12]
+
+
+@lru_cache(maxsize=1)
+def _index_html() -> Optional[str]:
+    """index.html with the asset version substituted, read once per container.
+
+    Cached because neither the file nor GIT_COMMIT changes within the life of a container.
+    Returns None when there is no frontend directory, which is the case in the API-only
+    test runs -- the caller then falls through to a 404 rather than raising.
+    """
+    if _frontend_dir is None:
+        return None
+
+    index_path = _frontend_dir / "index.html"
+    if not index_path.is_file():
+        return None
+
+    html = index_path.read_text(encoding="utf-8")
+    return html.replace(ASSET_VERSION_PLACEHOLDER, _asset_version())
+
+
+@app.get("/", include_in_schema=False)
+@app.get("/index.html", include_in_schema=False)
+async def serve_index():
+    """Serve the templated index.html.
+
+    Registered before the StaticFiles mount below, which would otherwise answer "/" with
+    the raw file and leave the placeholder in the markup.
+
+    no-store rather than a short max-age: this document is what names the versioned asset
+    URLs, so a cached copy of it defeats the whole mechanism by continuing to point at the
+    previous deploy's files.
+    """
+    from fastapi.responses import HTMLResponse, PlainTextResponse
+
+    html = _index_html()
+    if html is None:
+        return PlainTextResponse("Frontend not available", status_code=404)
+
+    return HTMLResponse(
+        html,
+        headers={
+            "Cache-Control": "no-store, must-revalidate",
+            # Surfaces which build a page came from without opening devtools, which is how
+            # the stale-asset problem went unnoticed for as long as it did.
+            "X-Asset-Version": _asset_version(),
+        },
+    )
+
+
+if _frontend_dir is not None:
+    # Mounted last so API routes and serve_index above take priority over the catch-all
+    # html=True handler.
+    app.mount("/", StaticFiles(directory=str(_frontend_dir), html=True), name="frontend")
