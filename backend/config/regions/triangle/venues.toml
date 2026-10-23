@@ -107,6 +107,8 @@ color = "#1e5c3c"  # emerald (Carrboro)
 url = "https://catscradle.com/events/"
 venue_filter = "Cat's Cradle"
 venue_filter_not = "Back Room"
+# The listing card's .eventSubHeader holds the support acts (issue #130).
+support_from_subheader = true
 
 [[venue]]
 name = "Motorco Music Hall"
@@ -190,6 +192,8 @@ color = "#1f6b47"  # lighter emerald (Carrboro)
 [venue.scraper_config]
 url = "https://catscradle.com/events/"
 venue_filter = "Back Room"
+# The listing card's .eventSubHeader holds the support acts (issue #130).
+support_from_subheader = true
 
 [[venue]]
 name = "The Cave"

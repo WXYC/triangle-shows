@@ -37,6 +37,17 @@ from app.scrapers.headliner import normalize_structured_support, parse_billing
         ("with special guests Hex Files", ["Hex Files"]),
         ("Special Guests: Hex Files, Mean Habit", ["Hex Files", "Mean Habit"]),
         ("Hex Files, and more", ["Hex Files"]),
+        ("Hex Files, And More", ["Hex Files"]),
+        ("Support TBA", []),
+        ("Hex Files, Openers TBA", ["Hex Files"]),
+        # Lead-ins stack, can sit mid-list, and include feat./featuring.
+        ("w/ special guest Hex Files", ["Hex Files"]),
+        ("feat. Hex Files", ["Hex Files"]),
+        ("Davie Circle, Featuring special guests Mean Habit", ["Davie Circle", "Mean Habit"]),
+        # An Oxford "and" only follows a comma; a lowercase-styled first name keeps it.
+        ("and also the trees, Hex Files", ["and also the trees", "Hex Files"]),
+        # One act per line.
+        ("Hex Files\nMean Habit", ["Hex Files", "Mean Habit"]),
         ("special guests TBA", []),
         ("Special Guest", []),
         # Guards: these stay whole.
@@ -71,6 +82,11 @@ def test_normalize_structured_support(raw, expected):
         ("Wednesday w/ Truth Club, DJ Nu-Mark, and Sluice", "Wednesday", ["Truth Club", "DJ Nu-Mark", "Sluice"]),
         ("Deerhoof w/ Sword II, And Also The Trees", "Deerhoof", ["Sword II", "And Also The Trees"]),
         ("AC/DC w/ Sword II", "AC/DC", ["Sword II"]),
+        # Placeholders in a tail name no act.
+        ("Deerhoof w/ Sword II, and more", "Deerhoof", ["Sword II"]),
+        ("Deerhoof w/ TBA", "Deerhoof", []),
+        # A tail that starts with a lowercase "and" keeps it (no comma before it).
+        ("Deerhoof w/ and so i watch you from afar", "Deerhoof", ["and so i watch you from afar"]),
     ],
 )
 def test_parse_billing_splits_spaced_slash_in_tail(billing, headliner, support):
@@ -122,8 +138,13 @@ def _rhp_card(inner: str):
             '<h4 class="eventSubHeader">Tobacco Road, Wim Tapley and The Cannons</h4>',
             ["Tobacco Road", "Wim Tapley and The Cannons"],
         ),
-        # A <br> separates acts the way a comma does.
+        # A <br> separates acts the way a comma does; other inline tags do not.
         ('<h4 class="eventSubHeader">Hex Files<br>Mean Habit</h4>', ["Hex Files", "Mean Habit"]),
+        (
+            '<h4 class="eventSubHeader"><a href="#">Wim Tapley</a> and The Cannons</h4>',
+            ["Wim Tapley and The Cannons"],
+        ),
+        ('<h4 class="eventSubHeader">Sunn O<span>)))</span></h4>', ["Sunn O)))"]),
         # An existing support selector wins over the subheader, whatever the document order.
         (
             '<h4 class="eventSubHeader">Tour Name Here</h4><div class="eventSupport">Stereolab, Cat Power</div>',
@@ -135,7 +156,29 @@ def _rhp_card(inner: str):
 def test_rhp_support_reads_subheader_as_fallback(inner, expected):
     from app.scrapers.rhp_events import RHPEventsScraper
 
-    scraper = RHPEventsScraper("cats-cradle", {"url": "https://catscradle.com/events/"})
-    parsed = scraper._parse_event(_rhp_card(inner), None)
+    config = {"url": "https://catscradle.com/events/", "support_from_subheader": True}
+    parsed = RHPEventsScraper("cats-cradle", config)._parse_event(_rhp_card(inner), None)
     assert parsed is not None
     assert parsed.support_artists == expected
+
+
+def test_rhp_subheader_is_ignored_unless_the_venue_opts_in():
+    # Lincoln Theatre uses the subheader for venue notes, not acts.
+    from app.scrapers.rhp_events import RHPEventsScraper
+
+    card = _rhp_card('<h4 class="eventSubHeader">The show is at The Ritz - 2820 Industrial Dr, Raleigh</h4>')
+    parsed = RHPEventsScraper("lincoln-theatre", {"url": "https://www.lincolntheatre.com/events/"})._parse_event(
+        card, None
+    )
+    assert parsed is not None
+    assert parsed.support_artists == []
+
+
+def test_cats_cradle_rooms_opt_in_to_the_subheader():
+    import tomllib
+    from pathlib import Path
+
+    toml = Path(__file__).resolve().parents[1] / "config/regions/triangle/venues.toml"
+    venues = {v["slug"]: v.get("scraper_config", {}) for v in tomllib.loads(toml.read_text())["venue"]}
+    opted_in = {slug for slug, cfg in venues.items() if cfg.get("support_from_subheader")}
+    assert opted_in == {"cats-cradle", "cats-cradle-back-room"}

@@ -54,8 +54,11 @@ _PRESENTS_RE = re.compile(r"\bpresents?\s*:\s*", re.IGNORECASE)
 # Support-act tails. "w/" tolerates a missing space after the slash but must not
 # fire on "w/o" or its long form "w/out" (nor "without"); "//" requires leading
 # whitespace so it can't split a URL-ish name.
+# The "w/" joiner, never "w/o"/"w/out". Shared with the structured-support lead-in
+# below so both grammars agree on what counts as "w/".
+_W_SLASH = r"w/(?!o(?:ut)?\b)"
 _SUPPORT_TAIL_RES = (
-    re.compile(r"\s+w/(?!o(?:ut)?\b)\s*", re.IGNORECASE),
+    re.compile(rf"\s+{_W_SLASH}\s*", re.IGNORECASE),
     re.compile(r"\s+//\s*"),
     re.compile(r"\s+(?:feat\.?|ft\.?|featuring)\s+", re.IGNORECASE),
     re.compile(r"\s+with special guests?\b", re.IGNORECASE),
@@ -72,24 +75,24 @@ _COMBINED_SUPPORT_TAIL_RE = re.compile(
     "|".join(f"(?:{r.pattern})" for r in _SUPPORT_TAIL_RES), re.IGNORECASE
 )
 
-# A billing tail's list delimiters: a comma, or a slash with spaces on both sides
-# ("A / B"; "AC/DC" is untouched). Only ever applied INSIDE an isolated tail, never to
-# the headliner prefix, so a " / " co-bill ("Wednesday 13 / Dead on a Sunday") keeps its
-# headliner.
-_TAIL_LIST_SPLIT_RE = re.compile(r",|\s+/\s+")
-# A list's Oxford-comma "and"/"&" belongs to the list. Lowercase only, so a name that
-# starts with a capitalized "And" ("And Also The Trees") keeps it.
+# A support list's delimiters: a comma, a slash with spaces on both sides ("A / B";
+# "AC/DC" is untouched), or a line break. Only ever applied INSIDE an isolated tail or
+# a structured blob, never to the headliner prefix, so a " / " co-bill ("Wednesday 13 /
+# Dead on a Sunday") keeps its headliner.
+_TAIL_LIST_SPLIT_RE = re.compile(r",|\s+/\s+|\n")
+# An Oxford-comma "and"/"&" after a comma belongs to the list. Lowercase only, so a name
+# that starts with a capitalized "And" ("And Also The Trees") keeps it.
 _OXFORD_AND_RE = re.compile(r"^(?:and|&)\s+")
 
-# Structured support blobs (issue #130). A leading joiner: "w/" in any case (never
-# "w/o"/"w/out"), a lowercase "with " (so "With Honor" survives), or a "special guests"
-# lead-in ("with special guests", "Special Guests:").
+# Structured support blobs (issue #130). A lead-in before an act: "w/" in any case
+# (never "w/o"/"w/out"), "feat."/"featuring", a "special guests" phrase ("with special
+# guests", "Special Guests:"), or a lowercase "with " (so "With Honor" survives).
 _STRUCTURED_LEAD_IN_RE = re.compile(
-    r"^(?:(?i:(?:with\s+)?(?:very\s+)?special\s+guests?)\s*:?\s*|(?i:w/(?!o(?:ut)?\b))\s*|with\s+)"
+    rf"^(?:(?i:(?:(?:with|featuring|feat\.)\s+)?(?:very\s+)?special\s+guests?\s*:?|featuring\b|feat\.|{_W_SLASH})\s*|with\s+)"
 )
-# Entries that name no act.
+# Entries that name no act: "& more", "TBA", "Support TBA", "special guests".
 _PLACEHOLDER_RE = re.compile(
-    r"(?:(?:and|&)\s+)?(?:(?:(?:very\s+)?special\s+)?guests?(?:\s+tba)?|friends|more|tba|tbd)",
+    r"(?:(?:and|&)\s+)?(?:(?:(?:very\s+)?special\s+)?guests?|friends|more|(?:(?:support|openers?|guests?)\s+)?(?:tba|tbd))",
     re.IGNORECASE,
 )
 
@@ -142,6 +145,26 @@ def _is_noise_tag(content: str) -> bool:
     return not residue
 
 
+def _split_list(text: str, *, lead_ins: bool = False) -> list[str]:
+    """Split a support list into act names: the one list grammar for billing tails and
+    structured support blobs.
+
+    Splits on commas, spaced slashes and line breaks; drops an Oxford-comma "and"/"&"
+    after a comma, empty names and placeholders ("& more", "TBA"). With ``lead_ins``,
+    also strips any stacked lead-ins ("w/ special guest X") from each name.
+    """
+    names: list[str] = []
+    for index, part in enumerate(_TAIL_LIST_SPLIT_RE.split(text)):
+        name = part.strip()
+        if index > 0:
+            name = _OXFORD_AND_RE.sub("", name)
+        while lead_ins and (stripped := _STRUCTURED_LEAD_IN_RE.sub("", name).strip()) != name:
+            name = stripped
+        if name and not _PLACEHOLDER_RE.fullmatch(name):
+            names.append(name)
+    return names
+
+
 def parse_billing(billing: Optional[str]) -> tuple[Optional[str], list[str]]:
     """Split a billing string into ``(headliner, tail_support_names)``.
 
@@ -161,9 +184,9 @@ def parse_billing(billing: Optional[str]) -> tuple[Optional[str], list[str]]:
        headliner prefix; every later piece is a support segment. Splitting on the
        combined pattern (vs the old per-delimiter loop) is what preserves interleaved
        tails — "A w/ B // C" yields prefix "A" and segments ["B", "C"].
-    4. Build the tail: split each support segment on commas and spaced slashes (ONLY
-       inside tails, never the headliner prefix), drop an Oxford-comma "and"/"&", strip
-       each name, drop empties, left to right.
+    4. Build the tail: split each support segment with ``_split_list`` (commas and
+       spaced slashes, ONLY inside tails, never the headliner prefix), dropping an
+       Oxford-comma "and"/"&", placeholders ("& more", "TBA") and empties, left to right.
     5. Derive the headliner from the prefix: a non-performance framing (karaoke,
        listening party) or a bare "Tribute to Y" nulls it, then a tribute act before
        the framing is recovered, then a final edge-punctuation tidy. May be ``None``.
@@ -196,14 +219,8 @@ def parse_billing(billing: Optional[str]) -> tuple[Optional[str], list[str]]:
     headliner_prefix = pieces[0]
     tail_pieces = pieces[1:]
 
-    # 4. Tail support: commas split WITHIN a segment (only here, never the prefix),
-    #    strip each name, drop empties, left to right.
-    tail_support: list[str] = []
-    for piece in tail_pieces:
-        for name in _TAIL_LIST_SPLIT_RE.split(piece):
-            name = _OXFORD_AND_RE.sub("", name.strip())
-            if name:
-                tail_support.append(name)
+    # 4. Tail support: split each segment into names (only here, never the prefix).
+    tail_support = [name for piece in tail_pieces for name in _split_list(piece)]
 
     # 5. Headliner, derived from the prefix (exactly the historical steps 4-5).
     #    Non-performance events have no headliner at all — null, never a guess
@@ -236,13 +253,7 @@ def normalize_structured_support(raw: Optional[str]) -> list[str]:
     Called only at those two call sites. Other scrapers already supply one name per
     element, and a comma inside such a name ("Earth, Wind & Fire") must stay whole.
     """
-    body = _STRUCTURED_LEAD_IN_RE.sub("", (raw or "").strip())
-    names: list[str] = []
-    for part in _TAIL_LIST_SPLIT_RE.split(body):
-        name = _OXFORD_AND_RE.sub("", part.strip())
-        if name and not _PLACEHOLDER_RE.fullmatch(name):
-            names.append(name)
-    return names
+    return _split_list(raw or "", lead_ins=True)
 
 
 def extract_headliner(billing: Optional[str]) -> Optional[str]:
