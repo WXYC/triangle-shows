@@ -12,6 +12,8 @@ malformed value rather than raise, so one bad field never fails a whole event.
 
 from datetime import date
 
+import pytest
+
 from app.schemas import EventResponse
 
 
@@ -38,6 +40,16 @@ def test_well_formed_https_ticket_url_passes_through_unchanged():
 def test_well_formed_http_image_url_passes_through_unchanged():
     ev = EventResponse(**_min_fields(image_url="http://cdn.example.com/poster.jpg"))
     assert ev.image_url == "http://cdn.example.com/poster.jpg"
+
+
+def test_well_formed_https_source_url_passes_through_unchanged():
+    ev = EventResponse(**_min_fields(source_url="https://venue.example/shows/42"))
+    assert ev.source_url == "https://venue.example/shows/42"
+
+
+@pytest.mark.parametrize("bad", ["javascript:alert(document.cookie)", "/shows/42", 12345])
+def test_malformed_source_url_becomes_none(bad):
+    assert EventResponse(**_min_fields(source_url=bad)).source_url is None
 
 
 def test_javascript_scheme_ticket_url_becomes_none():
@@ -70,3 +82,4 @@ def test_none_stays_none():
     ev = EventResponse(**_min_fields())
     assert ev.ticket_url is None
     assert ev.image_url is None
+    assert ev.source_url is None

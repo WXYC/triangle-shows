@@ -55,6 +55,29 @@ async def test_deprecated_events_expose_is_live_music(client, make_event):
     assert (await client.get("/api/events")).json()["events"][0]["is_live_music"] is False
 
 
+@pytest.mark.parametrize(
+    "stored, expected",
+    [
+        ("https://venue.example/shows/42", "https://venue.example/shows/42"),
+        (None, None),
+        ("javascript:alert(1)", None),
+        ("/shows/42", None),
+    ],
+)
+async def test_v1_events_expose_source_url_on_list_and_detail(client, make_event, stored, expected):
+    # Additive field (issue #138), sanitized like ticket_url: only an absolute
+    # http(s) URL is served, anything else (or nothing) is null.
+    e = await make_event(name="Show", date=D, source_url=stored)
+    listed = (await client.get("/api/v1/events")).json()
+    assert [ev["source_url"] for ev in listed] == [expected]
+    assert (await client.get(f"/api/v1/events/{e.id}")).json()["source_url"] == expected
+
+
+async def test_deprecated_events_expose_source_url(client, make_event):
+    await make_event(name="Show", date=D, source_url="https://venue.example/shows/42")
+    assert (await client.get("/api/events")).json()["events"][0]["source_url"] == "https://venue.example/shows/42"
+
+
 async def test_v1_events_support_artists_serializes_as_array(client, make_event):
     # support_artists is a lossless list, serialized as a JSON array (issue #40) —
     # a name with an internal comma stays one element, never split into fake acts.

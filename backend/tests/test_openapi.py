@@ -36,6 +36,11 @@ def test_openapi_exposes_v1_paths_and_neutral_schemas():
     # Non-null in the contract, so generated client types read it as required.
     assert "is_live_music" in schemas["EventResponse"]["required"]
 
+    # source_url is the event's own page at the source: an additive, optional string
+    # (issue #138), so it must not appear in the required list.
+    assert "source_url" in schemas["EventResponse"]["properties"]
+    assert "source_url" not in schemas["EventResponse"]["required"]
+
     # source_key is the stable per-event identity contract (issue #8).
     assert "source_key" in schemas["EventResponse"]["properties"]
 
