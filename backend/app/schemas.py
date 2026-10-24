@@ -99,6 +99,9 @@ class EventResponse(BaseModel):
     doors_time: Optional[time] = None
     show_time: Optional[time] = None
     ticket_url: OptionalHttpUrl = None
+    # The event's own page at the source (a ticket page for some scrapers). Additive
+    # and optional; also served on the deprecated /api/events routes (same model).
+    source_url: OptionalHttpUrl = None
     price_min: Optional[float] = None
     price_max: Optional[float] = None
     image_url: OptionalHttpUrl = None
